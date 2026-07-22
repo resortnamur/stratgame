@@ -208,6 +208,43 @@ même joueur IA des deux côtés et joue le tour entier avec le même germe —
 
 **L'étape 1 est terminée : le moteur est complet et autonome.**
 
-### Étape 2 — Serveur (FastAPI + WebSockets, lobby, persistance) ⬜
+### Étape 2 — Serveur (FastAPI + WebSockets, lobby, persistance) 🔶 (en cours)
+
+#### 2a — Cœur du serveur ✅ (2026-07-22)
+
+**`serveur/partie.py`** (pur, sans FastAPI) : `SessionPartie` enveloppe un
+`GameState` — chargement d'une sauvegarde (+ `sanitize_after_load`),
+arbitrage des droits (tour du joueur, siège humain), application des actions
+via `apply_action`, enchaînement automatique des tours IA jusqu'au prochain
+humain (`play_ai_turn`), état réseau allégé (sans `replay_history`, ~1 Mo
+dans les sauvegardes ; clé `phase` ajoutée, absente du format canonique),
+sauvegarde au format v13. `GestionnaireParties` : catalogue des sauvegardes
++ parties ouvertes. Dimensions logiques : `1200/cols × 620/rows` (repère
+pixel de x45, cohérent avec la géométrie des ponts sauvegardée).
+
+**`serveur/app.py`** : application FastAPI (`creer_app(dossier)` injectable
+pour les tests). REST : `GET /api/sauvegardes`, `GET|POST /api/parties`,
+`GET /api/parties/{id}/etat`, `POST /api/parties/{id}/sauvegarder`.
+WebSocket `/ws/parties/{id}` : `rejoindre` (siège ou spectateur, présence
+diffusée), `action` (vocabulaire du moteur, résultat + état diffusés à tous,
+refus à l'émetteur seul), `decision_soumission`. La question « soumettre ou
+annexer ? » (`submit_decider`) traverse le pont thread→asyncio : l'action
+tourne dans un thread, la question part au client attaquant, sans réponse
+sous 120 s → annexion (comme x45 sans Tkinter). Protocole détaillé dans la
+docstring de `serveur/app.py`.
+
+Tests : `tests/test_serveur.py` — 10 tests (session pure : arbitrage,
+tour complet + tours IA, aller-retour de sauvegarde ; couche web via
+TestClient : REST, WebSocket jouer/spectateur/sièges, sauvegarde API).
+Lancement manuel : `python -m uvicorn serveur.app:app --app-dir "Jeux Strat"`.
+
+#### 2b — Nouvelle partie côté serveur ⬜
+
+Porter la mise en place de x45 dans le moteur (`setup_players`,
+`generate_grid_map` ou carte sauvegardée, `assign_initial_ownership_and_armies`,
+territoires bonus/dorés/sanctuaires, économie initiale) pour créer une
+partie neuve depuis le lobby, pas seulement recharger une sauvegarde.
+
+#### 2c — Lobby complet ⬜ (identités persistantes, reconnexion, chat ?)
 ### Étape 3 — Client web (canvas, écran par écran) ⬜
 ### Étape 4 — Déploiement gratuit (Render/Fly.io ; réveil ~30 s, état en base) ⬜
