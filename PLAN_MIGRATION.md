@@ -186,11 +186,27 @@ science boostés à l'identique des deux côtés) et compare message par message
 et état par état — succès comme refus. Vert sur les 23 sauvegardes avant et
 après délégation.
 
-#### 1c.3 — IA de combat ⬜
+#### 1c.3 — IA de combat ✅ (2026-07-22)
 
-Porter le choix des cibles d'attaque et de déplacement des IA
-(`ai_attack_score`, `compute_ai_move_target`, boucle du tour IA) pour que le
-serveur puisse jouer des parties entières sans x45.
+**`moteur/ia.py`** (nouveau) : décisions des IA — `find_ai_attack` +
+`ai_attack_score` (profils very_aggressive/aggressive/defensive/standard,
+attaque totale ou duel, règle des 40 régiments contre les sanctuaires),
+`compute_ai_move_target`/`compute_ai_move_sources`/`execute_ai_move_phase`
+(concentration de fin de tour vers la frontière), `get_ai_behavior`,
+`get_offensive_alliance_target_for_ai`, `shortest_owned_path`.
+
+**`moteur/actions.py`** : `play_ai_turn(state, …) -> AiTurnReport` joue le
+tour IA complet (attaques, déplacement, fin de tour) — c'est l'appel que
+fera le serveur pour chaque tour IA. x45 garde sa machine à états
+`process_ai_turn` (rythme d'affichage) mais délègue toutes les décisions.
+
+**Parité vérifiée contre x45-original** : `tests/test_parite_ia.py` force le
+même joueur IA des deux côtés et joue le tour entier avec le même germe —
+états identiques sur les 23 sauvegardes. Et la preuve d'autonomie :
+`test_le_moteur_joue_seul` enchaîne 60 tours complets (IA via
+`play_ai_turn`, humains via le vocabulaire d'actions) sans x45 ni pygame.
+
+**L'étape 1 est terminée : le moteur est complet et autonome.**
 
 ### Étape 2 — Serveur (FastAPI + WebSockets, lobby, persistance) ⬜
 ### Étape 3 — Client web (canvas, écran par écran) ⬜

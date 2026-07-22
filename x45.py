@@ -15,6 +15,7 @@ import pygame
 from moteur import regles as moteur_regles
 from moteur import actions as moteur_actions
 from moteur import achats as moteur_achats
+from moteur import ia as moteur_ia
 
 try:
     import tkinter as tk
@@ -1634,14 +1635,7 @@ class GraphicalGame:
         return moteur_regles.get_ai_personality(self, player)
 
     def get_ai_behavior(self, player: int) -> str:
-        if self.is_commercial_city_player(player):
-            return "aggressive"
-        if self.is_ai_player(player) and player in self.last_stand_bonus_players:
-            return "defensive"
-        profile = self.get_ai_personality(player)
-        if profile == "variable":
-            return self.ai_current_behavior.get(player, "standard")
-        return profile
+        return moteur_ia.get_ai_behavior(self, player)
 
     def get_ai_profile_label(self, player: int, include_current: bool = True) -> str:
         labels = {
@@ -6365,14 +6359,7 @@ class GraphicalGame:
         return allied
 
     def get_offensive_alliance_target_for_ai(self, ai_player: int) -> Optional[int]:
-        self.cleanup_expired_alliances()
-        candidates: List[Tuple[int, int]] = []
-        for (_human, ai), (target, expires_turn) in self.active_offensive_alliances.items():
-            if ai == ai_player and self.turn < expires_turn and any(terr.owner == target for terr in self.territories):
-                candidates.append((expires_turn, target))
-        if not candidates:
-            return None
-        return max(candidates)[1]
+        return moteur_ia.get_offensive_alliance_target_for_ai(self, ai_player)
 
     def is_attack_blocked_by_alliance(self, attacker: int, defender: int) -> bool:
         # Guerre froide et vassaux : blocs morts non repris par le moteur.
@@ -9805,163 +9792,27 @@ class GraphicalGame:
         return True
 
     def shortest_owned_path(self, start_id: int, target_id: int, owner: int) -> Optional[List[int]]:
-        if start_id == target_id:
-            return [start_id]
-        from collections import deque
-
-        queue = deque([start_id])
-        previous: dict[int, Optional[int]] = {start_id: None}
-        while queue:
-            current = queue.popleft()
-            for neighbor_id in self.territories[current].neighbors:
-                neighbor = self.territories[neighbor_id]
-                if neighbor.owner != owner or neighbor_id in previous:
-                    continue
-                previous[neighbor_id] = current
-                if neighbor_id == target_id:
-                    path = [target_id]
-                    cursor = current
-                    while cursor is not None:
-                        path.append(cursor)
-                        cursor = previous[cursor]
-                    path.reverse()
-                    return path
-                queue.append(neighbor_id)
-        return None
+        return moteur_ia.shortest_owned_path(self, start_id, target_id, owner)
 
     def compute_ai_move_target(self) -> Optional[Tuple[Territory, Territory]]:
-        behavior = self.get_ai_behavior(self.current_player)
-        current_is_commercial = self.current_player in getattr(self, "commercial_city_players", set())
-        frontline_enemies = [
-            enemy for enemy in self.territories
-            if enemy.owner != self.current_player
-            and not (current_is_commercial and self.is_any_capital_territory(enemy.id))
-            and not self.is_attack_blocked_by_alliance(self.current_player, enemy.owner)
-            and any(self.territories[n].owner == self.current_player for n in enemy.neighbors)
-        ]
-        offensive_target = self.get_offensive_alliance_target_for_ai(self.current_player)
-        if offensive_target is not None:
-            targeted_frontline = [enemy for enemy in frontline_enemies if enemy.owner == offensive_target]
-            if targeted_frontline:
-                frontline_enemies = targeted_frontline
-                behavior = "aggressive"
-
-        if not frontline_enemies:
-            return None
-
-        if behavior == "aggressive":
-            target_enemy = max(frontline_enemies, key=lambda terr: (terr.owner == offensive_target, terr.regiments, len(terr.neighbors), -terr.id))
-        elif behavior == "defensive":
-            owned_borders = [
-                terr for terr in self.territories
-                if terr.owner == self.current_player
-                and any(self.territories[n].owner != self.current_player for n in terr.neighbors)
-            ]
-            if not owned_borders:
-                return None
-            weakest_border = min(owned_borders, key=lambda terr: (terr.regiments, terr.id))
-            enemy_neighbors = [
-                self.territories[n]
-                for n in weakest_border.neighbors
-                if self.territories[n].owner != self.current_player
-                and not (current_is_commercial and self.is_any_capital_territory(n))
-                and not self.is_attack_blocked_by_alliance(self.current_player, self.territories[n].owner)
-            ]
-            if not enemy_neighbors:
-                return None
-            target_enemy = max(enemy_neighbors, key=lambda terr: (terr.regiments, -terr.id))
-        else:
-            target_enemy = max(frontline_enemies, key=lambda terr: (terr.regiments, -terr.id))
-
-        border_candidates = [
-            self.territories[nid]
-            for nid in target_enemy.neighbors
-            if self.territories[nid].owner == self.current_player
-        ]
-        if not border_candidates:
-            return None
-
-        best_border: Optional[Tuple[Tuple[int, int, int, int], Territory]] = None
-        for border in border_candidates:
-            reachable_sources = [
-                src for src in self.territories
-                if src.owner == self.current_player
-                and src.regiments > 1
-                and src.id != border.id
-                and self.can_move_between(src, border)
-            ]
-            movable_total = sum(src.regiments - 1 for src in reachable_sources)
-            if behavior == "aggressive":
-                score = (movable_total, target_enemy.regiments, -border.regiments, -border.id)
-            elif behavior == "defensive":
-                pressure = sum(self.territories[n].regiments for n in border.neighbors if self.territories[n].owner != self.current_player and not self.is_attack_blocked_by_alliance(self.current_player, self.territories[n].owner))
-                score = (pressure, -border.regiments, movable_total, -border.id)
-            else:
-                score = (movable_total, -border.regiments, target_enemy.regiments, -border.id)
-            if best_border is None or score > best_border[0]:
-                best_border = (score, border)
-
-        if best_border is None or best_border[0][0] <= 0:
-            return None
-        return target_enemy, best_border[1]
+        return moteur_ia.compute_ai_move_target(self)
 
     def compute_ai_move_sources(self, border_id: int) -> List[Tuple[Territory, int]]:
-        border = self.territories[border_id]
-        candidates: List[Tuple[Tuple[int, int, int], Territory, int]] = []
-        for src in self.territories:
-            if src.owner != self.current_player or src.regiments <= 1 or src.id == border_id:
-                continue
-            path = self.shortest_owned_path(src.id, border_id, self.current_player)
-            if path is None:
-                continue
-            movable = src.regiments - 1
-            distance = len(path) - 1
-            score = (movable, -distance, -src.id)
-            candidates.append((score, src, movable))
-
-        candidates.sort(reverse=True, key=lambda item: item[0])
-        return [(src, movable) for _, src, movable in candidates]
+        return moteur_ia.compute_ai_move_sources(self, border_id)
 
     def execute_ai_move_phase(self) -> bool:
-        move_limit = self.get_end_turn_move_limit()
-        if self.turn_move_count >= move_limit:
+        report = moteur_ia.execute_ai_move_phase(self)
+        if report is None:
             return False
-        move_target = self.compute_ai_move_target()
-        if move_target is None:
-            return False
-
-        target_enemy, border = move_target
-        sources = self.compute_ai_move_sources(border.id)
-        if not sources:
-            return False
-
-        moved = 0
-        used_sources: List[str] = []
-        remaining = move_limit - self.turn_move_count
-        for src, movable in sources:
-            if remaining <= 0:
-                break
-            to_move = min(remaining, movable)
-            moved_from_source = 0
-            while moved_from_source < to_move and self.turn_move_count < move_limit and src.regiments > 1:
-                if not self.move_one_regiment(src, border):
-                    break
-                moved_from_source += 1
-                moved += 1
-                remaining -= 1
-            if moved_from_source > 0:
-                used_sources.append(f"{src.name} ({moved_from_source})")
-
-        if moved <= 0:
-            return False
-
         self.selected_source = None
-        self.selected_target = border.id
-        sources_text = ", ".join(used_sources[:3])
-        if len(used_sources) > 3:
+        self.selected_target = report.border_id
+        border = self.territories[report.border_id]
+        target_enemy = self.territories[report.target_enemy_id]
+        sources_text = ", ".join(report.used_sources[:3])
+        if len(report.used_sources) > 3:
             sources_text += ", ..."
         self.show_message(
-            f"Ordinateur J{self.current_player + 1} ({self.get_ai_profile_label(self.current_player)}): {moved} regiment(s) deplaces vers {border.name}, au contact de {target_enemy.name} ({target_enemy.regiments} regiments). Sources: {sources_text}.",
+            f"Ordinateur J{self.current_player + 1} ({self.get_ai_profile_label(self.current_player)}): {report.moved} regiment(s) deplaces vers {border.name}, au contact de {target_enemy.name} ({target_enemy.regiments} regiments). Sources: {sources_text}.",
             max(1, self.get_ai_action_delay_ms() - 100),
         )
         return True
@@ -10161,113 +10012,10 @@ class GraphicalGame:
         return result.att_text, result.def_text, result.conquered
 
     def ai_attack_score(self, src: Territory, dst: Territory, behavior: str) -> Optional[Tuple[Tuple[int, int, int, int, int], bool]]:
-        diff = src.regiments - dst.regiments
-        if behavior == "very_aggressive":
-            if src.regiments < 2:
-                return None
-            total_attack = diff >= 2 or src.regiments >= 6
-            score = (
-                1 if total_attack else 0,
-                src.regiments + max(0, -diff),
-                diff,
-                -dst.regiments,
-                -dst.id,
-            )
-        elif behavior == "aggressive":
-            if src.regiments < 3:
-                return None
-            total_attack = diff >= 6 or (src.regiments >= 8 and random.random() < 0.18)
-            score = (
-                1 if total_attack else 0,
-                src.regiments,
-                diff,
-                -dst.regiments,
-                -dst.id,
-            )
-        elif behavior == "defensive":
-            if src.regiments < 5 or diff < 3:
-                return None
-            total_attack = diff > 14
-            enemy_pressure = sum(self.territories[n].regiments for n in src.neighbors if self.territories[n].owner != self.current_player and not self.is_attack_blocked_by_alliance(self.current_player, self.territories[n].owner))
-            score = (
-                1 if total_attack else 0,
-                diff,
-                -enemy_pressure,
-                -dst.regiments,
-                -dst.id,
-            )
-        else:
-            if src.regiments < 4:
-                return None
-            total_attack = diff > 10
-            score = (
-                1 if total_attack else 0,
-                diff,
-                src.regiments,
-                -dst.regiments,
-                -dst.id,
-            )
-        return score, total_attack
+        return moteur_ia.ai_attack_score(self, src, dst, behavior)
 
     def find_ai_attack(self) -> Optional[Tuple[Territory, Territory, bool]]:
-        if self.is_colonized_player(self.current_player):
-            return None
-        current_is_commercial = self.is_commercial_city_player(self.current_player)
-        exclusive_wonder_ally = (
-            self.get_commercial_city_wonder_ally()
-            if current_is_commercial
-            else None
-        )
-        if (
-            current_is_commercial
-            and exclusive_wonder_ally is None
-            and self.count_player_territories(self.current_player) >= self.COMMERCIAL_CITY_TERRITORY_LIMIT
-        ):
-            return None
-        behavior = self.get_ai_behavior(self.current_player)
-        if exclusive_wonder_ally is not None:
-            # Sans cela, le profil simplement "agressif" lance souvent un seul duel,
-            # perd un regiment puis ne trouve plus d'attaque admissible. Avec le Palais,
-            # la CC doit agir comme une puissance offensive contre tous sauf son unique allie.
-            behavior = "very_aggressive"
-        offensive_target = self.get_offensive_alliance_target_for_ai(self.current_player)
-        if offensive_target is not None:
-            behavior = "very_aggressive"
-        candidates: List[Tuple[Tuple[int, int, int, int, int], Territory, Territory, bool]] = []
-
-        for src in self.territories:
-            if src.owner != self.current_player:
-                continue
-
-            for neighbor_id in src.neighbors:
-                dst = self.territories[neighbor_id]
-                if dst.owner == self.current_player:
-                    continue
-                if current_is_commercial and self.is_any_capital_territory(dst.id):
-                    continue
-                if offensive_target is not None and dst.owner != offensive_target:
-                    continue
-                if self.is_attack_blocked_by_alliance(self.current_player, dst.owner):
-                    continue
-                if self.is_ai_attack_blocked_by_culture(self.current_player, dst.owner):
-                    continue
-                if self.is_submitted_territory(dst.id):
-                    continue
-                if self.is_sanctuary_territory(dst.id) and src.regiments < 40:
-                    # Les IA ignorent les sanctuaires ONU, sauf si le territoire attaquant
-                    # adjacent concentre au moins 40 regiments. A ce stade, visiblement,
-                    # la diplomatie est remplacee par un gros tas de soldats.
-                    continue
-                scored = self.ai_attack_score(src, dst, behavior)
-                if scored is None:
-                    continue
-                score, total_attack = scored
-                candidates.append((score, src, dst, total_attack))
-
-        if not candidates:
-            return None
-        best_move = max(candidates, key=lambda item: item[0])
-        return best_move[1], best_move[2], best_move[3]
+        return moteur_ia.find_ai_attack(self)
 
     def normalize_ai_speed_mode(self) -> None:
         if getattr(self, "ai_speed_mode", "normal") not in ("normal", "fast", "instant"):

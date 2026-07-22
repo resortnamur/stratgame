@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from . import achats
+from . import ia
 from . import regles
 from .etat import GameState
 
@@ -164,6 +165,71 @@ def advance_turn(
             state.collecting_between_turn_events = False
     if active_players and begin_next_turn:
         report.begin_turn = begin_player_turn(state, state.current_player, rng)
+    return report
+
+
+@dataclass
+class AiTurnReport:
+    """Deroulement complet d'un tour IA joue par le moteur."""
+
+    skipped: bool = False  # joueur courant humain ou partie inactive
+    attack_passes: int = 0
+    winner: Optional[int] = None
+    winner_reason: str = ""
+    move_report: Optional[ia.AiMoveReport] = None
+    turn_report: Optional[TurnAdvanceReport] = None
+
+
+def play_ai_turn(
+    state: GameState,
+    cell_width: float,
+    cell_height: float,
+    rng=random,
+    submit_decider=None,
+    max_actions: int = 2000,
+) -> AiTurnReport:
+    """Joue le tour complet du joueur IA courant (miroir de process_ai_turn).
+
+    Attaques tant que ``find_ai_attack`` propose une cible, puis phase de
+    deplacement (concentration vers la frontiere), puis fin de tour via
+    ``advance_turn``. C'est ce que le serveur appellera pour les tours IA.
+    """
+    report = AiTurnReport()
+    if state.phase != "playing" or not regles.is_ai_player(state, state.current_player):
+        report.skipped = True
+        return report
+
+    for _ in range(max_actions):
+        move = ia.find_ai_attack(state, rng)
+        if move is None:
+            break
+        src, dst, total_attack = move
+        if total_attack:
+            # Miroir de resolve_attack_until_end.
+            while state.phase == "playing" and regles.can_attack_specific_target(state, src, dst):
+                result = regles.resolve_attack_once(state, src, dst, rng, submit_decider)
+                report.attack_passes += 1
+                if result.conquered:
+                    break
+        else:
+            regles.resolve_attack_once(state, src, dst, rng, submit_decider)
+            report.attack_passes += 1
+        winner, reason = regles.evaluate_winner(state)
+        if winner is not None:
+            report.winner = winner
+            report.winner_reason = reason
+            return report
+
+    # Phase de deplacement (miroir de start_move_phase + execute_ai_move_phase).
+    state.turn_phase = "move"
+    state.turn_move_count = 0
+    report.move_report = ia.execute_ai_move_phase(state, rng)
+
+    # Fin de tour.
+    report.turn_report = advance_turn(state, cell_width, cell_height, rng)
+    if report.turn_report.winner is not None:
+        report.winner = report.turn_report.winner
+        report.winner_reason = report.turn_report.winner_reason
     return report
 
 
