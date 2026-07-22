@@ -155,10 +155,11 @@ complètes par sauvegarde (même germe) — joueur courant, tour, phase et état
 sérialisé identiques entre le chemin x45 et le chemin pur ; le vocabulaire
 d'actions est exercé (transitions, refus, attaque, déplacement).
 
-⚠️ Le projet n'est **pas sous git** : jusqu'à 1b.2 la parité était validée
-contre le x45 d'origine avant délégation ; pour 1c.1 la référence est le code
-porté lui-même (transcription revue ligne à ligne). Mettre le dossier sous
-git est fortement recommandé avant la suite.
+**Référence d'origine** : `x45-original.py` est la copie du jeu d'avant
+toute délégation (aucune référence à `moteur/`). `tests/test_parite_original.py`
+compare le moteur pur à cette copie — chargement, assauts complets et six
+fins de tour par sauvegarde — et confirme la fidélité de la transcription.
+Le projet est désormais **sous git local** : un commit par étape validée.
 
 #### 1c.2 — Actions d'achat ⬜
 
