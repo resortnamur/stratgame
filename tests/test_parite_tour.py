@@ -133,6 +133,10 @@ class TestPariteTour(unittest.TestCase):
         self.assertEqual(act({"type": "deplacer", "source": 0, "cible": 1}).code, "phase_invalide")
         self.assertEqual(act({"type": "fin_de_tour"}).code, "phase_invalide")
         self.assertEqual(act({"type": "terminer_achats"}).code, "phase_invalide")
+        self.assertEqual(
+            act({"type": "acheter", "achat": "mercenaires", "territoire": 0, "quantite": 1}).code,
+            "phase_invalide",
+        )
 
         # Attaque : cible invalide vs cible valide.
         outcome = act({"type": "attaquer", "source": 0, "cible": 99999})
@@ -159,6 +163,18 @@ class TestPariteTour(unittest.TestCase):
         self.assertTrue(outcome.ok)
         if outcome.next_phase == "shopping":
             self.assertEqual(state.phase, "shopping")
+            # Achat via le vocabulaire : mercenaires sur un territoire possede.
+            owned_id = next(
+                (t.id for t in state.territories if t.owner == state.current_player), None)
+            if owned_id is not None:
+                state.player_money[state.current_player] = (
+                    state.player_money.get(state.current_player, 0) + 500)
+                before = state.territories[owned_id].regiments
+                achat = act({"type": "acheter", "achat": "mercenaires",
+                             "territoire": owned_id, "quantite": 3})
+                self.assertTrue(achat.ok, achat.message)
+                self.assertEqual(state.territories[owned_id].regiments, before + 3)
+            self.assertEqual(act({"type": "acheter", "achat": "inconnu"}).code, "achat_inconnu")
             outcome = act({"type": "terminer_achats"})
             self.assertTrue(outcome.ok)
         self.assertEqual(state.turn_phase, "move")

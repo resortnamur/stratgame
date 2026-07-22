@@ -161,12 +161,36 @@ compare le moteur pur à cette copie — chargement, assauts complets et six
 fins de tour par sauvegarde — et confirme la fidélité de la transcription.
 Le projet est désormais **sous git local** : un commit par étape validée.
 
-#### 1c.2 — Actions d'achat ⬜
+#### 1c.2 — Actions d'achat ✅ (2026-07-22)
 
-Migrer la boutique (mercenaires, bâtiments, corruption, alliances, dons,
-ventes, ponts, manipulation ONU, changement de capitale…) vers des actions
-`acheter` validées par le moteur. L'IA de combat (choix de cibles) suivra
-pour que le serveur puisse jouer les tours IA complets.
+**`moteur/achats.py`** (nouveau) : toute la boutique en fonctions pures
+`(state, …) -> AchatResult(ok, message)`, mêmes validations, coûts et textes
+que x45 : mercenaires, vente/don de territoire, don d'argent, forteresse
+(+destruction), usine/aéroport/port, temple, centre culturel, université
+(+destruction), merveille, changement de capitale, corruption, révolte,
+ponts (+destruction), alliance défensive et offensive, figement/libération
+ONU, association paradis fiscal (avec ses variantes intégration scientifique
+et intégration PF). Les flux « en deux clics » de x45 deviennent des
+paramètres explicites (source + bénéficiaire, deux extrémités du pont…).
+
+`apply_action` accepte `{"type": "acheter", "achat": "...", ...}` en phase
+d'achats (liste `ACHATS` dans `moteur/actions.py`), avec codes de refus
+typés et le message boutique dans le résultat.
+
+x45 délègue les 24 `execute_shop_*` (les clics, sélections en attente et
+durées d'affichage restent côté interface).
+
+**Parité vérifiée contre x45-original** : `tests/test_parite_achats.py`
+rejoue sur chaque sauvegarde une séquence d'achats déterministe (trésor et
+science boostés à l'identique des deux côtés) et compare message par message
+et état par état — succès comme refus. Vert sur les 23 sauvegardes avant et
+après délégation.
+
+#### 1c.3 — IA de combat ⬜
+
+Porter le choix des cibles d'attaque et de déplacement des IA
+(`ai_attack_score`, `compute_ai_move_target`, boucle du tour IA) pour que le
+serveur puisse jouer des parties entières sans x45.
 
 ### Étape 2 — Serveur (FastAPI + WebSockets, lobby, persistance) ⬜
 ### Étape 3 — Client web (canvas, écran par écran) ⬜

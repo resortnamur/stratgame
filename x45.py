@@ -14,6 +14,7 @@ import pygame
 # moteur.etat.GameState.
 from moteur import regles as moteur_regles
 from moteur import actions as moteur_actions
+from moteur import achats as moteur_achats
 
 try:
     import tkinter as tk
@@ -6726,49 +6727,16 @@ class GraphicalGame:
             self.declare_victory(winner)
 
     def execute_shop_mercenary_purchase(self, terr: Territory) -> None:
-        if terr.owner != self.current_player:
-            self.show_message("Les mercenaires doivent etre places sur un territoire controle.", 2200)
-            return
         self.update_shop_mercenary_quantity()
-        quantity = self.shop_mercenary_quantity
-        cost = quantity * self.MERCENARY_COST
-        if not self.spend_player_money(self.current_player, cost):
-            self.show_message("Pas assez d'ecus pour ces mercenaires.", 1800)
-            return
-        terr.regiments += quantity
-        self.shop_mercenary_quantity = 1
-        self.update_shop_mercenary_quantity()
-        self.show_message(f"{quantity} mercenaire(s) places sur {terr.name} pour {cost} ecu(s).", 2000)
+        result = moteur_achats.acheter_mercenaires(self, terr, self.shop_mercenary_quantity)
+        if result.ok:
+            self.shop_mercenary_quantity = 1
+            self.update_shop_mercenary_quantity()
+        self.show_message(result.message, 2000 if result.ok else 2200)
 
     def execute_shop_sell_territory(self, terr: Territory) -> None:
-        if terr.owner != self.current_player:
-            self.show_message("Vous ne pouvez vendre qu'un territoire que vous controlez.", 2200)
-            return
-        candidates = [
-            player for player in self.get_active_players()
-            if player != self.current_player and not self.is_commercial_city_player(player)
-        ]
-        if not candidates:
-            self.show_message("Vente impossible : aucun autre joueur actif non cite commercante ne peut recevoir ce territoire.", 2600)
-            return
-        sale_price = self.calculate_territory_sale_price(terr)
-        buyer = random.choice(candidates)
-        terr.owner = buyer
-        self.ensure_player_economy(self.current_player)
-        self.player_money[self.current_player] += sale_price
-        self.refresh_last_stand_bonus_state()
-        self.enforce_last_stand_bonus_limits()
-        elimination_note = ""
-        if not any(t.owner == self.current_player for t in self.territories):
-            self.mark_eliminated_player_if_human(self.current_player)
-            self.refresh_eliminated_human_players()
-            elimination_note = f" J{self.current_player + 1} n'a plus de territoire."
-        self.show_message(
-            f"{terr.name} vendu a J{buyer + 1} pour {sale_price} ecu(s) "
-            f"({terr.regiments} regiment(s) x 10 + {self.calculate_sale_structure_bonus(terr)} ecu(s) de bonus)."
-            + elimination_note,
-            3600,
-        )
+        result = moteur_achats.vendre_territoire(self, terr)
+        self.show_message(result.message, 3600 if result.ok else 2400)
 
     def execute_shop_give_territory(self, terr: Territory) -> None:
         if self.pending_gift_territory_id is None:
@@ -6796,77 +6764,25 @@ class GraphicalGame:
             self.pending_gift_territory_id = None
             self.show_message("Don impossible : ce territoire n'est plus controle par vous.", 2600)
             return
-
-        target_player = terr.owner
-        if target_player < 0 or self.is_sanctuary_territory(terr.id):
-            self.show_message("Impossible de donner un territoire a l'ONU.", 2200)
-            return
-        if target_player == self.current_player:
-            self.show_message("Choisissez un autre joueur comme beneficiaire. Se donner sa propre terre, c'est juste rester proprietaire avec des etapes.", 3000)
-            return
-        if not self.can_commercial_city_gain_territory(target_player, source.id):
-            self.show_message("Don impossible : une Cite commercante ne peut jamais prendre le controle d'une capitale.", 3000)
-            return
-
-        source.owner = target_player
-        self.pending_gift_territory_id = None
-        self.refresh_last_stand_bonus_state()
-        self.enforce_last_stand_bonus_limits()
-        elimination_note = ""
-        if not any(t.owner == self.current_player for t in self.territories):
-            self.mark_eliminated_player_if_human(self.current_player)
-            self.refresh_eliminated_human_players()
-            elimination_note = f" J{self.current_player + 1} n'a plus de territoire."
-        self.show_message(
-            f"{source.name} donne a J{target_player + 1}. Aucun ecu gagne, juste de la geopolitique charitable." + elimination_note,
-            3600,
-        )
+        result = moteur_achats.donner_territoire(self, source, terr.owner)
+        if result.ok:
+            self.pending_gift_territory_id = None
+        self.show_message(result.message, 3600 if result.ok else 2600)
 
     def execute_shop_gift_money(self, terr: Territory) -> None:
-        target_player = terr.owner
-        if target_player < 0 or self.is_sanctuary_territory(terr.id):
-            self.show_message("Impossible de donner de l'argent a l'ONU.", 2200)
-            return
-        if target_player == self.current_player:
-            self.show_message("Impossible de se donner de l'argent a soi-meme. Meme la comptabilite refuserait.", 2400)
-            return
         self.update_shop_gift_amount()
-        amount = self.shop_gift_amount
-        if amount <= 0:
-            self.show_message("Impossible de donner de l'argent : aucun ecu disponible.", 1800)
-            return
-        if not self.spend_player_money(self.current_player, amount):
-            self.show_message(f"Don impossible : {amount} ecu(s) non disponibles.", 2200)
-            return
-        self.ensure_player_economy(target_player)
-        self.player_money[target_player] += amount
-        self.update_shop_gift_amount()
-        self.show_message(f"J{self.current_player + 1} donne {amount} ecu(s) a J{target_player + 1}.", 2600)
+        result = moteur_achats.donner_argent(self, terr.owner, self.shop_gift_amount)
+        if result.ok:
+            self.update_shop_gift_amount()
+        self.show_message(result.message, 2600 if result.ok else 2200)
 
     def execute_shop_build_fortress(self, terr: Territory) -> None:
-        if terr.owner != self.current_player:
-            self.show_message("Une forteresse doit etre construite sur un territoire controle.", 2200)
-            return
-        if terr.id in self.fortress_territory_ids:
-            self.show_message("Ce territoire possede deja une forteresse.", 1800)
-            return
-        if not self.spend_player_money(self.current_player, self.FORTRESS_COST):
-            self.show_message("Pas assez d'ecus pour construire une forteresse.", 1800)
-            return
-        self.fortress_territory_ids.add(terr.id)
-        self.fortress_capture_counts[terr.id] = 0
-        self.show_message(f"Forteresse construite sur {terr.name} pour {self.FORTRESS_COST} ecu(s).", 2200)
+        result = moteur_achats.construire_forteresse(self, terr)
+        self.show_message(result.message, 2200 if result.ok else 1800)
 
     def execute_shop_destroy_fortress(self, terr: Territory) -> None:
-        if terr.id not in self.fortress_territory_ids:
-            self.show_message("Aucune forteresse a detruire sur ce territoire.", 1800)
-            return
-        if not self.spend_player_money(self.current_player, self.DESTROY_FORTRESS_COST):
-            self.show_message("Pas assez d'ecus pour detruire cette forteresse.", 1800)
-            return
-        self.fortress_territory_ids.discard(terr.id)
-        self.fortress_capture_counts.pop(terr.id, None)
-        self.show_message(f"Forteresse de {terr.name} detruite pour {self.DESTROY_FORTRESS_COST} ecu(s).", 2200)
+        result = moteur_achats.detruire_forteresse(self, terr)
+        self.show_message(result.message, 2200 if result.ok else 1800)
 
     def calculate_corruption_surcharge(self, territory_id: int) -> int:
         surcharge = 0
@@ -6890,139 +6806,16 @@ class GraphicalGame:
         return base_cost + surcharge, base_cost, surcharge
 
     def execute_shop_corrupt_territory(self, terr: Territory) -> None:
-        current_is_commercial_city = self.is_commercial_city_player(self.current_player)
-        if terr.owner == self.current_player:
-            self.show_message("Ce territoire est deja a vous. La corruption interne, gardons ca pour plus tard.", 2200)
-            return
-        if terr.id in self.golden_territory_ids:
-            self.show_message("Impossible de corrompre un territoire dore : incorruptible.", 2200)
-            return
-        if (terr.owner < 0 or self.is_sanctuary_territory(terr.id)) and not current_is_commercial_city:
-            self.show_message("Impossible de corrompre un territoire ONU.", 2200)
-            return
-        if self.is_commercial_city_territory(terr.id):
-            self.show_message("Impossible de corrompre une cite commercante.", 2200)
-            return
-        if self.is_last_stand_bonus_territory(terr.id) and not current_is_commercial_city:
-            self.show_message("Impossible de corrompre une capitale en paradis fiscal.", 2400)
-            return
-        if current_is_commercial_city and not self.is_territory_adjacent_to_player(terr.id, self.current_player):
-            self.show_message("Corruption CC impossible : le territoire doit etre adjacent a une cite deja controlee.", 2600)
-            return
-        cost, base_cost, surcharge = self.calculate_corruption_cost(terr)
-        if not self.spend_player_money(self.current_player, cost):
-            surcharge_note = f" dont {surcharge} de surcout amenagement/+3" if surcharge > 0 else ""
-            self.show_message(f"Corruption trop chere : {cost} ecu(s) necessaires{surcharge_note}.", 2600)
-            return
-        previous_owner = terr.owner
-        if self.can_player_create_vassal_from_corruption(self.current_player):
-            vassal_player = self.create_vassal_from_corruption(terr.id, self.current_player)
-            self.refresh_last_stand_bonus_state()
-            self.enforce_last_stand_bonus_limits()
-            elimination_note = ""
-            if previous_owner >= 0 and not any(t.owner == previous_owner for t in self.territories):
-                self.mark_eliminated_player_if_human(previous_owner)
-                self.refresh_eliminated_human_players()
-                elimination_note = f" J{previous_owner + 1} est elimine." + self.transfer_eliminated_player_money(previous_owner, self.current_player)
-            surcharge_note = f" Base {base_cost} + surcout {surcharge}." if surcharge > 0 else ""
-            vassal_label = f"J{vassal_player + 1}" if vassal_player is not None else "un nouveau vassal"
-            self.show_message(
-                f"{terr.name} corrompu pour {cost} ecu(s).{surcharge_note} Le territoire devient vassal ({vassal_label}), Cite commercante alliee a J{self.current_player + 1}; integration dans {self.VASSAL_INTEGRATION_DELAY_TURNS} tours." + elimination_note,
-                5200,
-            )
-            return
-
-        self.sanctuary_territory_ids.discard(terr.id)
-        self.submitted_territory_ids.discard(terr.id)
-        self.submitted_territory_overlords.pop(terr.id, None)
-        self.submitted_territory_created_turns.pop(terr.id, None)
-        self.vassal_territory_overlords.pop(terr.id, None)
-        self.vassal_territory_created_turns.pop(terr.id, None)
-        self.vassal_players.pop(terr.id, None)
-        terr.owner = self.current_player
-        if current_is_commercial_city:
-            self.enforce_commercial_city_cultural_center_limit()
-        self.refresh_last_stand_bonus_state()
-        self.enforce_last_stand_bonus_limits()
-        elimination_note = ""
-        if previous_owner >= 0 and not any(t.owner == previous_owner for t in self.territories):
-            self.mark_eliminated_player_if_human(previous_owner)
-            self.refresh_eliminated_human_players()
-            elimination_note = f" J{previous_owner + 1} est elimine." + self.transfer_eliminated_player_money(previous_owner, self.current_player)
-        surcharge_note = f" Base {base_cost} + surcout {surcharge}." if surcharge > 0 else ""
-        self.show_message(f"{terr.name} corrompu pour {cost} ecu(s).{surcharge_note} Les amenagements restent intacts." + elimination_note, 4200)
+        result = moteur_achats.corrompre_territoire(self, terr)
+        self.show_message(result.message, 4200 if result.ok else 2400)
 
     def execute_shop_revolt(self, terr: Territory) -> None:
-        if terr.owner == self.current_player:
-            self.show_message("Choisissez un territoire ennemi pour designer la cible de la revolte.", 2200)
-            return
-        if terr.owner < 0:
-            self.show_message("Impossible de declencher une revolte chez l'ONU.", 2200)
-            return
-        target_player = terr.owner
-        if self.is_commercial_city_player(target_player):
-            self.show_message(
-                "Revolte impossible : les Cites Commercantes sont immunisees contre les revoltes.",
-                2800,
-            )
-            return
-        if target_player in getattr(self, "nation_players", set()):
-            self.show_message("Revolte impossible : les nations sont immunisees contre les revoltes.", 2600)
-            return
-        owned = [t for t in self.territories if t.owner == target_player]
-        if not owned:
-            self.show_message("Cet ennemi n'a plus de territoire a perdre.", 1800)
-            return
-
-        revolt_cost = self.calculate_revolt_cost_for_target_player(target_player)
-        if not self.spend_player_money(self.current_player, revolt_cost):
-            self.show_message(f"Pas assez d'ecus pour declencher cette revolte : {revolt_cost} ecu(s) necessaires.", 2200)
-            return
-
-        lost_count = self.calculate_revolt_loss_count(len(owned))
-        territories_to_transfer = self.choose_owned_contiguous_block(target_player, lost_count)
-        if not territories_to_transfer:
-            self.player_money[self.current_player] += revolt_cost
-            self.show_message("Revolte impossible : aucune cible valide hors capitale.", 2600)
-            return
-        lost_count = len(territories_to_transfer)
-        rebel_player, returning_human = self.allocate_rebel_player()
-        for territory in territories_to_transfer:
-            territory.owner = rebel_player
-        self.refresh_last_stand_bonus_state()
-        self.refresh_eliminated_human_players()
-        elimination_note = ""
-        if not any(t.owner == target_player for t in self.territories):
-            self.mark_eliminated_player_if_human(target_player)
-            elimination_note = f" J{target_player + 1} est elimine." + self.transfer_eliminated_player_money(target_player, self.current_player)
-        comeback = "nouveau joueur IA"
-        self.show_message(
-            f"Revolte financee chez J{target_player + 1} pour {revolt_cost} ecu(s): "
-            f"{lost_count}/{len(owned)} territoire(s) passent a J{rebel_player + 1} ({comeback})." + elimination_note,
-            4400,
-        )
+        result = moteur_achats.financer_revolte(self, terr)
+        self.show_message(result.message, 4400 if result.ok else 2400)
 
     def execute_shop_build_industrial_structure(self, terr: Territory, structure_type: str, label: str, cost: int) -> None:
-        if terr.owner != self.current_player:
-            self.show_message(f"Un {label} doit etre construit sur un territoire controle.", 2200)
-            return
-        existing_structure_type = self.get_industrial_structure_type(terr.id)
-        if terr.id in self.get_industrial_structure_sets().get(structure_type, set()):
-            labels = {"factory": "usine", "airport": "aeroport", "port": "port"}
-            self.show_message(f"Ce territoire possede deja cet amenagement industriel ({labels.get(structure_type, 'industrie')}).", 2200)
-            return
-        if existing_structure_type is not None:
-            labels = {"factory": "usine", "airport": "aeroport", "port": "port"}
-            self.show_message(f"Ce territoire possede deja un amenagement industriel ({labels.get(existing_structure_type, 'industrie')}).", 2200)
-            return
-        if not self.spend_player_money(self.current_player, cost):
-            self.show_message(f"Pas assez d'ecus pour construire un {label}.", 1800)
-            return
-        if not self.add_industrial_structure(terr.id, structure_type):
-            self.show_message(f"Construction impossible pour ce {label}.", 1800)
-            return
-        bonus_note = " Bonus PF trio industriel actif : revenus +50%." if self.is_tax_haven_income_bonus_active(self.current_player) else ""
-        self.show_message(f"{label.capitalize()} construit sur {terr.name} pour {cost} ecu(s)." + bonus_note, 2600)
+        result = moteur_achats.construire_industrie(self, terr, structure_type)
+        self.show_message(result.message, 2600 if result.ok else 2200)
 
     def execute_shop_build_factory(self, terr: Territory) -> None:
         self.execute_shop_build_industrial_structure(terr, "factory", "usine", self.FACTORY_COST)
@@ -7034,86 +6827,27 @@ class GraphicalGame:
         self.execute_shop_build_industrial_structure(terr, "port", "port", self.PORT_COST)
 
     def execute_shop_build_temple(self, terr: Territory) -> None:
-        if terr.owner != self.current_player:
-            self.show_message("Un temple doit etre construit sur un territoire controle.", 2200)
-            return
-        if self.has_temple(terr.id):
-            self.show_message(f"Maximum atteint : un seul temple sur {terr.name}.", 2200)
-            return
-        if not self.spend_player_money(self.current_player, self.TEMPLE_COST):
-            self.show_message(f"Pas assez d'ecus pour construire un temple : {self.TEMPLE_COST} requis.", 2200)
-            return
-        self.add_temple(terr.id)
-        religion_note = getattr(self, "last_religion_foundation_message", None)
-        if religion_note:
-            self.show_message(f"Temple construit sur {terr.name}. {religion_note}", 5200)
-        else:
-            self.show_message(f"Temple construit sur {terr.name} pour {self.TEMPLE_COST} ecu(s).", 2600)
+        result = moteur_achats.construire_temple(self, terr)
+        duration = 5200 if getattr(self, "last_religion_foundation_message", None) else 2600
+        self.show_message(result.message, duration if result.ok else 2200)
 
     def execute_shop_build_cultural_center(self, terr: Territory) -> None:
-        if terr.owner != self.current_player:
-            self.show_message("Un centre culturel doit etre construit sur un territoire controle.", 2200)
-            return
-        if not self.can_add_cultural_center(terr.id):
-            self.show_message(f"Maximum atteint : un seul centre culturel sur {terr.name}.", 2200)
-            return
-        if not self.spend_player_money(self.current_player, self.CULTURAL_CENTER_COST):
-            self.show_message(f"Pas assez d'ecus pour construire un centre culturel : {self.CULTURAL_CENTER_COST} requis.", 2200)
-            return
-        self.add_cultural_center(terr.id, age=0)
-        count = self.get_cultural_center_count(terr.id)
-        self.show_message(f"Centre culturel construit sur {terr.name} pour {self.CULTURAL_CENTER_COST} ecu(s).", 2600)
+        result = moteur_achats.construire_centre_culturel(self, terr)
+        self.show_message(result.message, 2600 if result.ok else 2200)
 
     def execute_shop_build_university(self, terr: Territory) -> None:
-        if terr.owner != self.current_player:
-            self.show_message("Une universite doit etre construite sur un territoire controle.", 2200)
-            return
-        if self.has_university(terr.id):
-            self.show_message(f"Maximum atteint : une seule universite sur {terr.name}.", 2200)
-            return
-        if not self.spend_player_money(self.current_player, self.UNIVERSITY_COST):
-            self.show_message(f"Pas assez d'ecus pour construire une universite : {self.UNIVERSITY_COST} requis.", 2200)
-            return
-        self.add_university(terr.id)
-        self.show_message(f"Universite construite sur {terr.name} pour {self.UNIVERSITY_COST} ecu(s). Elle produit de la science a chaque tour.", 3400)
+        result = moteur_achats.construire_universite(self, terr)
+        self.show_message(result.message, 3400 if result.ok else 2200)
 
     def execute_shop_build_wonder(self, terr: Territory) -> None:
         wonder_type = self.pending_wonder_type
-        if wonder_type not in self.WONDER_DEFINITIONS:
-            self.show_message("Choisissez d'abord une merveille dans le menu des achats.", 2200)
-            return
-        required_science = self.get_wonder_science_threshold(self.current_player)
-        if not self.can_player_build_wonder(self.current_player):
-            self.show_message(
-                f"Science insuffisante : {required_science} points requis pour une merveille.",
-                2400,
-            )
-            return
-        if terr.owner != self.current_player:
-            self.show_message("Une merveille doit etre construite sur un territoire controle.", 2200)
-            return
-        if self.get_wonder_type_at_territory(terr.id) is not None:
-            self.show_message(f"{terr.name} accueille deja une merveille.", 2200)
-            return
-        if wonder_type not in self.get_available_wonder_types():
-            self.show_message(f"{self.get_wonder_name(wonder_type)} a deja ete construite.", 2400)
+        result = moteur_achats.construire_merveille(self, terr, wonder_type)
+        if result.ok:
             self.pending_wonder_type = None
-            return
-        if not self.spend_player_money(self.current_player, self.WONDER_COST):
-            self.show_message(f"Pas assez d'ecus : {self.WONDER_COST} requis pour cette merveille.", 2200)
-            return
-        if not self.build_wonder(terr.id, wonder_type):
-            self.player_money[self.current_player] += self.WONDER_COST
-            self.show_message("Construction de la merveille impossible.", 2200)
-            return
-        wonder_name = self.get_wonder_name(wonder_type)
-        wonder_effect = self.get_wonder_effect(wonder_type)
-        self.pending_wonder_type = None
-        self.shop_action = None
-        self.show_message(
-            f"{wonder_name} construite sur {terr.name} pour {self.WONDER_COST} ecus. {wonder_effect}.",
-            5200,
-        )
+            self.shop_action = None
+        elif wonder_type in self.WONDER_DEFINITIONS and wonder_type not in self.get_available_wonder_types():
+            self.pending_wonder_type = None
+        self.show_message(result.message, 5200 if result.ok else 2400)
 
     def execute_shop_build_bridge(self, terr: Territory) -> None:
         if self.get_player_science(self.current_player) < self.SCIENCE_BRIDGE_THRESHOLD:
@@ -7128,35 +6862,12 @@ class GraphicalGame:
                 f"Premier territoire : {terr.name}. Cliquez maintenant sur le territoire a relier.", 2800
             )
             return
-        territory_a = self.pending_bridge_territory_id
-        territory_b = terr.id
-        if territory_a == territory_b:
-            self.show_message("Choisissez deux territoires differents.", 2000)
-            return
-        key = tuple(sorted((territory_a, territory_b)))
-        if key in self.bridge_links or territory_b in self.territories[territory_a].neighbors:
-            self.show_message("Ces deux territoires sont deja directement relies.", 2400)
-            return
-        points = self.find_bridge_connection_points(*key)
-        if points is None:
-            self.show_message(
-                "Pont impossible : distance superieure a 2 cm, absence d'eau ou passage au-dessus d'un territoire.",
-                3400,
-            )
-            return
-        if not self.spend_player_money(self.current_player, self.BUILD_BRIDGE_COST):
-            self.pending_bridge_territory_id = None
-            self.show_message(f"Pont trop cher : {self.BUILD_BRIDGE_COST} ecus requis.", 2200)
-            return
-        self.add_bridge(key, points)
-        self.pending_bridge_territory_id = None
-        message = (
-            f"J{self.current_player + 1} construit un pont entre {self.territories[key[0]].name} "
-            f"et {self.territories[key[1]].name} pour {self.BUILD_BRIDGE_COST} ecus."
+        result = moteur_achats.construire_pont(
+            self, self.pending_bridge_territory_id, terr.id, self.cell_width, self.cell_height,
         )
-        self.record_major_event(message)
-        self.record_replay_snapshot(message, force=True)
-        self.show_message(message, 4200)
+        if result.ok:
+            self.pending_bridge_territory_id = None
+        self.show_message(result.message, 4200 if result.ok else 2800)
 
     def execute_shop_destroy_bridge(self, terr: Territory) -> None:
         if self.get_player_science(self.current_player) < self.SCIENCE_BRIDGE_THRESHOLD:
@@ -7171,66 +6882,18 @@ class GraphicalGame:
                 f"Premier territoire : {terr.name}. Cliquez sur l'autre extremite du pont.", 2800
             )
             return
-        key = tuple(sorted((self.pending_bridge_territory_id, terr.id)))
-        if key not in self.bridge_links:
-            self.show_message("Aucun pont ne relie ces deux territoires.", 2400)
-            return
-        if not self.spend_player_money(self.current_player, self.DESTROY_BRIDGE_COST):
+        result = moteur_achats.detruire_pont(self, self.pending_bridge_territory_id, terr.id)
+        if result.ok:
             self.pending_bridge_territory_id = None
-            self.show_message(f"Destruction trop chere : {self.DESTROY_BRIDGE_COST} ecus requis.", 2200)
-            return
-        territory_a, territory_b = key
-        self.remove_bridge(key)
-        self.pending_bridge_territory_id = None
-        message = (
-            f"J{self.current_player + 1} detruit le pont entre {self.territories[territory_a].name} "
-            f"et {self.territories[territory_b].name} pour {self.DESTROY_BRIDGE_COST} ecus."
-        )
-        self.record_major_event(message)
-        self.record_replay_snapshot(message, force=True)
-        self.show_message(message, 4200)
+        self.show_message(result.message, 4200 if result.ok else 2400)
 
     def execute_shop_destroy_university(self, terr: Territory) -> None:
-        if not self.has_university(terr.id):
-            self.show_message("Aucune universite a detruire sur ce territoire.", 1800)
-            return
-        if not self.spend_player_money(self.current_player, self.UNIVERSITY_COST):
-            self.show_message(f"Pas assez d'ecus pour detruire cette universite : {self.UNIVERSITY_COST} requis.", 2200)
-            return
-        self.remove_university(terr.id)
-        self.show_message(f"Universite de {terr.name} detruite pour {self.UNIVERSITY_COST} ecu(s).", 2400)
+        result = moteur_achats.detruire_universite(self, terr)
+        self.show_message(result.message, 2400 if result.ok else 2200)
 
     def execute_shop_change_capital(self, terr: Territory) -> None:
-        if self.current_player in self.commercial_city_players:
-            self.show_message("Changement impossible : les Cites commercantes gardent leur capitale CC propre.", 2600)
-            return
-        if terr.owner != self.current_player:
-            self.show_message("La nouvelle capitale doit etre un territoire que vous controlez.", 2400)
-            return
-        if self.is_sanctuary_territory(terr.id) or terr.owner == self.onu_player_id:
-            self.show_message("Changement impossible : un territoire ONU ne peut pas devenir capitale.", 2400)
-            return
-        previous_capital_id = getattr(self, "player_capital_ids", {}).get(self.current_player)
-        if previous_capital_id == terr.id and self.is_active_regular_capital(terr.id):
-            self.show_message(f"{terr.name} est deja votre capitale. Meme l'administration peut eviter un formulaire inutile.", 2600)
-            return
-        if not self.spend_player_money(self.current_player, self.CHANGE_CAPITAL_COST):
-            self.show_message(f"Pas assez d'ecus pour changer de capitale : {self.CHANGE_CAPITAL_COST} requis.", 2200)
-            return
-        if not hasattr(self, "player_capital_ids"):
-            self.player_capital_ids = {}
-        old_name = None
-        if previous_capital_id is not None and 0 <= previous_capital_id < len(self.territories):
-            old_name = self.territories[previous_capital_id].name
-        self.player_capital_ids[self.current_player] = terr.id
-        self.sanctuary_territory_ids.discard(terr.id)
-        self.sanitize_player_capitals()
-        old_note = f" Ancienne capitale : {old_name}." if old_name and old_name != terr.name else ""
-        self.show_message(
-            f"{terr.name} devient la capitale de J{self.current_player + 1} pour {self.CHANGE_CAPITAL_COST} ecu(s)."
-            f" Revenu x{self.CAPITAL_INCOME_MULTIPLIER} et symbole C actifs." + old_note,
-            3600,
-        )
+        result = moteur_achats.changer_capitale(self, terr)
+        self.show_message(result.message, 3600 if result.ok else 2400)
 
     def calculate_union_cost(self, target_player: int) -> int:
         return 0
@@ -7242,48 +6905,10 @@ class GraphicalGame:
         self.show_message("Traite national supprime : les nations n'ont plus de diplomatie permanente particuliere.", 2600)
 
     def execute_shop_buy_alliance(self, terr: Territory) -> None:
-        if self.is_cold_war_active():
-            self.show_message("Alliance impossible : la guerre froide a fige les blocs. Plus aucun contrat d'alliance n'est disponible.", 3200)
-            return
-        target_player = terr.owner
-        exclusive_ally = self.get_commercial_city_wonder_ally()
-        if self.is_commercial_city_player(target_player) and exclusive_ally is not None:
-            self.show_message(
-                f"Alliance impossible : la Cite commercante est exclusivement alliee a J{exclusive_ally + 1} grace au Palais du Pacte d'Or.",
-                3200,
-            )
-            return
-        if target_player == self.current_player:
-            self.show_message("Choisissez un territoire du joueur IA avec qui conclure l'alliance defensive.", 2200)
-            return
-        if target_player < 0 or self.is_sanctuary_territory(terr.id):
-            self.show_message("Impossible d'acheter une alliance avec l'ONU. Meme la fiction a des limites.", 2200)
-            return
-        if not self.is_ai_player(target_player):
-            self.show_message("Alliance impossible : la cible doit etre un joueur IA, pas un joueur humain.", 2400)
-            return
-        if not self.is_human_player_id(self.current_player):
-            self.show_message("Seul un joueur humain peut acheter une alliance.", 2200)
-            return
-        cost = self.get_alliance_cost(target_player)
-        if cost <= 0:
-            self.show_message("Alliance impossible : ce joueur IA ne controle plus aucun territoire.", 2200)
-            return
-        if not self.spend_player_money(self.current_player, cost):
-            self.show_message(f"Alliance defensive trop chere : {cost} ecu(s) necessaires.", 2200)
-            return
-        expires_turn = self.turn + self.ALLIANCE_DURATION_TURNS
-        self.active_alliances[(self.current_player, target_player)] = expires_turn
-        self.alliance_start_turns[(self.current_player, target_player)] = self.turn
-        event_message = f"Alliance defensive conclue avec J{target_player + 1} pour {cost} ecu(s). J{target_player + 1} n'attaquera plus J{self.current_player + 1} jusqu'au tour {expires_turn}."
-        self.record_major_event(event_message)
-        self.show_message(event_message, 4200)
+        result = moteur_achats.acheter_alliance(self, terr)
+        self.show_message(result.message, 4200 if result.ok else 2400)
 
     def execute_shop_buy_offensive_alliance(self, terr: Territory) -> None:
-        if self.is_cold_war_active():
-            self.pending_offensive_alliance_ai = None
-            self.show_message("Alliance offensive impossible : la guerre froide a remplace la diplomatie par deux blocs definitifs.", 3200)
-            return
         clicked_player = terr.owner
         if not self.is_human_player_id(self.current_player):
             self.pending_offensive_alliance_ai = None
@@ -7322,41 +6947,12 @@ class GraphicalGame:
             )
             return
 
-        ai_player = self.pending_offensive_alliance_ai
-        target_player = clicked_player
-        if target_player < 0 or self.is_sanctuary_territory(terr.id):
-            self.show_message("Cible invalide : l'ONU ne compte pas comme joueur cible pour cette alliance.", 2400)
-            return
-        if target_player == self.current_player:
-            self.show_message("Cible invalide : payer une IA pour vous attaquer serait audacieux, mais non.", 2600)
-            return
-        if target_player == ai_player:
-            self.show_message("Cible invalide : l'allie offensif ne va pas s'attaquer lui-meme.", 2400)
-            return
-        if not any(t.owner == ai_player for t in self.territories):
+        result = moteur_achats.acheter_alliance_offensive(
+            self, self.pending_offensive_alliance_ai, clicked_player,
+        )
+        if result.ok:
             self.pending_offensive_alliance_ai = None
-            self.show_message("Alliance offensive impossible : l'allie IA n'a plus de territoire.", 2400)
-            return
-        if not any(t.owner == target_player for t in self.territories):
-            self.show_message("Alliance offensive impossible : la cible n'a plus de territoire.", 2400)
-            return
-
-        cost = self.get_offensive_alliance_cost(ai_player)
-        if not self.spend_player_money(self.current_player, cost):
-            self.pending_offensive_alliance_ai = None
-            self.show_message(f"Alliance offensive trop chere : {cost} ecu(s) necessaires.", 2400)
-            return
-
-        expires_turn = self.turn + self.ALLIANCE_DURATION_TURNS
-        self.active_offensive_alliances[(self.current_player, ai_player)] = (target_player, expires_turn)
-        self.offensive_alliance_start_turns[(self.current_player, ai_player)] = self.turn
-        broken_ai_alliance_note = self.break_ai_alliance_due_to_offensive_contract(ai_player, target_player)
-        self.pending_offensive_alliance_ai = None
-        event_message = f"Alliance offensive conclue avec J{ai_player + 1} pour {cost} ecu(s). J{ai_player + 1} cible J{target_player + 1} jusqu'au tour {expires_turn}."
-        if broken_ai_alliance_note:
-            event_message += " " + broken_ai_alliance_note
-        self.record_major_event(event_message)
-        self.show_message(event_message, 5200 if broken_ai_alliance_note else 4600)
+        self.show_message(result.message, 4600 if result.ok else 2400)
 
     def cleanup_removed_ai_player(self, ai_player: int) -> None:
         self.schedule_commercial_city_replacement_if_destroyed(ai_player)
@@ -7391,187 +6987,33 @@ class GraphicalGame:
         self.nation_wars = {key for key in self.nation_wars if ai_player not in key}
 
     def execute_shop_freeze_territory(self, terr: Territory) -> None:
-        if not self.can_player_manipulate_onu(self.current_player):
-            self.show_message(f"Figement impossible : il faut etre en paradis fiscal ou avoir {self.SCIENCE_ONU_MANIPULATION_THRESHOLD} points de science.", 2800)
-            return
-        if self.is_sanctuary_territory(terr.id) or terr.owner == self.onu_player_id:
-            self.show_message("Ce territoire est deja un territoire ONU. Meme l'ONU ne peut pas etre plus ONU.", 2600)
-            return
-        if self.is_last_stand_bonus_territory(terr.id):
-            self.show_message("Figement impossible : une capitale en paradis fiscal ne peut pas devenir territoire ONU.", 3000)
-            return
-        if self.is_regular_capital_territory(terr.id):
-            self.show_message("Figement impossible : une capitale de joueur ne peut pas devenir territoire ONU.", 3000)
-            return
-        if self.is_golden_territory(terr.id):
-            self.show_message("Figement impossible : un territoire dore ne peut jamais devenir territoire ONU.", 3000)
-            return
-        cost = self.calculate_onu_manipulation_cost(terr)
-        if not self.spend_player_money(self.current_player, cost):
-            self.show_message(f"Figement trop cher : {cost} ecu(s) necessaires.", 2400)
-            return
-        previous_owner = terr.owner
-        previous_regiments = terr.regiments
-        self.convert_territory_to_sanctuary(terr.id, regiments=previous_regiments)
-        self.refresh_last_stand_bonus_state()
-        self.refresh_eliminated_human_players()
-        elimination_note = ""
-        if previous_owner >= 0 and not any(t.owner == previous_owner for t in self.territories):
-            self.mark_eliminated_player_if_human(previous_owner)
-            self.refresh_eliminated_human_players()
-            elimination_note = f" J{previous_owner + 1} n'a plus de territoire."
-        self.show_message(
-            f"{terr.name} fige en territoire ONU pour {cost} ecu(s) ({max(1, previous_regiments)} regiment(s) x {self.ONU_MANIPULATION_COST_PER_REGIMENT})."
-            + elimination_note,
-            4200,
-        )
+        result = moteur_achats.figer_territoire(self, terr)
+        self.show_message(result.message, 4200 if result.ok else 2800)
 
     def execute_shop_release_sanctuary(self, terr: Territory) -> None:
-        if not self.can_player_manipulate_onu(self.current_player):
-            self.show_message(f"Liberation impossible : il faut etre en paradis fiscal ou avoir {self.SCIENCE_ONU_MANIPULATION_THRESHOLD} points de science.", 2800)
-            return
-        if not self.is_sanctuary_territory(terr.id) and terr.owner != self.onu_player_id:
-            self.show_message("Liberation impossible : ce territoire n'est pas un territoire ONU.", 2400)
-            return
-        cost = self.calculate_onu_manipulation_cost(terr)
-        if not self.spend_player_money(self.current_player, cost):
-            self.show_message(f"Liberation trop chere : {cost} ecu(s) necessaires.", 2400)
-            return
-        new_owner = self.get_random_ai_recipient_for_released_sanctuary(excluded_players={self.current_player})
-        self.sanctuary_territory_ids.discard(terr.id)
-        self.submitted_territory_ids.discard(terr.id)
-        self.submitted_territory_overlords.pop(terr.id, None)
-        self.submitted_territory_created_turns.pop(terr.id, None)
-        terr.owner = new_owner
-        terr.reinforcement_bonus = 1
-        terr.regiments = max(1, terr.regiments)
-        if self.selected_source == terr.id:
-            self.selected_source = None
-        if self.selected_target == terr.id:
-            self.selected_target = None
-        self.refresh_last_stand_bonus_state()
-        self.refresh_eliminated_human_players()
-        self.show_message(
-            f"{terr.name} libere de l'ONU pour {cost} ecu(s) et attribue a l'IA J{new_owner + 1}.",
-            4200,
-        )
+        result = moteur_achats.liberer_sanctuaire(self, terr)
+        if result.ok:
+            if self.selected_source == terr.id:
+                self.selected_source = None
+            if self.selected_target == terr.id:
+                self.selected_target = None
+        self.show_message(result.message, 4200 if result.ok else 2600)
 
     def execute_shop_tax_haven_association(self, terr: Territory) -> None:
-        human_player = self.current_player
-        ai_player = terr.owner
-        if not self.is_human_player_id(human_player):
-            self.show_message("Seul un joueur humain peut utiliser cette option de paradis fiscal.", 2400)
-            return
-        if ai_player == human_player:
-            self.show_message("Choisissez une capitale IA en paradis fiscal, pas votre propre territoire.", 2400)
-            return
-        if ai_player < 0 or self.is_sanctuary_territory(terr.id):
-            self.show_message("Operation impossible avec l'ONU. La bureaucratie gagne encore.", 2400)
-            return
-        if not self.is_ai_player(ai_player):
-            self.show_message("Operation impossible : la capitale cible doit appartenir a un joueur IA.", 2600)
-            return
-        if ai_player not in self.last_stand_bonus_players or terr.id not in self.get_player_tax_haven_capital_ids(ai_player):
-            self.show_message("Operation impossible : ce territoire n'est pas la capitale IA en paradis fiscal.", 2800)
-            return
-
-        if self.can_player_integrate_tax_haven_by_science(human_player):
-            self.execute_shop_science_tax_haven_integration(terr, ai_player)
-            return
-
-        if human_player in self.last_stand_bonus_players:
-            self.execute_shop_tax_haven_integration(terr, ai_player)
-            return
-
-        absorbed_territories = [territory for territory in self.territories if territory.owner == ai_player]
-        if not absorbed_territories:
-            self.show_message("Association impossible : ce joueur IA n'a plus de territoire actif.", 2200)
-            return
-
-        previous_ai_money = self.player_money.get(ai_player, 0)
-        self.ensure_player_economy(human_player)
-        self.player_money[human_player] += previous_ai_money
-        self.player_money[ai_player] = 0
-
-        for territory in absorbed_territories:
-            territory.owner = human_player
-
-        self.remove_tax_haven_player(ai_player)
-        self.cleanup_removed_ai_player(ai_player)
-
-        self.add_tax_haven_capital(human_player, terr.id)
-
-        owned_after_association = [territory for territory in self.territories if territory.owner == human_player]
-        loss_count = min(max(0, len(owned_after_association) // 4), max(0, len(owned_after_association) - 1))
-        lost_territories: List[Territory] = []
-        returning_human = False
-        loss_receiver: Optional[int] = None
-        if loss_count > 0:
-            loss_candidates = [territory.id for territory in owned_after_association if territory.id != terr.id]
-            # On privilegie un bloc contigu sans jamais sacrifier la nouvelle capitale, parce que perdre
-            # son paradis fiscal au moment precis ou on le cree serait une blague fiscale de trop.
-            picked = [territory for territory in self.choose_owned_contiguous_block(human_player, loss_count) if territory.id != terr.id]
-            if len(picked) < loss_count:
-                picked_ids = {territory.id for territory in picked}
-                remaining = [tid for tid in loss_candidates if tid not in picked_ids]
-                random.shuffle(remaining)
-                picked.extend(self.territories[tid] for tid in remaining[: loss_count - len(picked)])
-            lost_territories = picked[:loss_count]
-            loss_receiver, returning_human = self.allocate_rebel_player()
-            for territory in lost_territories:
-                territory.owner = loss_receiver
-
-        self.refresh_last_stand_bonus_state()
-        self.refresh_eliminated_human_players()
-        comeback = "nouveau joueur IA"
-        loss_note = (
-            f" J{human_player + 1} perd {len(lost_territories)} territoire(s) sur {len(owned_after_association)} au profit de J{loss_receiver + 1} ({comeback})."
-            if loss_receiver is not None
-            else " Aucun territoire perdu : empire trop petit pour prelever un quart sans detruire la capitale."
-        )
-        money_note = f" Tresor IA recupere : {previous_ai_money} ecu(s)." if previous_ai_money > 0 else ""
-        self.show_message(
-            f"Association conclue : J{human_player + 1} absorbe J{ai_player + 1}, {terr.name} devient sa capitale x10."
-            + loss_note
-            + money_note,
-            5600,
-        )
+        result = moteur_achats.association_paradis_fiscal(self, terr)
+        self.show_message(result.message, 5600 if result.ok else 2600)
 
     def execute_shop_science_tax_haven_integration(self, terr: Territory, ai_player: int) -> None:
-        human_player = self.current_player
-        if not self.can_player_integrate_tax_haven_by_science(human_player):
-            self.show_message(f"Integration scientifique impossible : {self.SCIENCE_TAX_HAVEN_INTEGRATION_THRESHOLD} points de science requis.", 2600)
-            return
-        terr.owner = human_player
-        self.remove_tax_haven_capital(ai_player, terr.id)
-        if not any(territory.owner == ai_player for territory in self.territories):
-            self.cleanup_removed_ai_player(ai_player)
-        self.refresh_last_stand_bonus_state()
-        self.refresh_eliminated_human_players()
-        self.show_message(
-            f"Integration technologique : J{human_player + 1} integre {terr.name} sans cout ni penalite. Le territoire perd son statut de paradis fiscal.",
-            4600,
-        )
+        # Conserve pour compatibilite : le moteur choisit lui-meme la variante
+        # dans association_paradis_fiscal.
+        result = moteur_achats._integration_scientifique_paradis_fiscal(self, terr, ai_player)
+        self.show_message(result.message, 4600 if result.ok else 2600)
 
     def execute_shop_tax_haven_integration(self, terr: Territory, ai_player: int) -> None:
-        human_player = self.current_player
-        cost = self.TAX_HAVEN_INTEGRATION_COST
-        if not self.spend_player_money(human_player, cost):
-            self.show_message(f"Integration trop chere : {cost} ecu(s) necessaires.", 2400)
-            return
-
-        terr.owner = human_player
-        self.remove_tax_haven_capital(ai_player, terr.id)
-        self.add_tax_haven_capital(human_player, terr.id)
-        if not any(territory.owner == ai_player for territory in self.territories):
-            self.cleanup_removed_ai_player(ai_player)
-        self.refresh_last_stand_bonus_state()
-        self.refresh_eliminated_human_players()
-
-        self.show_message(
-            f"Integration conclue : J{human_player + 1} paie {cost} ecu(s) et prend le controle de la capitale x10 {terr.name} de J{ai_player + 1}.",
-            4600,
-        )
+        # Conserve pour compatibilite : le moteur choisit lui-meme la variante
+        # dans association_paradis_fiscal.
+        result = moteur_achats._integration_paradis_fiscal(self, terr, ai_player)
+        self.show_message(result.message, 4600 if result.ok else 2400)
 
     def execute_ai_economic_actions(self, player: int) -> int:
         return moteur_regles.execute_ai_economic_actions(self, player)

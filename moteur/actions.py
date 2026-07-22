@@ -23,6 +23,7 @@ import random
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from . import achats
 from . import regles
 from .etat import GameState
 
@@ -173,6 +174,34 @@ def advance_turn(
 ACTION_TYPES = (
     "attaquer", "assaut_total", "deplacer",
     "terminer_attaque", "terminer_achats", "fin_de_tour",
+    "acheter",
+)
+
+# Achats disponibles pendant la phase d'achats, avec leurs parametres :
+# {"type": "acheter", "achat": "mercenaires", "territoire": 3, "quantite": 5}
+ACHATS = (
+    "mercenaires",            # territoire, quantite
+    "vendre_territoire",      # territoire
+    "donner_territoire",      # territoire, joueur
+    "donner_argent",          # joueur, montant
+    "forteresse",             # territoire
+    "detruire_forteresse",    # territoire
+    "usine", "aeroport", "port",  # territoire
+    "temple",                 # territoire
+    "centre_culturel",        # territoire
+    "universite",             # territoire
+    "detruire_universite",    # territoire
+    "merveille",              # territoire, merveille
+    "capitale",               # territoire
+    "corruption",             # territoire
+    "revolte",                # territoire
+    "pont",                   # territoire, territoire_b
+    "detruire_pont",          # territoire, territoire_b
+    "alliance",               # territoire (du joueur IA cible)
+    "alliance_offensive",     # allie, cible (joueurs)
+    "figer_onu",              # territoire
+    "liberer_onu",            # territoire
+    "association_pf",         # territoire (capitale PF de l'IA)
 )
 
 
@@ -182,12 +211,15 @@ class ActionOutcome:
 
     ``ok=False`` : action refusee, ``code`` explique pourquoi
     ("action_inconnue", "phase_invalide", "territoire_invalide",
-    "attaque_invalide", ou un code de refus de deplacement : "limite",
-    "proprietaire", "meme_territoire", "garnison", "continuite").
+    "attaque_invalide", "achat_inconnu", "achat_refuse", ou un code de refus
+    de deplacement : "limite", "proprietaire", "meme_territoire", "garnison",
+    "continuite"). Pour les achats, ``message`` porte le texte de la
+    boutique (succes comme refus).
     """
 
     ok: bool
     code: str = "ok"
+    message: str = ""
     attack_passes: List[regles.AttackResult] = field(default_factory=list)
     next_phase: Optional[str] = None
     turn_report: Optional[TurnAdvanceReport] = None
@@ -277,6 +309,11 @@ def apply_action(
         state.phase = "shopping"
         return ActionOutcome(ok=True, next_phase="shopping")
 
+    if action_type == "acheter":
+        if state.phase != "shopping":
+            return _refuse("phase_invalide")
+        return _apply_purchase(state, action, cell_width, cell_height, rng)
+
     if action_type == "terminer_achats":
         if state.phase != "shopping":
             return _refuse("phase_invalide")
@@ -298,3 +335,102 @@ def apply_action(
         )
 
     return _refuse("action_inconnue")
+
+
+def _apply_purchase(
+    state: GameState,
+    action: Dict[str, Any],
+    cell_width: float,
+    cell_height: float,
+    rng=random,
+) -> ActionOutcome:
+    """Applique un achat de la boutique (phase d'achats deja verifiee)."""
+    achat = action.get("achat")
+    if achat not in ACHATS:
+        return _refuse("achat_inconnu")
+
+    def outcome(result: achats.AchatResult) -> ActionOutcome:
+        if result.ok:
+            return ActionOutcome(ok=True, message=result.message)
+        return ActionOutcome(ok=False, code="achat_refuse", message=result.message)
+
+    def get_int(key: str) -> Optional[int]:
+        try:
+            return int(action.get(key))
+        except (TypeError, ValueError):
+            return None
+
+    needs_territory = achat not in ("donner_argent", "alliance_offensive")
+    terr = None
+    if needs_territory:
+        terr = _get_territory(state, action, "territoire")
+        if terr is None:
+            return _refuse("territoire_invalide")
+
+    if achat == "mercenaires":
+        quantity = get_int("quantite")
+        if quantity is None or quantity <= 0:
+            return _refuse("achat_refuse")
+        return outcome(achats.acheter_mercenaires(state, terr, quantity))
+    if achat == "vendre_territoire":
+        return outcome(achats.vendre_territoire(state, terr, rng))
+    if achat == "donner_territoire":
+        target_player = get_int("joueur")
+        if target_player is None:
+            return _refuse("achat_refuse")
+        return outcome(achats.donner_territoire(state, terr, target_player))
+    if achat == "donner_argent":
+        target_player = get_int("joueur")
+        amount = get_int("montant")
+        if target_player is None or amount is None:
+            return _refuse("achat_refuse")
+        return outcome(achats.donner_argent(state, target_player, amount))
+    if achat == "forteresse":
+        return outcome(achats.construire_forteresse(state, terr))
+    if achat == "detruire_forteresse":
+        return outcome(achats.detruire_forteresse(state, terr))
+    if achat in ("usine", "aeroport", "port"):
+        structure_type = {"usine": "factory", "aeroport": "airport", "port": "port"}[achat]
+        return outcome(achats.construire_industrie(state, terr, structure_type))
+    if achat == "temple":
+        return outcome(achats.construire_temple(state, terr))
+    if achat == "centre_culturel":
+        return outcome(achats.construire_centre_culturel(state, terr))
+    if achat == "universite":
+        return outcome(achats.construire_universite(state, terr))
+    if achat == "detruire_universite":
+        return outcome(achats.detruire_universite(state, terr))
+    if achat == "merveille":
+        return outcome(achats.construire_merveille(state, terr, action.get("merveille")))
+    if achat == "capitale":
+        return outcome(achats.changer_capitale(state, terr))
+    if achat == "corruption":
+        return outcome(achats.corrompre_territoire(state, terr))
+    if achat == "revolte":
+        return outcome(achats.financer_revolte(state, terr, rng))
+    if achat == "pont":
+        other = get_int("territoire_b")
+        if other is None or not (0 <= other < len(state.territories)):
+            return _refuse("territoire_invalide")
+        return outcome(achats.construire_pont(state, terr.id, other, cell_width, cell_height))
+    if achat == "detruire_pont":
+        other = get_int("territoire_b")
+        if other is None or not (0 <= other < len(state.territories)):
+            return _refuse("territoire_invalide")
+        return outcome(achats.detruire_pont(state, terr.id, other))
+    if achat == "alliance":
+        return outcome(achats.acheter_alliance(state, terr))
+    if achat == "alliance_offensive":
+        ai_player = get_int("allie")
+        target_player = get_int("cible")
+        if ai_player is None or target_player is None:
+            return _refuse("achat_refuse")
+        return outcome(achats.acheter_alliance_offensive(state, ai_player, target_player))
+    if achat == "figer_onu":
+        return outcome(achats.figer_territoire(state, terr))
+    if achat == "liberer_onu":
+        return outcome(achats.liberer_sanctuaire(state, terr, rng))
+    if achat == "association_pf":
+        return outcome(achats.association_paradis_fiscal(state, terr, rng))
+
+    return _refuse("achat_inconnu")
