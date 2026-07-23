@@ -40,12 +40,62 @@ const client = {
   monSiege: null,
   selection: null,   // territoire sélectionné sur la carte
   actionDepuis: null,  // horodatage de l'action en attente de réponse
+  achat: null,          // article de boutique sélectionné (entrée du catalogue)
+  territoiresAchat: [],  // territoires déjà cliqués pour l'achat en cours
   fermetureVoulue: false,
 };
 
 // Le serveur garde son propre verrou par connexion : ce délai n'est qu'un
 // filet si une réponse se perd, pour ne jamais laisser l'interface sourde.
 const DELAI_ACTION_MS = 5000;
+
+// ---------------------------------------------------------------------------
+// Catalogue de la boutique — mêmes articles, prix et flux que x45.
+// ``cibles`` décrit les clics de carte attendus ("mien"/"ennemi"/"tout") ;
+// ``joueur``/``allie``/``cible``/``quantite``/``montant``/``merveille``
+// ajoutent des champs au panneau. ``science`` masque l'article sous le seuil.
+// ---------------------------------------------------------------------------
+
+const MERVEILLES = {
+  elyrion_sanctuary: "Sanctuaire d'Elyrion",
+  thousand_voices_theatre: "Théâtre des Mille Voix",
+  atlas_observatory: "Observatoire d'Atlas",
+  golden_pact_palace: "Palais du Pacte d'Or",
+};
+
+const CATALOGUE_ACHATS = [
+  { id: "mercenaires", libelle: "Mercenaires — 50/rég.", cibles: ["mien"], quantite: true },
+  { id: "vendre_territoire", libelle: "Vendre terr. +10/rég.", cibles: ["mien"], style: "special" },
+  { id: "donner_territoire", libelle: "Donner territoire", cibles: ["mien"], joueur: true, style: "special" },
+  { id: "donner_argent", libelle: "Donner argent", joueur: true, montant: true, style: "special" },
+  { id: "forteresse", libelle: "Forteresse — 100", cibles: ["mien"], cout: 100 },
+  { id: "detruire_forteresse", libelle: "Détruire forteresse — 100", cibles: ["tout"], cout: 100 },
+  { id: "corruption", libelle: "Corrompre — 40-200/rég.", cibles: ["ennemi"] },
+  { id: "revolte", libelle: "Révolte — 200-600", cibles: ["ennemi"], cout: 200 },
+  { id: "usine", libelle: "Usine — 100", cibles: ["mien"], cout: 100 },
+  { id: "aeroport", libelle: "Aéroport — 100", cibles: ["mien"], cout: 100 },
+  { id: "port", libelle: "Port — 100", cibles: ["mien"], cout: 100 },
+  { id: "temple", libelle: "Temple — 300", cibles: ["mien"], cout: 300 },
+  { id: "centre_culturel", libelle: "Centre culturel — 200", cibles: ["mien"], cout: 200 },
+  { id: "universite", libelle: "Université — 200", cibles: ["mien"], cout: 200 },
+  { id: "detruire_universite", libelle: "Détruire université — 200", cibles: ["tout"], cout: 200 },
+  { id: "merveille", libelle: "Merveille — 300", cibles: ["mien"], merveille: true, cout: 300 },
+  { id: "capitale", libelle: "Changer capitale — 300", cibles: ["mien"], cout: 300 },
+  { id: "alliance", libelle: "Alliance déf. — 20/terr.", cibles: ["ennemi"] },
+  { id: "alliance_offensive", libelle: "Alliance off. — 25/terr.", allie: true, cible: true },
+  { id: "association_pf", libelle: "Association / intégr. PF", cibles: ["ennemi"] },
+  { id: "figer_onu", libelle: "Figer ONU — 50/rég.", cibles: ["tout"], style: "onu" },
+  { id: "liberer_onu", libelle: "Libérer ONU — 50/rég.", cibles: ["tout"], style: "onu" },
+  { id: "pont", libelle: "Créer pont — 300", cibles: ["tout", "tout"], cout: 300, science: 150 },
+  { id: "detruire_pont", libelle: "Détruire pont — 150", cibles: ["tout", "tout"], cout: 150, science: 150 },
+];
+
+// Consignes de clic sur la carte par type de cible.
+const CONSIGNES_CIBLE = {
+  mien: "clique un de tes territoires",
+  ennemi: "clique un territoire adverse",
+  tout: "clique un territoire",
+};
 
 // Libellés français des codes de refus du serveur et du moteur.
 const LIBELLES_REFUS = {
@@ -391,7 +441,11 @@ function traiterMessage(message) {
         montrerEcran("identite");
         break;
       }
-      journal(LIBELLES_REFUS[message.code] || `Refus : ${message.code}`);
+      // Le refus d'un achat porte le texte de la boutique : on le préfère
+      // au libellé générique du code.
+      const detail = message.resultat && message.resultat.outcome
+        && message.resultat.outcome.message;
+      journal(detail || LIBELLES_REFUS[message.code] || `Refus : ${message.code}`);
       break;
     case "chat":
       afficherMessageChat(message);
@@ -444,6 +498,7 @@ function toutRafraichir() {
   afficherEnTete();
   afficherSieges();
   afficherBarreActions();
+  afficherBoutique();
   afficherDetailTerritoire();
   dessinerCarte();
 }
@@ -486,7 +541,8 @@ function afficherBarreActions() {
         "clic gauche = une passe, clic droit = assaut total.";
     } else if (enAchats) {
       $("indication-phase").textContent =
-        "Phase d'achats (boutique à venir dans le client web).";
+        "Phase d'achats — choisis un article dans la boutique (à droite), " +
+        "Échap pour terminer.";
     } else if (enDeplacement) {
       $("indication-phase").textContent =
         `Déplacements : ${etat.turn_move_count}/${limiteDeplacements(etat)} — ` +
@@ -512,6 +568,164 @@ function afficherBarreActions() {
       `En attente du siège ${courant} (libre).`;
     $("bouton-jouer-siege").hidden = false;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Boutique (phase d'achats)
+// ---------------------------------------------------------------------------
+
+function enPhaseAchats() {
+  return aMonTour() && client.etat.phase === "shopping";
+}
+
+function afficherBoutique() {
+  const panneau = $("panneau-boutique");
+  if (!enPhaseAchats()) {
+    panneau.hidden = true;
+    client.achat = null;
+    client.territoiresAchat = [];
+    return;
+  }
+  panneau.hidden = false;
+  const etat = client.etat;
+  const argent = etat.player_money[String(client.monSiege)] || 0;
+  const science = etat.player_science[String(client.monSiege)] || 0;
+
+  const zone = $("boutons-boutique");
+  zone.textContent = "";
+  for (const article of CATALOGUE_ACHATS) {
+    if (article.science && science < article.science) continue;
+    const bouton = document.createElement("button");
+    bouton.type = "button";
+    bouton.textContent = article.libelle;
+    if (article.style) bouton.classList.add(article.style);
+    if (client.achat && client.achat.id === article.id) bouton.classList.add("choisi");
+    if (article.cout && argent < article.cout) bouton.disabled = true;
+    bouton.addEventListener("click", () => {
+      client.achat = (client.achat && client.achat.id === article.id) ? null : article;
+      client.territoiresAchat = [];
+      afficherBoutique();
+    });
+    zone.append(bouton);
+  }
+  afficherParamsBoutique();
+  afficherConsigneBoutique();
+}
+
+function afficherParamsBoutique() {
+  const zone = $("params-boutique");
+  zone.textContent = "";
+  const article = client.achat;
+  if (!article) return;
+
+  function ajouterChampNombre(id, libelle, valeur, minimum) {
+    const label = document.createElement("label");
+    label.textContent = libelle;
+    const champ = document.createElement("input");
+    champ.type = "number";
+    champ.id = id;
+    champ.min = minimum;
+    champ.value = valeur;
+    label.append(champ);
+    zone.append(label);
+  }
+  function ajouterChoixJoueur(id, libelle) {
+    const label = document.createElement("label");
+    label.textContent = libelle;
+    const champ = document.createElement("select");
+    champ.id = id;
+    for (const siege of client.sieges) {
+      if (siege.joueur === client.monSiege || !siege.actif) continue;
+      const option = document.createElement("option");
+      option.value = siege.joueur;
+      option.textContent = nomDuJoueur(siege.joueur);
+      champ.append(option);
+    }
+    label.append(champ);
+    zone.append(label);
+  }
+
+  if (article.quantite) ajouterChampNombre("achat-quantite", "Quantité", 5, 1);
+  if (article.montant) ajouterChampNombre("achat-montant", "Montant", 100, 1);
+  if (article.joueur) ajouterChoixJoueur("achat-joueur", "Bénéficiaire");
+  if (article.allie) ajouterChoixJoueur("achat-allie", "Allié (IA)");
+  if (article.cible) ajouterChoixJoueur("achat-cible", "Contre");
+  if (article.merveille) {
+    const label = document.createElement("label");
+    label.textContent = "Merveille";
+    const champ = document.createElement("select");
+    champ.id = "achat-merveille";
+    for (const [type, nom] of Object.entries(MERVEILLES)) {
+      if (Object.keys(client.etat.wonder_territories).includes(type)) continue;
+      const option = document.createElement("option");
+      option.value = type;
+      option.textContent = nom;
+      champ.append(option);
+    }
+    label.append(champ);
+    zone.append(label);
+  }
+  if (!article.cibles) {
+    // Aucun clic de carte requis : un bouton d'envoi direct.
+    const valider = document.createElement("button");
+    valider.type = "button";
+    valider.textContent = "Valider l'achat";
+    valider.addEventListener("click", envoyerAchat);
+    zone.append(valider);
+  }
+}
+
+function afficherConsigneBoutique() {
+  const zone = $("consigne-boutique");
+  const article = client.achat;
+  if (!article) {
+    zone.textContent = "Choisis un article.";
+    return;
+  }
+  if (article.cibles) {
+    const etape = client.territoiresAchat.length;
+    const consigne = CONSIGNES_CIBLE[article.cibles[etape]] || "clique un territoire";
+    const suffixe = article.cibles.length > 1
+      ? ` (${etape + 1}/${article.cibles.length})` : "";
+    zone.textContent = `${article.libelle} : ${consigne}${suffixe}.`;
+  } else {
+    zone.textContent = `${article.libelle} : complète puis valide.`;
+  }
+}
+
+function envoyerAchat() {
+  const article = client.achat;
+  if (!article) return;
+  const action = { type: "acheter", achat: article.id };
+  if (article.cibles) {
+    action.territoire = client.territoiresAchat[0];
+    if (article.cibles.length > 1) action.territoire_b = client.territoiresAchat[1];
+  }
+  if (article.quantite) action.quantite = Number($("achat-quantite").value);
+  if (article.montant) action.montant = Number($("achat-montant").value);
+  if (article.joueur) action.joueur = Number($("achat-joueur").value);
+  if (article.allie) action.allie = Number($("achat-allie").value);
+  if (article.cible) action.cible = Number($("achat-cible").value);
+  if (article.merveille) action.merveille = $("achat-merveille").value;
+  client.territoiresAchat = [];  // l'article reste choisi pour enchaîner
+  envoyerAction(action);
+  afficherConsigneBoutique();
+}
+
+function clicCarteBoutique(tid) {
+  const article = client.achat;
+  if (!article || !article.cibles || tid === null) return false;
+  const attendu = article.cibles[client.territoiresAchat.length];
+  const proprietaire = client.etat.territories_state[tid].owner;
+  if (attendu === "mien" && proprietaire !== client.monSiege) return false;
+  if (attendu === "ennemi" && proprietaire === client.monSiege) return false;
+  client.territoiresAchat.push(tid);
+  if (client.territoiresAchat.length >= article.cibles.length) {
+    envoyerAchat();
+  } else {
+    afficherConsigneBoutique();
+  }
+  return true;
 }
 
 $("bouton-jouer-siege").addEventListener("click", () => {
@@ -1043,6 +1257,11 @@ function traiterClicTerritoire(tid, boutonDroit) {
   const source = client.selection;
   const situation = tid !== null ? etat.territories_state[tid] : null;
   const aMoi = situation !== null && situation.owner === client.monSiege;
+
+  // Phase d'achats : le clic gauche sert d'abord la boutique.
+  if (enPhaseAchats() && !boutonDroit && clicCarteBoutique(tid)) {
+    return;
+  }
 
   if (aMonTour() && etat.phase === "playing" && tid !== null) {
     if (!boutonDroit && tid === source) {

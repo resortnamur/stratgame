@@ -385,6 +385,28 @@ Vérifié en direct dans le navigateur sur une partie neuve : attaque avec
 dés au journal, phases, déplacement compté 1/5, fin de tour → tours IA
 **et cité commerçante** joués, revenus perçus au tour 2, barre masquée
 quand ce n'est pas son tour. Couche serveur inchangée (20 tests verts).
-#### 3c — Boutique et panneaux détaillés ⬜ (achats, aperçus revenus,
-événements majeurs, religions/science/culture)
+#### 3c — Boutique ✅ (2026-07-23)
+
+Panneau « Boutique » dans la colonne de droite, visible pendant sa phase
+d'achats — mêmes articles, prix et flux que le « Marché des achats » de
+x45, piloté par un catalogue déclaratif (`CATALOGUE_ACHATS`) :
+- clic sur un article puis clic(s) sur la carte selon ses cibles
+  (mien/ennemi/tout, deux clics pour les ponts), consigne affichée à
+  chaque étape ; l'article reste choisi pour enchaîner ; re-clic = déselection ;
+- champs contextuels : quantité (mercenaires), montant + bénéficiaire
+  (don d'argent, avec bouton « Valider »), bénéficiaire (don de
+  territoire), allié/cible (alliance offensive), choix de la merveille
+  (les 4, déjà construites masquées) ;
+- articles à prix fixe grisés si le trésor ne suffit pas (re-grisage
+  après chaque achat) ; ponts cachés sous 150 de science, comme x45 ;
+- les messages de la boutique du moteur (succès **et refus**) s'affichent
+  au journal — le refus d'achat montre le texte exact (« Impossible de
+  corrompre une cité commerçante. ») plutôt qu'un code.
+
+Vérifié en direct : mercenaires ×2 (trésor décompté, régiments ajoutés,
+re-grisage), refus de corruption avec texte, don d'argent à l'IA via
+« Valider ». Couche serveur inchangée.
+
+#### 3d — Panneaux d'information ⬜ (aperçus revenus/culture/science,
+événements majeurs, panneau empire/géopolitique de x45)
 ### Étape 4 — Déploiement gratuit (Render/Fly.io ; réveil ~30 s, état en base) ⬜

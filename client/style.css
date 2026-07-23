@@ -160,6 +160,45 @@ header {
 
 #detail-territoire { font-size: 0.9rem; line-height: 1.5; }
 
+/* --- Boutique -------------------------------------------------------- */
+
+#boutons-boutique {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+#boutons-boutique button {
+  font-size: 0.72rem;
+  padding: 5px 6px;
+  background: rgb(52, 73, 94);
+  text-align: center;
+}
+#boutons-boutique button.choisi { background: rgb(84, 153, 199); }
+#boutons-boutique button.special { background: rgb(102, 76, 36); }
+#boutons-boutique button.onu { background: rgb(62, 82, 110); }
+#boutons-boutique button:disabled {
+  background: rgb(44, 52, 60);
+  color: rgb(135, 140, 145);
+  cursor: default;
+}
+
+#params-boutique { display: grid; gap: 6px; margin-top: 8px; }
+#params-boutique label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+#params-boutique input, #params-boutique select { max-width: 150px; }
+
+#consigne-boutique {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: rgb(244, 208, 63);
+  min-height: 1.2em;
+}
+
 .panneau-chat #messages-chat,
 .panneau-journal #journal {
   height: 150px;
