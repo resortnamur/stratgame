@@ -208,7 +208,7 @@ même joueur IA des deux côtés et joue le tour entier avec le même germe —
 
 **L'étape 1 est terminée : le moteur est complet et autonome.**
 
-### Étape 2 — Serveur (FastAPI + WebSockets, lobby, persistance) 🔶 (en cours)
+### Étape 2 — Serveur (FastAPI + WebSockets, lobby, persistance) ✅ (2026-07-23)
 
 #### 2a — Cœur du serveur ✅ (2026-07-22)
 
@@ -291,5 +291,8 @@ Tests : `tests/test_serveur.py` passe à 18 tests — registre (unicité,
 persistance), réservations (reconnexion, refus typés), et côté WS :
 reconnexion après coupure, remplacement de connexion, chat, quitter le
 siège, refus `identite_requise`/`jeton_inconnu`.
+**L'étape 2 est terminée : le serveur couvre lobby, parties, jeu en direct
+et identités.**
+
 ### Étape 3 — Client web (canvas, écran par écran) ⬜
 ### Étape 4 — Déploiement gratuit (Render/Fly.io ; réveil ~30 s, état en base) ⬜
