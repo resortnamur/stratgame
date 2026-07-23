@@ -122,6 +122,7 @@ header {
 #carte {
   width: 100%;
   height: auto;
+  aspect-ratio: 1200 / 620;
   display: block;
   border: 1px solid rgb(52, 73, 94);
   border-radius: 6px;

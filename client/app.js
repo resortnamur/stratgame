@@ -336,6 +336,9 @@ function traiterMessage(message) {
       client.monSiege = message.joueur;
       client.etat = message.etat;
       client.actionDepuis = null;
+      // La présence détaillée suit immédiatement ; en attendant on connaît
+      // au moins les réservations.
+      client.sieges = (message.sieges || []).map((s) => ({ connecte: false, ...s }));
       if (message.joueur !== null) {
         journal(`Assis au siège ${message.joueur}.`);
       }
@@ -345,6 +348,8 @@ function traiterMessage(message) {
       client.sieges = message.sieges;
       client.spectateurs = message.spectateurs;
       afficherSieges();
+      afficherBarreActions();
+      afficherEnTete();
       break;
     case "resultat":
       client.etat = message.etat;
@@ -429,10 +434,17 @@ function limiteDeplacements(etat) {
   return possessions >= 10 ? 10 : 5;
 }
 
+function joueurAutomatique(etat, joueur) {
+  // IA de base, joueur repris par l'IA ou cité commerçante.
+  return (etat.base_ai_players || []).includes(joueur)
+    || (etat.auto_controlled_players || []).includes(joueur)
+    || (etat.commercial_city_players || []).includes(joueur);
+}
+
 function afficherBarreActions() {
   const etat = client.etat;
   const barre = $("barre-actions");
-  if (!etat || !aMonTour()) {
+  if (!etat || etat.phase === "victory") {
     barre.hidden = true;
     return;
   }
@@ -440,22 +452,54 @@ function afficherBarreActions() {
   const enAttaque = etat.phase === "playing" && etat.turn_phase === "attack";
   const enAchats = etat.phase === "shopping";
   const enDeplacement = etat.phase === "playing" && etat.turn_phase === "move";
-  $("bouton-fin-attaque").hidden = !enAttaque;
-  $("bouton-fin-achats").hidden = !enAchats;
-  $("bouton-fin-tour").hidden = !enDeplacement;
-  if (enAttaque) {
+  const monTour = aMonTour();
+  $("bouton-fin-attaque").hidden = !(monTour && enAttaque);
+  $("bouton-fin-achats").hidden = !(monTour && enAchats);
+  $("bouton-fin-tour").hidden = !(monTour && enDeplacement);
+  $("bouton-jouer-siege").hidden = true;
+
+  if (monTour) {
+    if (enAttaque) {
+      $("indication-phase").textContent =
+        "À toi ! Clique un de tes territoires puis une cible : " +
+        "clic gauche = une passe, clic droit = assaut total.";
+    } else if (enAchats) {
+      $("indication-phase").textContent =
+        "Phase d'achats (boutique à venir dans le client web).";
+    } else if (enDeplacement) {
+      $("indication-phase").textContent =
+        `Déplacements : ${etat.turn_move_count}/${limiteDeplacements(etat)} — ` +
+        "clique une source puis une destination (1 régiment par clic).";
+    }
+    return;
+  }
+
+  // Pas mon tour : dire clairement ce qu'on attend, et proposer de jouer
+  // le siège au trait s'il est humain et sans personne (mode « chacun son
+  // tour sur le même écran », comme x45).
+  const courant = etat.current_player;
+  const siege = client.sieges.find((s) => s.joueur === courant);
+  if (joueurAutomatique(etat, courant)) {
+    $("indication-phase").textContent = `Tour de ${nomDuJoueur(courant)} (IA)…`;
+  } else if (siege && siege.nom && siege.connecte) {
+    $("indication-phase").textContent = `Tour de ${siege.nom}…`;
+  } else if (siege && siege.nom) {
     $("indication-phase").textContent =
-      "À toi ! Clique un de tes territoires puis une cible : " +
-      "clic gauche = une passe, clic droit = assaut total.";
-  } else if (enAchats) {
+      `En attente de ${siege.nom} (déconnecté) — son siège lui reste réservé.`;
+  } else {
     $("indication-phase").textContent =
-      "Phase d'achats (boutique à venir dans le client web).";
-  } else if (enDeplacement) {
-    $("indication-phase").textContent =
-      `Déplacements : ${etat.turn_move_count}/${limiteDeplacements(etat)} — ` +
-      "clique une source puis une destination (1 régiment par clic).";
+      `En attente du siège ${courant} (libre).`;
+    $("bouton-jouer-siege").hidden = false;
   }
 }
+
+$("bouton-jouer-siege").addEventListener("click", () => {
+  const etat = client.etat;
+  if (!etat) return;
+  // Basculer de siège : on libère le sien puis on prend celui au trait.
+  if (client.monSiege !== null) envoyer({ type: "quitter_siege" });
+  envoyer({ type: "prendre_siege", joueur: etat.current_player });
+});
 
 $("bouton-fin-attaque").addEventListener("click", () =>
   envoyerAction({ type: "terminer_attaque" }));
@@ -676,10 +720,33 @@ function centreTerritoire(etat, territoire) {
   return [sommeR / cellules.length, sommeC / cellules.length];
 }
 
+function ajusterResolutionCarte() {
+  // Le canvas est rendu au nombre réel de pixels affichés (netteté sur les
+  // écrans mis à l'échelle par Windows) ; le dessin reste en repère logique
+  // 1200×620 grâce à la transformation.
+  const carte = $("carte");
+  const cadre = carte.getBoundingClientRect();
+  if (!cadre.width) return;
+  const dpr = window.devicePixelRatio || 1;
+  const largeur = Math.round(cadre.width * dpr);
+  const hauteur = Math.round(cadre.width * dpr * (HAUTEUR_CARTE / LARGEUR_CARTE));
+  if (carte.width !== largeur || carte.height !== hauteur) {
+    carte.width = largeur;
+    carte.height = hauteur;
+  }
+}
+
+window.addEventListener("resize", () => dessinerCarte());
+
 function dessinerCarte() {
   const etat = client.etat;
   if (!etat) return;
-  const contexte = $("carte").getContext("2d");
+  ajusterResolutionCarte();
+  const carte = $("carte");
+  const contexte = carte.getContext("2d");
+  contexte.setTransform(
+    carte.width / LARGEUR_CARTE, 0, 0, carte.height / HAUTEUR_CARTE, 0, 0,
+  );
   const largeurCellule = LARGEUR_CARTE / etat.cols;
   const hauteurCellule = HAUTEUR_CARTE / etat.rows;
   const grille = etat.grid_territory;

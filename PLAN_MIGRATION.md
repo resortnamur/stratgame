@@ -352,6 +352,18 @@ Robustesse (retour du premier essai réel — interface muette) :
   `parties_en_cours/` (x45 et les tests y sondent tous les .json) ;
 - bouton « Créer la partie » inactif tant que le catalogue n'est pas chargé.
 
+Retours du deuxième essai réel :
+- la barre d'état est **permanente** : elle dit toujours à qui est le tour
+  (« Tour de IA 3… », « En attente du siège 7 (libre) », « En attente de
+  Bob (déconnecté) ») — fini le silence quand ce n'est pas son tour ;
+- bouton **« Jouer ce siège »** quand le siège au trait est humain et
+  libre : bascule quitter+prendre — le mode « chacun son tour sur le même
+  écran » des sauvegardes x45 multi-humains marche en solo ;
+- **netteté** : canvas rendu au nombre réel de pixels affichés
+  (devicePixelRatio, redessiné au redimensionnement), dessin en repère
+  logique 1200×620 via transformation — plus de flou d'étirement ;
+- cache-busting `?v=n` sur app.js/style.css.
+
 Vérifié en direct dans le navigateur sur une partie neuve : attaque avec
 dés au journal, phases, déplacement compté 1/5, fin de tour → tours IA
 **et cité commerçante** joués, revenus perçus au tour 2, barre masquée

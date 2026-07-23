@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <title>Jeux Strat</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="style.css">
+<!-- ?v=... force le navigateur à reprendre les fichiers après une mise à jour -->
+<link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
 
@@ -76,6 +77,7 @@
     <div class="zone-carte">
       <div id="barre-actions" hidden>
         <span id="indication-phase"></span>
+        <button id="bouton-jouer-siege" hidden>Jouer ce siège</button>
         <button id="bouton-fin-attaque" hidden>Terminer l'attaque</button>
         <button id="bouton-fin-achats" hidden>Terminer les achats</button>
         <button id="bouton-fin-tour" hidden>Fin de tour</button>
@@ -109,6 +111,6 @@
   </div>
 </section>
 
-<script src="app.js"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>
