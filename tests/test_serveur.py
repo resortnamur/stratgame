@@ -1,10 +1,11 @@
-"""Tests du serveur (etape 2a) : sessions de partie et couche FastAPI.
+"""Tests du serveur (etapes 2a-2c) : sessions, lobby et couche FastAPI.
 
-Deux niveaux, comme le code :
+Trois niveaux, comme le code :
+- ``RegistreJoueurs`` : identites persistantes (nom + jeton, fichier) ;
 - ``SessionPartie`` / ``GestionnaireParties`` en direct (sans HTTP) :
-  arbitrage des droits, enchainement des tours IA, sauvegarde aller-retour ;
+  arbitrage des droits, reservation des sieges, tours IA, sauvegarde ;
 - l'application FastAPI via son TestClient : REST du lobby et protocole
-  WebSocket (rejoindre, agir, refus, diffusion, presence).
+  WebSocket (rejoindre, reconnexion, chat, refus, diffusion, presence).
 
 Lancement : ``python -m unittest tests.test_serveur -v`` depuis ``Jeux Strat``.
 """
@@ -18,6 +19,7 @@ from fastapi.testclient import TestClient
 
 from moteur import regles
 from serveur.app import creer_app
+from serveur.joueurs import RegistreJoueurs
 from serveur.partie import GestionnaireParties, SessionPartie
 
 RACINE = Path(__file__).resolve().parent.parent
@@ -47,7 +49,63 @@ def sauvegarde_avec_humain_au_trait() -> Path:
     raise unittest.SkipTest("Aucune sauvegarde avec un humain au trait.")
 
 
+class TestRegistreJoueurs(unittest.TestCase):
+    def test_inscription_et_persistance(self):
+        with tempfile.TemporaryDirectory() as dossier:
+            fichier = Path(dossier) / "joueurs.json"
+            registre = RegistreJoueurs(fichier)
+            alice = registre.inscrire("  Alice   Dupont ")
+            self.assertEqual(alice["nom"], "Alice Dupont")
+            self.assertEqual(registre.nom_par_jeton(alice["jeton"]), "Alice Dupont")
+            # Unicite (insensible a la casse) et noms irrecevables.
+            with self.assertRaises(ValueError):
+                registre.inscrire("alice dupont")
+            with self.assertRaises(ValueError):
+                registre.inscrire("   ")
+            with self.assertRaises(ValueError):
+                registre.inscrire("x" * 40)
+            with self.assertRaises(ValueError):
+                registre.inscrire(None)
+            # Persistance : un registre neuf relit le fichier.
+            recharge = RegistreJoueurs(fichier)
+            self.assertEqual(recharge.nom_par_jeton(alice["jeton"]), "Alice Dupont")
+            with self.assertRaises(ValueError):
+                recharge.inscrire("Alice Dupont")
+            self.assertIsNone(recharge.nom_par_jeton("inexistant"))
+
+
 class TestSessionPartie(unittest.TestCase):
+    def test_reservation_de_sieges(self):
+        session = SessionPartie.depuis_fichier("p1", premiere_sauvegarde(), seed=RANDOM_SEED)
+        libres = session.sieges_humains_libres()
+        self.assertTrue(libres)
+        siege = libres[0]
+
+        self.assertEqual(session.reserver_siege(siege, "jeton-a", "Alice"), (True, "ok"))
+        # Re-reserver son siege est la reconnexion : accepte.
+        self.assertEqual(session.reserver_siege(siege, "jeton-a", "Alice"), (True, "ok"))
+        # Un siege pris, un siege inconnu, un deuxieme siege : refuses.
+        self.assertEqual(
+            session.reserver_siege(siege, "jeton-b", "Bob"), (False, "siege_indisponible"),
+        )
+        self.assertEqual(
+            session.reserver_siege(999, "jeton-b", "Bob"), (False, "siege_indisponible"),
+        )
+        if len(libres) > 1:
+            self.assertEqual(
+                session.reserver_siege(libres[1], "jeton-a", "Alice"),
+                (False, "deja_un_siege"),
+            )
+
+        self.assertEqual(session.siege_de("jeton-a"), siege)
+        self.assertNotIn(siege, session.sieges_humains_libres())
+        descriptif = next(s for s in session.sieges() if s["joueur"] == siege)
+        self.assertEqual(descriptif["nom"], "Alice")
+
+        self.assertEqual(session.liberer_siege("jeton-a"), siege)
+        self.assertIsNone(session.liberer_siege("jeton-a"))
+        self.assertIn(siege, session.sieges_humains_libres())
+
     def test_chargement_et_resume(self):
         session = SessionPartie.depuis_fichier("p1", premiere_sauvegarde(), seed=RANDOM_SEED)
         resume = session.resume()
@@ -167,11 +225,25 @@ class TestSessionPartie(unittest.TestCase):
 
 class TestApplicationWeb(unittest.TestCase):
     def setUp(self):
-        self.app = creer_app(DOSSIER_PARTIES, DOSSIER_CARTES)
+        # Le registre des joueurs ecrit un fichier : il va dans un dossier
+        # temporaire pour ne pas polluer parties_en_cours.
+        self._dossier_temp = tempfile.TemporaryDirectory()
+        self.app = creer_app(
+            DOSSIER_PARTIES, DOSSIER_CARTES,
+            fichier_joueurs=Path(self._dossier_temp.name) / "joueurs.json",
+        )
         self.client = TestClient(self.app)
+
+    def tearDown(self):
+        self._dossier_temp.cleanup()
 
     def ouvrir_partie(self, fichier: str) -> dict:
         reponse = self.client.post("/api/parties", json={"sauvegarde": fichier, "seed": RANDOM_SEED})
+        self.assertEqual(reponse.status_code, 200)
+        return reponse.json()
+
+    def inscrire(self, nom: str) -> dict:
+        reponse = self.client.post("/api/joueurs", json={"nom": nom})
         self.assertEqual(reponse.status_code, 200)
         return reponse.json()
 
@@ -221,22 +293,40 @@ class TestApplicationWeb(unittest.TestCase):
             "carte": "inconnue.json", "joueurs": 4,
         }).status_code, 404)
 
+    def test_rest_inscription(self):
+        alice = self.inscrire("Alice")
+        self.assertIn("jeton", alice)
+        self.assertEqual(alice["nom"], "Alice")
+        # Nom deja pris (insensible a la casse) et noms irrecevables.
+        self.assertEqual(
+            self.client.post("/api/joueurs", json={"nom": "alice"}).status_code, 409,
+        )
+        self.assertEqual(
+            self.client.post("/api/joueurs", json={"nom": "   "}).status_code, 422,
+        )
+        self.assertEqual(self.client.post("/api/joueurs", json={}).status_code, 422)
+
     def test_websocket_rejoindre_et_jouer(self):
         chemin = sauvegarde_avec_humain_au_trait()
         resume = self.ouvrir_partie(chemin.name)
         partie_id = resume["id"]
         joueur = resume["joueur_courant"]
+        alice = self.inscrire("Alice")
 
         with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws:
-            ws.send_json({"type": "rejoindre", "joueur": joueur})
+            ws.send_json({"type": "rejoindre", "jeton": alice["jeton"], "joueur": joueur})
             bienvenue = ws.receive_json()
             self.assertEqual(bienvenue["type"], "bienvenue")
             self.assertEqual(bienvenue["joueur"], joueur)
+            self.assertEqual(bienvenue["nom"], "Alice")
             self.assertEqual(bienvenue["etat"]["current_player"], joueur)
 
             presence = ws.receive_json()
             self.assertEqual(presence["type"], "presence")
-            self.assertEqual(presence["sieges_occupes"], [joueur])
+            siege = next(s for s in presence["sieges"] if s["joueur"] == joueur)
+            self.assertEqual(siege["nom"], "Alice")
+            self.assertTrue(siege["connecte"])
+            self.assertEqual(presence["spectateurs"], [])
 
             ws.send_json({"type": "action", "action": {"type": "terminer_attaque"}})
             resultat = ws.receive_json()
@@ -256,37 +346,151 @@ class TestApplicationWeb(unittest.TestCase):
         resume = self.ouvrir_partie(chemin.name)
         partie_id = resume["id"]
         joueur = resume["joueur_courant"]
+        alice = self.inscrire("Alice")
+        bob = self.inscrire("Bob")
 
         with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws1:
-            ws1.send_json({"type": "rejoindre", "joueur": joueur})
+            ws1.send_json({"type": "rejoindre", "jeton": alice["jeton"], "joueur": joueur})
             ws1.receive_json()  # bienvenue
             ws1.receive_json()  # presence
 
             with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws2:
-                # Le siege est deja pris.
+                # Un siege sans identite, un jeton inconnu : refuses.
                 ws2.send_json({"type": "rejoindre", "joueur": joueur})
+                self.assertEqual(ws2.receive_json()["code"], "identite_requise")
+                ws2.send_json({"type": "rejoindre", "jeton": "faux", "joueur": joueur})
+                self.assertEqual(ws2.receive_json()["code"], "jeton_inconnu")
+                # Le siege est deja reserve par Alice.
+                ws2.send_json({"type": "rejoindre", "jeton": bob["jeton"], "joueur": joueur})
                 self.assertEqual(ws2.receive_json()["code"], "siege_indisponible")
                 # Un siege IA est refuse aussi.
                 siege_ia = next(
                     (s["joueur"] for s in resume["sieges"] if s["ia"]), None,
                 )
                 if siege_ia is not None:
-                    ws2.send_json({"type": "rejoindre", "joueur": siege_ia})
+                    ws2.send_json({"type": "rejoindre", "jeton": bob["jeton"],
+                                   "joueur": siege_ia})
                     self.assertEqual(ws2.receive_json()["code"], "siege_indisponible")
-                # En spectateur : bienvenue sans siege, pas d'action possible.
+                # En spectateur anonyme : bienvenue sans siege ni nom, pas
+                # d'action ni de chat possibles.
                 ws2.send_json({"type": "rejoindre"})
                 bienvenue = ws2.receive_json()
                 self.assertEqual(bienvenue["type"], "bienvenue")
                 self.assertIsNone(bienvenue["joueur"])
+                self.assertIsNone(bienvenue["nom"])
                 ws1.receive_json()  # presence diffusee a ws1
-                ws2.receive_json()  # presence diffusee a ws2
+                presence = ws2.receive_json()  # presence diffusee a ws2
+                self.assertEqual(presence["spectateurs"], [None])
                 ws2.send_json({"type": "action", "action": {"type": "terminer_attaque"}})
                 self.assertEqual(ws2.receive_json()["code"], "spectateur")
+                ws2.send_json({"type": "chat", "texte": "coucou"})
+                self.assertEqual(ws2.receive_json()["code"], "identite_requise")
 
                 # Le spectateur voit les resultats du joueur actif.
                 ws1.send_json({"type": "action", "action": {"type": "terminer_attaque"}})
                 self.assertEqual(ws1.receive_json()["type"], "resultat")
                 self.assertEqual(ws2.receive_json()["type"], "resultat")
+
+    def test_websocket_reconnexion(self):
+        chemin = sauvegarde_avec_humain_au_trait()
+        resume = self.ouvrir_partie(chemin.name)
+        partie_id = resume["id"]
+        joueur = resume["joueur_courant"]
+        alice = self.inscrire("Alice")
+        bob = self.inscrire("Bob")
+
+        with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws:
+            ws.send_json({"type": "rejoindre", "jeton": alice["jeton"], "joueur": joueur})
+            ws.receive_json()  # bienvenue
+            ws.receive_json()  # presence
+
+        # Alice est deconnectee : son siege lui reste reserve.
+        with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws_bob:
+            ws_bob.send_json({"type": "rejoindre", "jeton": bob["jeton"], "joueur": joueur})
+            self.assertEqual(ws_bob.receive_json()["code"], "siege_indisponible")
+
+        # Elle revient avec son seul jeton et retrouve son siege.
+        with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws:
+            ws.send_json({"type": "rejoindre", "jeton": alice["jeton"]})
+            bienvenue = ws.receive_json()
+            self.assertEqual(bienvenue["type"], "bienvenue")
+            self.assertEqual(bienvenue["joueur"], joueur)
+            presence = ws.receive_json()
+            siege = next(s for s in presence["sieges"] if s["joueur"] == joueur)
+            self.assertEqual((siege["nom"], siege["connecte"]), ("Alice", True))
+
+    def test_websocket_remplacement_de_connexion(self):
+        chemin = sauvegarde_avec_humain_au_trait()
+        resume = self.ouvrir_partie(chemin.name)
+        partie_id = resume["id"]
+        joueur = resume["joueur_courant"]
+        alice = self.inscrire("Alice")
+
+        with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws1:
+            ws1.send_json({"type": "rejoindre", "jeton": alice["jeton"], "joueur": joueur})
+            ws1.receive_json()  # bienvenue
+            ws1.receive_json()  # presence
+
+            # La meme identite se connecte ailleurs : elle garde son siege,
+            # l'ancienne connexion est fermee par le serveur.
+            with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws2:
+                ws2.send_json({"type": "rejoindre", "jeton": alice["jeton"]})
+                bienvenue = ws2.receive_json()
+                self.assertEqual(bienvenue["joueur"], joueur)
+                with self.assertRaises(Exception):
+                    ws1.receive_json()
+
+    def test_websocket_chat_et_quitter_siege(self):
+        chemin = sauvegarde_avec_humain_au_trait()
+        resume = self.ouvrir_partie(chemin.name)
+        partie_id = resume["id"]
+        joueur = resume["joueur_courant"]
+        alice = self.inscrire("Alice")
+        bob = self.inscrire("Bob")
+
+        with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws1:
+            ws1.send_json({"type": "rejoindre", "jeton": alice["jeton"], "joueur": joueur})
+            ws1.receive_json()  # bienvenue
+            ws1.receive_json()  # presence
+
+            with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws2:
+                ws2.send_json({"type": "rejoindre", "jeton": bob["jeton"]})
+                bienvenue = ws2.receive_json()
+                self.assertIsNone(bienvenue["joueur"])
+                self.assertEqual(bienvenue["nom"], "Bob")
+                ws1.receive_json()  # presence
+                presence = ws2.receive_json()
+                self.assertEqual(presence["spectateurs"], ["Bob"])
+
+                # Le chat est diffuse a tous, spectateur identifie compris.
+                ws2.send_json({"type": "chat", "texte": "  Salut !  "})
+                for ws in (ws1, ws2):
+                    chat = ws.receive_json()
+                    self.assertEqual(chat["type"], "chat")
+                    self.assertEqual(chat["nom"], "Bob")
+                    self.assertIsNone(chat["joueur"])
+                    self.assertEqual(chat["texte"], "Salut !")
+                ws1.send_json({"type": "chat", "texte": "Bienvenue"})
+                for ws in (ws1, ws2):
+                    chat = ws.receive_json()
+                    self.assertEqual((chat["nom"], chat["joueur"]), ("Alice", joueur))
+
+                # Alice libere son siege : Bob peut le prendre... apres
+                # avoir quitte son role de spectateur (une seule connexion).
+                ws1.send_json({"type": "quitter_siege"})
+                self.assertEqual(ws1.receive_json()["type"], "siege_quitte")
+                presence = ws1.receive_json()
+                siege = next(s for s in presence["sieges"] if s["joueur"] == joueur)
+                self.assertEqual((siege["nom"], siege["connecte"]), (None, False))
+                ws2.receive_json()  # meme presence pour Bob
+                ws1.send_json({"type": "quitter_siege"})
+                self.assertEqual(ws1.receive_json()["code"], "aucun_siege")
+
+            # Bob revient et reserve le siege libere.
+            with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws3:
+                ws3.send_json({"type": "rejoindre", "jeton": bob["jeton"], "joueur": joueur})
+                bienvenue = ws3.receive_json()
+                self.assertEqual((bienvenue["joueur"], bienvenue["nom"]), (joueur, "Bob"))
 
     def test_sauvegarde_via_api(self):
         with tempfile.TemporaryDirectory() as dossier:

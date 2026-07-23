@@ -23,6 +23,8 @@ from typing import Any, Callable, Dict, List, Optional
 from moteur import actions, mise_en_place, regles
 from moteur.etat import GameState
 
+from .joueurs import RegistreJoueurs
+
 # Dimensions logiques d'une cellule, heritees de la zone de carte de x45
 # (1200 x 620 pixels) : la geometrie des ponts est exprimee en pixels dans
 # les sauvegardes, on garde donc le meme repere que x45 et les tests.
@@ -72,6 +74,9 @@ class SessionPartie:
         self.lock = threading.Lock()
         self.cell_width = LOGICAL_MAP_WIDTH / state.cols
         self.cell_height = LOGICAL_MAP_HEIGHT / state.rows
+        # Sieges reserves par identite : joueur -> {"jeton", "nom"}. La
+        # reservation survit a la deconnexion (le jeton permet de revenir).
+        self.reservations: Dict[int, Dict[str, str]] = {}
 
     # ------------------------------------------------------------------
     # Chargement / sauvegarde
@@ -130,23 +135,60 @@ class SessionPartie:
     # ------------------------------------------------------------------
 
     def sieges(self) -> List[Dict[str, Any]]:
-        """Un descriptif par joueur : humain/IA, actif, eliminable au lobby."""
+        """Un descriptif par joueur : humain/IA, actif, nom du reservataire."""
         actifs = set(regles.get_active_players(self.state))
         return [
             {
                 "joueur": player,
                 "ia": regles.is_ai_player(self.state, player),
                 "actif": player in actifs,
+                "nom": self.reservations.get(player, {}).get("nom"),
             }
             for player in range(self.state.num_players)
         ]
 
-    def sieges_humains_libres(self, occupes: set) -> List[int]:
-        actifs = set(regles.get_active_players(self.state))
+    def sieges_humains_libres(self) -> List[int]:
         return [
             s["joueur"] for s in self.sieges()
-            if not s["ia"] and s["joueur"] in actifs and s["joueur"] not in occupes
+            if not s["ia"] and s["actif"] and s["joueur"] not in self.reservations
         ]
+
+    def siege_de(self, jeton: Optional[str]) -> Optional[int]:
+        """Le siege deja reserve par cette identite, s'il y en a un."""
+        for joueur, reservation in self.reservations.items():
+            if reservation["jeton"] == jeton:
+                return joueur
+        return None
+
+    def reserver_siege(self, joueur: Any, jeton: str, nom: str) -> tuple:
+        """Reserve un siege humain pour une identite ; retourne (ok, code).
+
+        Re-reserver son propre siege reussit (c'est la reconnexion) ; les
+        codes de refus : ``deja_un_siege`` (l'identite occupe un autre siege)
+        et ``siege_indisponible`` (siege inconnu, IA, elimine ou pris).
+        """
+        with self.lock:
+            deja = self.siege_de(jeton)
+            if deja is not None:
+                return (deja == joueur, "ok" if deja == joueur else "deja_un_siege")
+            if not isinstance(joueur, int) or not 0 <= joueur < self.state.num_players:
+                return (False, "siege_indisponible")
+            if (
+                regles.is_ai_player(self.state, joueur)
+                or joueur not in regles.get_active_players(self.state)
+                or joueur in self.reservations
+            ):
+                return (False, "siege_indisponible")
+            self.reservations[joueur] = {"jeton": jeton, "nom": nom}
+            return (True, "ok")
+
+    def liberer_siege(self, jeton: Optional[str]) -> Optional[int]:
+        """Libere le siege reserve par cette identite ; retourne le siege."""
+        with self.lock:
+            joueur = self.siege_de(jeton)
+            if joueur is not None:
+                del self.reservations[joueur]
+            return joueur
 
     def etat_reseau(self) -> Dict[str, Any]:
         """L'etat complet a diffuser aux clients, sans l'historique replay.
@@ -258,9 +300,14 @@ class SessionPartie:
 class GestionnaireParties:
     """Les parties ouvertes du serveur + les catalogues (sauvegardes, cartes)."""
 
-    def __init__(self, dossier_sauvegardes: Path, dossier_cartes: Optional[Path] = None) -> None:
+    def __init__(self, dossier_sauvegardes: Path, dossier_cartes: Optional[Path] = None,
+                 fichier_joueurs: Optional[Path] = None) -> None:
         self.dossier_sauvegardes = Path(dossier_sauvegardes)
         self.dossier_cartes = Path(dossier_cartes) if dossier_cartes is not None else None
+        self.registre = RegistreJoueurs(
+            fichier_joueurs if fichier_joueurs is not None
+            else self.dossier_sauvegardes / "joueurs.json"
+        )
         self.parties: Dict[str, SessionPartie] = {}
         self._compteur = 0
         self._lock = threading.Lock()

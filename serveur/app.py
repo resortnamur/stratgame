@@ -1,6 +1,9 @@
 """Application FastAPI du jeu : REST pour le lobby, WebSockets pour jouer.
 
 REST :
+- ``POST /api/joueurs``                — ``{"nom": "Alice"}`` cree une
+  identite persistante et retourne ``{"jeton": "...", "nom": "Alice"}`` ; le
+  client garde le jeton (localStorage) pour rejoindre et se reconnecter.
 - ``GET  /api/sauvegardes``            — sauvegardes chargeables.
 - ``GET  /api/cartes``                 — cartes pour une partie neuve.
 - ``GET  /api/parties``                — parties ouvertes (resume + sieges).
@@ -16,16 +19,24 @@ REST :
 WebSocket ``/ws/parties/{id}`` — messages JSON :
 
 Client vers serveur :
-- ``{"type": "rejoindre", "joueur": 2}`` — prend le siege du joueur 2 ;
-  ``{"type": "rejoindre"}`` sans joueur — spectateur.
+- ``{"type": "rejoindre", "jeton": "...", "joueur": 2}`` — reserve le siege
+  du joueur 2 pour cette identite. Le siege reste reserve apres une
+  deconnexion : ``{"type": "rejoindre", "jeton": "..."}`` suffit ensuite pour
+  le retrouver (reconnexion). Sans jeton du tout : spectateur anonyme. Si la
+  meme identite etait deja connectee, l'ancienne connexion est fermee (4000).
+- ``{"type": "quitter_siege"}`` — libere son siege (on reste spectateur).
 - ``{"type": "action", "action": {...}}`` — vocabulaire de
   ``moteur.actions.apply_action`` (attaquer, deplacer, acheter...).
 - ``{"type": "decision_soumission", "reponse": true}`` — reponse a une
   ``question_soumission``.
+- ``{"type": "chat", "texte": "..."}`` — message aux presents (identite
+  requise ; tronque a 500 caracteres).
 
 Serveur vers client :
-- ``{"type": "bienvenue", "joueur": 2|null, "etat": {...}, "sieges": [...]}``
-- ``{"type": "presence", "sieges_occupes": [..]}`` — a chaque arrivee/depart.
+- ``{"type": "bienvenue", "joueur": 2|null, "nom": "...", "etat": {...},
+     "sieges": [...]}``
+- ``{"type": "presence", "sieges": [{"joueur", "ia", "actif", "nom",
+     "connecte"}...], "spectateurs": [noms]}`` — a chaque arrivee/depart.
 - ``{"type": "resultat", "joueur": n, "action": {...}, "resultat": {...},
      "etat": {...}}`` — diffuse a tous apres chaque action acceptee (les
   tours IA joues dans la foulee sont dans ``resultat.rapports_ia``).
@@ -33,6 +44,8 @@ Serveur vers client :
 - ``{"type": "question_soumission", "territoire": id, "nom": "...",
      "regiments_vaincus": n}`` — au joueur attaquant seul, pendant une
   attaque de nation ; sans reponse sous ``DELAI_DECISION_S``, annexion.
+- ``{"type": "chat", "joueur": n|null, "nom": "...", "texte": "..."}``
+- ``{"type": "siege_quitte"}`` — accuse de reception de ``quitter_siege``.
 - ``{"type": "victoire", "vainqueur": n, "raison": "..."}``
 
 Le traitement d'une action tourne dans un thread (le moteur est synchrone) ;
@@ -64,6 +77,8 @@ class ConnexionClient:
 
     def __init__(self, websocket: WebSocket) -> None:
         self.websocket = websocket
+        self.jeton: Optional[str] = None
+        self.nom: Optional[str] = None
         self.joueur: Optional[int] = None
         self.action_en_cours = False
         self.decision_future: Optional[asyncio.Future] = None
@@ -79,11 +94,17 @@ class SallePartie:
         self.session = session
         self.connexions: list[ConnexionClient] = []
 
-    def sieges_occupes(self) -> list[int]:
-        return sorted(
-            connexion.joueur for connexion in self.connexions
-            if connexion.joueur is not None
-        )
+    def message_presence(self) -> Dict[str, Any]:
+        """Les sieges (reservataire, connecte ou non) et les spectateurs."""
+        connectes = {c.joueur for c in self.connexions if c.joueur is not None}
+        return {
+            "type": "presence",
+            "sieges": [
+                {**siege, "connecte": siege["joueur"] in connectes}
+                for siege in self.session.sieges()
+            ],
+            "spectateurs": [c.nom for c in self.connexions if c.joueur is None],
+        }
 
     async def diffuser(self, message: Dict[str, Any]) -> None:
         for connexion in list(self.connexions):
@@ -94,7 +115,7 @@ class SallePartie:
                 pass
 
     async def diffuser_presence(self) -> None:
-        await self.diffuser({"type": "presence", "sieges_occupes": self.sieges_occupes()})
+        await self.diffuser(self.message_presence())
 
     async def diffuser_resultat(
         self, joueur: int, action: Optional[Dict[str, Any]], resultat: ResultatAction,
@@ -115,12 +136,14 @@ class SallePartie:
 
 
 def creer_app(dossier_parties: Optional[Path] = None,
-              dossier_cartes: Optional[Path] = None) -> FastAPI:
-    """Construit l'application (dossiers injectables pour les tests)."""
+              dossier_cartes: Optional[Path] = None,
+              fichier_joueurs: Optional[Path] = None) -> FastAPI:
+    """Construit l'application (dossiers et registre injectables, tests)."""
     app = FastAPI(title="Jeux Strat - serveur de parties")
     gestionnaire = GestionnaireParties(
         dossier_parties or DOSSIER_PARTIES,
         dossier_cartes if dossier_cartes is not None else DOSSIER_CARTES,
+        fichier_joueurs=fichier_joueurs,
     )
     salles: Dict[str, SallePartie] = {}
     app.state.gestionnaire = gestionnaire
@@ -136,6 +159,14 @@ def creer_app(dossier_parties: Optional[Path] = None,
     # ------------------------------------------------------------------
     # REST
     # ------------------------------------------------------------------
+
+    @app.post("/api/joueurs")
+    def inscrire_joueur(corps: Dict[str, Any]):
+        try:
+            return gestionnaire.registre.inscrire(corps.get("nom"))
+        except ValueError as erreur:
+            code = 409 if str(erreur) == "nom_pris" else 422
+            raise HTTPException(status_code=code, detail=str(erreur))
 
     @app.get("/api/sauvegardes")
     def lister_sauvegardes():
@@ -276,24 +307,51 @@ def creer_app(dossier_parties: Optional[Path] = None,
                     if connexion in salle.connexions:
                         await connexion.envoyer({"type": "refus", "code": "deja_rejoint"})
                         continue
+                    # Chaque tentative repart de l'identite du message (une
+                    # tentative refusee ne doit pas laisser la precedente).
+                    jeton = message.get("jeton")
+                    connexion.jeton = connexion.nom = None
+                    if jeton is not None:
+                        nom = gestionnaire.registre.nom_par_jeton(jeton)
+                        if nom is None:
+                            await connexion.envoyer({"type": "refus", "code": "jeton_inconnu"})
+                            continue
+                        connexion.jeton, connexion.nom = jeton, nom
                     joueur = message.get("joueur")
+                    if joueur is None and connexion.jeton is not None:
+                        # Reconnexion : l'identite retrouve son siege reserve.
+                        joueur = session.siege_de(connexion.jeton)
                     if joueur is not None:
+                        if connexion.jeton is None:
+                            await connexion.envoyer({"type": "refus", "code": "identite_requise"})
+                            continue
                         try:
                             joueur = int(joueur)
                         except (TypeError, ValueError):
                             await connexion.envoyer({"type": "refus", "code": "siege_indisponible"})
                             continue
-                        if joueur not in session.sieges_humains_libres(set(salle.sieges_occupes())):
-                            await connexion.envoyer({"type": "refus", "code": "siege_indisponible"})
+                        ok, code = session.reserver_siege(joueur, connexion.jeton, connexion.nom)
+                        if not ok:
+                            await connexion.envoyer({"type": "refus", "code": code})
                             continue
                         connexion.joueur = joueur
+                    # Une meme identite n'a qu'une connexion : l'ancienne
+                    # (onglet oublie, coupure pas encore detectee) est fermee.
+                    if connexion.jeton is not None:
+                        for autre in list(salle.connexions):
+                            if autre is not connexion and autre.jeton == connexion.jeton:
+                                salle.connexions.remove(autre)
+                                try:
+                                    await autre.websocket.close(code=4000)
+                                except Exception:
+                                    pass
                     salle.connexions.append(connexion)
                     await connexion.envoyer({
                         "type": "bienvenue",
                         "joueur": connexion.joueur,
+                        "nom": connexion.nom,
                         "etat": session.etat_reseau(),
                         "sieges": session.sieges(),
-                        "sieges_occupes": salle.sieges_occupes(),
                     })
                     await salle.diffuser_presence()
                     # Si la sauvegarde chargee laissait une IA au trait, le
@@ -316,6 +374,28 @@ def creer_app(dossier_parties: Optional[Path] = None,
                         continue
                     connexion.action_en_cours = True
                     asyncio.create_task(traiter_action(action))
+
+                elif type_message == "quitter_siege":
+                    if connexion.joueur is None:
+                        await connexion.envoyer({"type": "refus", "code": "aucun_siege"})
+                        continue
+                    session.liberer_siege(connexion.jeton)
+                    connexion.joueur = None
+                    await connexion.envoyer({"type": "siege_quitte"})
+                    await salle.diffuser_presence()
+
+                elif type_message == "chat":
+                    if connexion not in salle.connexions or connexion.nom is None:
+                        await connexion.envoyer({"type": "refus", "code": "identite_requise"})
+                        continue
+                    texte = str(message.get("texte", "")).strip()[:500]
+                    if texte:
+                        await salle.diffuser({
+                            "type": "chat",
+                            "joueur": connexion.joueur,
+                            "nom": connexion.nom,
+                            "texte": texte,
+                        })
 
                 elif type_message == "decision_soumission":
                     future = connexion.decision_future

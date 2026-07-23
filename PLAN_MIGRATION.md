@@ -267,6 +267,29 @@ sérialisés identiques, y compris mode Tribus et premier début de tour ;
 plus un test d'autonomie (la partie neuve se joue seule au moteur pur).
 `tests/test_serveur.py` couvre le parcours serveur (12 tests).
 
-#### 2c — Lobby complet ⬜ (identités persistantes, reconnexion, chat ?)
+#### 2c — Lobby complet ✅ (2026-07-23)
+
+**`serveur/joueurs.py`** (nouveau) : `RegistreJoueurs` — identités
+persistantes. `POST /api/joueurs {"nom"}` crée une identité et retourne un
+**jeton secret** que le client conserve (localStorage) ; nom public unique
+(insensible à la casse, 24 caractères max), persistance dans un fichier JSON
+(`joueurs.json`, injectable pour les tests) relu au démarrage.
+
+**Sièges réservés par identité** (`SessionPartie.reserver_siege` /
+`liberer_siege` / `siege_de`) : le siège appartient au jeton, pas à la
+connexion — il **survit à la déconnexion**. `rejoindre` avec le seul jeton
+retrouve le siège (reconnexion) ; une identité = un siège et une connexion
+(la connexion fantôme du même jeton est fermée, code 4000). `sieges()`
+expose le nom du réservataire, le lobby l'affiche via `resume()`.
+
+**Protocole WS enrichi** : `rejoindre {jeton, joueur?}` (sans jeton :
+spectateur anonyme, sans droit de siège ni de chat), `quitter_siege`,
+`chat {texte}` (diffusé avec nom + siège, 500 caractères max) ; message
+`presence` détaillé : sièges avec `nom`/`connecte`, liste des spectateurs.
+
+Tests : `tests/test_serveur.py` passe à 18 tests — registre (unicité,
+persistance), réservations (reconnexion, refus typés), et côté WS :
+reconnexion après coupure, remplacement de connexion, chat, quitter le
+siège, refus `identite_requise`/`jeton_inconnu`.
 ### Étape 3 — Client web (canvas, écran par écran) ⬜
 ### Étape 4 — Déploiement gratuit (Render/Fly.io ; réveil ~30 s, état en base) ⬜
