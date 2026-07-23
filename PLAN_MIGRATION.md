@@ -238,12 +238,34 @@ tour complet + tours IA, aller-retour de sauvegarde ; couche web via
 TestClient : REST, WebSocket jouer/spectateur/sièges, sauvegarde API).
 Lancement manuel : `python -m uvicorn serveur.app:app --app-dir "Jeux Strat"`.
 
-#### 2b — Nouvelle partie côté serveur ⬜
+#### 2b — Nouvelle partie côté serveur ✅ (2026-07-23)
 
-Porter la mise en place de x45 dans le moteur (`setup_players`,
-`generate_grid_map` ou carte sauvegardée, `assign_initial_ownership_and_armies`,
-territoires bonus/dorés/sanctuaires, économie initiale) pour créer une
-partie neuve depuis le lobby, pas seulement recharger une sauvegarde.
+**`moteur/mise_en_place.py`** (nouveau) : la mise en place de
+`start_game_session` (x45) portée en fonctions pures — configuration des
+joueurs (miroir de `setup_players`, sans les questions), profils IA, cité
+commerçante initiale, distribution des territoires et armées (modes
+aléatoire **et Tribus**, BFS contigu), capitales initiales, territoires
+bonus +3 (avec le double appel de x45, fidélité RNG oblige), territoires
+dorés (essais à distance décroissante), sanctuaires ONU, remise à zéro de
+l'économie (champs du moteur uniquement — les mécaniques abandonnées
+n'existent plus dans `GameState`), structures initiales pondérées.
+Point d'entrée : `nouvelle_partie(carte_payload, num_players,
+ai_player_count, difficulty_level, tribes_mode, rng)` ; l'appelant enchaîne
+sur `actions.begin_player_turn`. `GameState.from_map_payload` charge une
+carte seule. La **génération aléatoire de cartes** (`generate_grid_map`,
+masques de terre) n'est pas portée : le serveur crée depuis les 42 cartes
+de `cartes_sauvegardees/`.
+
+**Serveur** : `GET /api/cartes`, et `POST /api/parties` accepte
+`{"carte": "Alpha.json", "joueurs": 4, "ia": 2, "mode": "normal",
+"tribus": false}` (`SessionPartie.nouvelle`, `GestionnaireParties.creer`).
+
+**Parité vérifiée contre x45-original** :
+`tests/test_parite_mise_en_place.py` rejoue la séquence complète des deux
+côtés (6 cartes représentatives × 3 configurations, même germe) — états
+sérialisés identiques, y compris mode Tribus et premier début de tour ;
+plus un test d'autonomie (la partie neuve se joue seule au moteur pur).
+`tests/test_serveur.py` couvre le parcours serveur (12 tests).
 
 #### 2c — Lobby complet ⬜ (identités persistantes, reconnexion, chat ?)
 ### Étape 3 — Client web (canvas, écran par écran) ⬜

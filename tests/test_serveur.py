@@ -22,6 +22,7 @@ from serveur.partie import GestionnaireParties, SessionPartie
 
 RACINE = Path(__file__).resolve().parent.parent
 DOSSIER_PARTIES = RACINE / "parties_en_cours"
+DOSSIER_CARTES = RACINE / "cartes_sauvegardees"
 RANDOM_SEED = 20260722
 
 
@@ -127,7 +128,7 @@ class TestSessionPartie(unittest.TestCase):
             )
 
     def test_gestionnaire(self):
-        gestionnaire = GestionnaireParties(DOSSIER_PARTIES)
+        gestionnaire = GestionnaireParties(DOSSIER_PARTIES, DOSSIER_CARTES)
         sauvegardes = gestionnaire.lister_sauvegardes()
         self.assertTrue(sauvegardes)
         self.assertIn("fichier", sauvegardes[0])
@@ -137,10 +138,36 @@ class TestSessionPartie(unittest.TestCase):
             gestionnaire.ouvrir("../x45.py")
         self.assertTrue(gestionnaire.fermer(session.id))
 
+    def test_partie_neuve_depuis_une_carte(self):
+        gestionnaire = GestionnaireParties(DOSSIER_PARTIES, DOSSIER_CARTES)
+        cartes = gestionnaire.lister_cartes()
+        self.assertTrue(cartes)
+        self.assertNotIn("partie_001.json", {carte["fichier"] for carte in cartes})
+
+        session = gestionnaire.creer(
+            cartes[0]["fichier"], num_players=4, ai_player_count=2, seed=RANDOM_SEED,
+        )
+        state = session.state
+        self.assertEqual(state.phase, "playing")
+        self.assertEqual((state.current_player, state.turn), (0, 1))
+        # 4 joueurs choisis + 1 cite commercante, tous actifs sur la carte.
+        self.assertEqual(state.num_players, 5)
+        self.assertEqual(len(regles.get_active_players(state)), 5)
+        self.assertEqual(len(state.golden_territory_ids), 4)
+        self.assertEqual(len(state.sanctuary_territory_ids), 3)
+        # Chaque joueur ordinaire a sa capitale.
+        self.assertEqual(sorted(state.player_capital_ids), [0, 1, 2, 3])
+        # L'etat est serialisable et rechargeable.
+        recharge = SessionPartie("p2", type(state).from_payload(state.to_payload()))
+        self.assertEqual(recharge.state.num_players, 5)
+
+        with self.assertRaises(ValueError):
+            gestionnaire.creer(cartes[0]["fichier"], num_players=1, ai_player_count=0)
+
 
 class TestApplicationWeb(unittest.TestCase):
     def setUp(self):
-        self.app = creer_app(DOSSIER_PARTIES)
+        self.app = creer_app(DOSSIER_PARTIES, DOSSIER_CARTES)
         self.client = TestClient(self.app)
 
     def ouvrir_partie(self, fichier: str) -> dict:
@@ -169,6 +196,30 @@ class TestApplicationWeb(unittest.TestCase):
             "/api/parties", json={"sauvegarde": "inexistante.json"},
         ).status_code, 404)
         self.assertEqual(self.client.get("/api/parties/absente/etat").status_code, 404)
+
+    def test_rest_partie_neuve(self):
+        reponse = self.client.get("/api/cartes")
+        self.assertEqual(reponse.status_code, 200)
+        cartes = reponse.json()["cartes"]
+        self.assertTrue(cartes)
+
+        reponse = self.client.post("/api/parties", json={
+            "carte": cartes[0]["fichier"], "joueurs": 4, "ia": 2,
+            "mode": "normal", "seed": RANDOM_SEED,
+        })
+        self.assertEqual(reponse.status_code, 200)
+        resume = reponse.json()
+        self.assertEqual(resume["tour"], 1)
+        self.assertEqual(resume["num_players"], 5)
+        self.assertEqual(resume["source"], None)
+
+        # Parametres invalides et carte inconnue.
+        self.assertEqual(self.client.post("/api/parties", json={
+            "carte": cartes[0]["fichier"], "joueurs": 1,
+        }).status_code, 422)
+        self.assertEqual(self.client.post("/api/parties", json={
+            "carte": "inconnue.json", "joueurs": 4,
+        }).status_code, 404)
 
     def test_websocket_rejoindre_et_jouer(self):
         chemin = sauvegarde_avec_humain_au_trait()

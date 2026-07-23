@@ -20,7 +20,7 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from moteur import actions, regles
+from moteur import actions, mise_en_place, regles
 from moteur.etat import GameState
 
 # Dimensions logiques d'une cellule, heritees de la zone de carte de x45
@@ -84,6 +84,33 @@ class SessionPartie:
         state = GameState.from_payload(payload)
         session = cls(partie_id, state, source=Path(chemin), seed=seed)
         regles.sanitize_after_load(state, session.rng, phase_before_load="start_menu")
+        return session
+
+    @classmethod
+    def nouvelle(
+        cls,
+        partie_id: str,
+        carte_payload: dict,
+        num_players: int,
+        ai_player_count: int,
+        difficulty_level: str = "normal",
+        tribes_mode: bool = False,
+        seed: Optional[int] = None,
+    ) -> "SessionPartie":
+        """Cree une partie neuve depuis une carte (miroir de start_game_session).
+
+        Le premier tour est demarre (``begin_player_turn``), comme dans x45 ;
+        si le joueur 0 est une IA, l'appelant declenche ensuite
+        ``jouer_tours_ia_en_attente``.
+        """
+        rng = random.Random(seed)
+        state = mise_en_place.nouvelle_partie(
+            carte_payload, num_players, ai_player_count,
+            difficulty_level=difficulty_level, tribes_mode=tribes_mode, rng=rng,
+        )
+        session = cls(partie_id, state, source=None, seed=None)
+        session.rng = rng
+        actions.begin_player_turn(state, state.current_player, rng)
         return session
 
     def sauvegarder(self, chemin: Optional[Path] = None) -> Path:
@@ -229,10 +256,11 @@ class SessionPartie:
 
 
 class GestionnaireParties:
-    """Les parties ouvertes du serveur + le catalogue des sauvegardes."""
+    """Les parties ouvertes du serveur + les catalogues (sauvegardes, cartes)."""
 
-    def __init__(self, dossier_sauvegardes: Path) -> None:
+    def __init__(self, dossier_sauvegardes: Path, dossier_cartes: Optional[Path] = None) -> None:
         self.dossier_sauvegardes = Path(dossier_sauvegardes)
+        self.dossier_cartes = Path(dossier_cartes) if dossier_cartes is not None else None
         self.parties: Dict[str, SessionPartie] = {}
         self._compteur = 0
         self._lock = threading.Lock()
@@ -254,15 +282,62 @@ class GestionnaireParties:
             })
         return resultats
 
-    def ouvrir(self, fichier: str, seed: Optional[int] = None) -> SessionPartie:
-        chemin = (self.dossier_sauvegardes / fichier).resolve()
-        if chemin.parent != self.dossier_sauvegardes.resolve() or not chemin.is_file():
-            raise FileNotFoundError(fichier)
+    def lister_cartes(self) -> List[Dict[str, Any]]:
+        if self.dossier_cartes is None:
+            return []
+        resultats = []
+        for chemin in sorted(self.dossier_cartes.glob("*.json")):
+            try:
+                payload = json.loads(chemin.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            # Les cartes anciennes n'ont pas de cle "kind" ; on ecarte juste
+            # les sauvegardes de partie et les fichiers sans carte.
+            if payload.get("kind") == "game" or not isinstance(payload.get("territories"), list):
+                continue
+            resultats.append({
+                "fichier": chemin.name,
+                "map_mode": payload.get("map_mode", "standard"),
+                "territoires": len(payload["territories"]),
+            })
+        return resultats
+
+    def _nouvel_id(self) -> str:
         with self._lock:
             self._compteur += 1
-            partie_id = f"p{self._compteur}"
-        session = SessionPartie.depuis_fichier(partie_id, chemin, seed=seed)
-        self.parties[partie_id] = session
+            return f"p{self._compteur}"
+
+    @staticmethod
+    def _chemin_sous(dossier: Optional[Path], fichier: str) -> Path:
+        if dossier is None:
+            raise FileNotFoundError(fichier)
+        chemin = (dossier / fichier).resolve()
+        if chemin.parent != dossier.resolve() or not chemin.is_file():
+            raise FileNotFoundError(fichier)
+        return chemin
+
+    def ouvrir(self, fichier: str, seed: Optional[int] = None) -> SessionPartie:
+        chemin = self._chemin_sous(self.dossier_sauvegardes, fichier)
+        session = SessionPartie.depuis_fichier(self._nouvel_id(), chemin, seed=seed)
+        self.parties[session.id] = session
+        return session
+
+    def creer(
+        self,
+        fichier_carte: str,
+        num_players: int,
+        ai_player_count: int,
+        difficulty_level: str = "normal",
+        tribes_mode: bool = False,
+        seed: Optional[int] = None,
+    ) -> SessionPartie:
+        chemin = self._chemin_sous(self.dossier_cartes, fichier_carte)
+        carte_payload = json.loads(chemin.read_text(encoding="utf-8"))
+        session = SessionPartie.nouvelle(
+            self._nouvel_id(), carte_payload, num_players, ai_player_count,
+            difficulty_level=difficulty_level, tribes_mode=tribes_mode, seed=seed,
+        )
+        self.parties[session.id] = session
         return session
 
     def fermer(self, partie_id: str) -> bool:

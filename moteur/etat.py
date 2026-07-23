@@ -343,6 +343,17 @@ class GameState:
         state._load_game(payload)
         return state
 
+    @classmethod
+    def from_map_payload(cls, payload: dict) -> "GameState":
+        """Charge une carte seule (cartes_sauvegardees/*.json), sans partie.
+
+        L'etat reste en phase "setup" : c'est le point de depart de
+        ``mise_en_place.nouvelle_partie``.
+        """
+        state = cls()
+        state._load_map(payload)
+        return state
+
     def _load_map(self, payload: dict) -> None:
         rows = payload.get("rows")
         cols = payload.get("cols")

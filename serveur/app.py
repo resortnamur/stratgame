@@ -2,9 +2,13 @@
 
 REST :
 - ``GET  /api/sauvegardes``            — sauvegardes chargeables.
+- ``GET  /api/cartes``                 — cartes pour une partie neuve.
 - ``GET  /api/parties``                — parties ouvertes (resume + sieges).
-- ``POST /api/parties``                — ouvre une partie : ``{"sauvegarde": "partie_001.json"}``
-  (``seed`` optionnel pour des tests reproductibles).
+- ``POST /api/parties``                — ouvre une partie :
+  ``{"sauvegarde": "partie_001.json"}`` pour recharger une sauvegarde, ou
+  ``{"carte": "Alpha.json", "joueurs": 4, "ia": 2, "mode": "normal",
+  "tribus": false}`` pour une partie neuve (mise en place du moteur) ;
+  ``seed`` optionnel pour des tests reproductibles.
 - ``GET  /api/parties/{id}/etat``      — etat complet (sans historique replay).
 - ``POST /api/parties/{id}/sauvegarder`` — ``{"fichier": "..."}`` optionnel
   (par defaut : le fichier d'origine).
@@ -48,6 +52,7 @@ from .partie import GestionnaireParties, ResultatAction, SessionPartie, to_jsona
 
 RACINE = Path(__file__).resolve().parent.parent
 DOSSIER_PARTIES = RACINE / "parties_en_cours"
+DOSSIER_CARTES = RACINE / "cartes_sauvegardees"
 
 # Temps laisse a un humain pour repondre "soumettre ou annexer ?" avant que
 # le serveur tranche (annexion, comme x45 sans Tkinter).
@@ -109,10 +114,14 @@ class SallePartie:
             })
 
 
-def creer_app(dossier_parties: Optional[Path] = None) -> FastAPI:
-    """Construit l'application (dossier injectable pour les tests)."""
+def creer_app(dossier_parties: Optional[Path] = None,
+              dossier_cartes: Optional[Path] = None) -> FastAPI:
+    """Construit l'application (dossiers injectables pour les tests)."""
     app = FastAPI(title="Jeux Strat - serveur de parties")
-    gestionnaire = GestionnaireParties(dossier_parties or DOSSIER_PARTIES)
+    gestionnaire = GestionnaireParties(
+        dossier_parties or DOSSIER_PARTIES,
+        dossier_cartes if dossier_cartes is not None else DOSSIER_CARTES,
+    )
     salles: Dict[str, SallePartie] = {}
     app.state.gestionnaire = gestionnaire
 
@@ -132,22 +141,45 @@ def creer_app(dossier_parties: Optional[Path] = None) -> FastAPI:
     def lister_sauvegardes():
         return {"sauvegardes": gestionnaire.lister_sauvegardes()}
 
+    @app.get("/api/cartes")
+    def lister_cartes():
+        return {"cartes": gestionnaire.lister_cartes()}
+
     @app.get("/api/parties")
     def lister_parties():
         return {"parties": [session.resume() for session in gestionnaire.parties.values()]}
 
     @app.post("/api/parties")
     def ouvrir_partie(corps: Dict[str, Any]):
-        fichier = corps.get("sauvegarde")
-        if not isinstance(fichier, str):
-            raise HTTPException(status_code=422, detail="Champ 'sauvegarde' requis.")
+        sauvegarde = corps.get("sauvegarde")
+        carte = corps.get("carte")
         seed = corps.get("seed")
-        try:
-            session = gestionnaire.ouvrir(fichier, seed=seed)
-        except FileNotFoundError:
-            raise HTTPException(status_code=404, detail="Sauvegarde inconnue.")
-        except (ValueError, KeyError, TypeError):
-            raise HTTPException(status_code=422, detail="Sauvegarde illisible.")
+        if isinstance(sauvegarde, str):
+            try:
+                session = gestionnaire.ouvrir(sauvegarde, seed=seed)
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail="Sauvegarde inconnue.")
+            except (ValueError, KeyError, TypeError):
+                raise HTTPException(status_code=422, detail="Sauvegarde illisible.")
+        elif isinstance(carte, str):
+            try:
+                session = gestionnaire.creer(
+                    carte,
+                    num_players=int(corps.get("joueurs")),
+                    ai_player_count=int(corps.get("ia", 0)),
+                    difficulty_level=str(corps.get("mode", "normal")),
+                    tribes_mode=bool(corps.get("tribus", False)),
+                    seed=seed,
+                )
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail="Carte inconnue.")
+            except (ValueError, KeyError, TypeError):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Parametres invalides (joueurs 2-10, ia 0-joueurs, carte lisible).",
+                )
+        else:
+            raise HTTPException(status_code=422, detail="Champ 'sauvegarde' ou 'carte' requis.")
         return session.resume()
 
     @app.get("/api/parties/{partie_id}/etat")
