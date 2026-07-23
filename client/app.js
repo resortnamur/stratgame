@@ -469,7 +469,7 @@ function afficherBarreActions() {
     } else if (enDeplacement) {
       $("indication-phase").textContent =
         `Déplacements : ${etat.turn_move_count}/${limiteDeplacements(etat)} — ` +
-        "clique une source puis une destination (1 régiment par clic).";
+        "clic gauche = source, clic droit = destination (1 régiment par clic).";
     }
     return;
   }
@@ -632,9 +632,14 @@ function journalResultat(message) {
       journal(`${nomDuJoueur(message.joueur)} : ${libelles[action.type] || action.type}.`);
     }
   }
+  // Tour IA diffusé seul (action null) : une ligne narrative par tour.
   const rapports = (message.resultat && message.resultat.rapports_ia) || [];
-  if (rapports.length) {
-    journal(`${rapports.length} tour(s) IA joué(s).`);
+  for (const rapport of rapports) {
+    const nom = nomDuJoueur(message.joueur);
+    const passes = rapport.attack_passes || 0;
+    journal(passes
+      ? `${nom} joue son tour : ${passes} passe(s) d'attaque.`
+      : `${nom} joue son tour sans attaquer.`);
   }
 }
 
@@ -986,15 +991,15 @@ $("carte").addEventListener("contextmenu", (evenement) => {
   traiterClicTerritoire(territoireSousLaSouris(evenement), true);
 });
 
-function traiterClicTerritoire(tid, assautTotal) {
+function traiterClicTerritoire(tid, boutonDroit) {
   const etat = client.etat;
   const source = client.selection;
   const situation = tid !== null ? etat.territories_state[tid] : null;
   const aMoi = situation !== null && situation.owner === client.monSiege;
 
   if (aMonTour() && etat.phase === "playing" && tid !== null) {
-    if (tid === source) {
-      // Recliquer la source la libère (pour en choisir une autre).
+    if (!boutonDroit && tid === source) {
+      // Recliquer la source (clic gauche) la libère.
       client.selection = null;
       afficherDetailTerritoire();
       dessinerCarte();
@@ -1007,7 +1012,7 @@ function traiterClicTerritoire(tid, assautTotal) {
           && etat.territories[source].neighbors.includes(tid)
           && etat.territories_state[source].owner === client.monSiege) {
         envoyerAction({
-          type: assautTotal ? "assaut_total" : "attaquer",
+          type: boutonDroit ? "assaut_total" : "attaquer",
           source, cible: tid,
         });
         return;  // la sélection reste : on peut enchaîner les passes
@@ -1019,12 +1024,14 @@ function traiterClicTerritoire(tid, assautTotal) {
         return;
       }
     } else if (etat.turn_phase === "move") {
-      // Source à moi déjà choisie + clic sur un autre territoire à moi :
-      // un régiment par clic, la sélection reste pour enchaîner.
-      if (source !== null && aMoi && source !== tid
-          && etat.territories_state[source].owner === client.monSiege) {
-        envoyerAction({ type: "deplacer", source, cible: tid });
-        return;
+      // Comme x45 : clic gauche = choisir la source, clic droit sur un
+      // autre territoire à soi = y envoyer un régiment (répétable).
+      if (boutonDroit) {
+        if (source !== null && aMoi && source !== tid
+            && etat.territories_state[source].owner === client.monSiege) {
+          envoyerAction({ type: "deplacer", source, cible: tid });
+        }
+        return;  // le clic droit ne change jamais la sélection
       }
       if (aMoi) {
         client.selection = tid;

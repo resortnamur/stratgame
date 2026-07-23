@@ -58,6 +58,7 @@ class ResultatAction:
     code: str = "ok"
     outcome: Optional[Dict[str, Any]] = None
     rapports_ia: List[Dict[str, Any]] = dataclasses.field(default_factory=list)
+    joueur_ia: Optional[int] = None  # le joueur IA du tour, pour la diffusion
     winner: Optional[int] = None
     winner_reason: str = ""
 
@@ -235,8 +236,9 @@ class SessionPartie:
         - la partie doit etre en cours (phases "playing"/"shopping") ;
         - c'est au tour de ``joueur`` ;
         - le siege de ``joueur`` est bien humain.
-        Ensuite les tours IA qui suivent sont joues dans la foulee, et leurs
-        rapports sont joints au resultat.
+        Les tours IA qui suivent ne sont PAS joues ici : la couche web les
+        enchaine un par un (``jouer_un_tour_ia``), avec une cadence, pour
+        que les clients voient chaque tour se derouler.
         """
         with self.lock:
             if self.state.phase not in ("playing", "shopping"):
@@ -258,43 +260,42 @@ class SessionPartie:
             )
             if outcome.winner is not None:
                 self.state.phase = "victory"
-                return resultat
-            if outcome.ok:
-                self._jouer_tours_ia(resultat)
             return resultat
 
-    def jouer_tours_ia_en_attente(self) -> ResultatAction:
-        """Joue les tours IA si c'est a une IA de jouer (ex. : au chargement).
+    def tour_ia_en_attente(self) -> bool:
+        """Vrai si c'est a un joueur automatique (IA, cite...) de jouer."""
+        with self.lock:
+            return (
+                self.state.phase == "playing"
+                and regles.is_ai_player(self.state, self.state.current_player)
+            )
 
-        Retourne un resultat sans ``outcome`` (aucune action humaine) mais
-        avec les rapports IA a diffuser ; ``ok=False``/``rien_a_jouer`` si ce
-        n'etait pas a une IA.
+    def jouer_un_tour_ia(self) -> ResultatAction:
+        """Joue UN tour IA (celui du joueur courant) et retourne son rapport.
+
+        ``ok=False``/``rien_a_jouer`` si ce n'est pas a une IA. La couche web
+        appelle cette methode en boucle, en diffusant l'etat entre chaque
+        tour, pour que les joueurs voient la partie avancer IA par IA.
         """
         with self.lock:
-            resultat = ResultatAction(ok=True)
             if self.state.phase != "playing" or not regles.is_ai_player(
                 self.state, self.state.current_player
             ):
                 return ResultatAction(ok=False, code="rien_a_jouer")
-            self._jouer_tours_ia(resultat)
-            return resultat
-
-    def _jouer_tours_ia(self, resultat: ResultatAction) -> None:
-        """Enchaine les tours IA jusqu'au prochain humain (verrou deja pris)."""
-        for _ in range(MAX_CONSECUTIVE_AI_TURNS):
-            if self.state.phase != "playing":
-                break
-            if not regles.is_ai_player(self.state, self.state.current_player):
-                break
+            joueur_ia = self.state.current_player
             rapport = actions.play_ai_turn(
                 self.state, self.cell_width, self.cell_height, self.rng,
             )
-            resultat.rapports_ia.append(to_jsonable(rapport))
+            resultat = ResultatAction(
+                ok=True,
+                joueur_ia=joueur_ia,
+                rapports_ia=[to_jsonable(rapport)],
+                winner=rapport.winner,
+                winner_reason=rapport.winner_reason,
+            )
             if rapport.winner is not None:
-                resultat.winner = rapport.winner
-                resultat.winner_reason = rapport.winner_reason
                 self.state.phase = "victory"
-                break
+            return resultat
 
 
 class GestionnaireParties:

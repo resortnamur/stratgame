@@ -40,8 +40,10 @@ Serveur vers client :
 - ``{"type": "presence", "sieges": [{"joueur", "ia", "actif", "nom",
      "connecte"}...], "spectateurs": [noms]}`` — a chaque arrivee/depart.
 - ``{"type": "resultat", "joueur": n, "action": {...}, "resultat": {...},
-     "etat": {...}}`` — diffuse a tous apres chaque action acceptee (les
-  tours IA joues dans la foulee sont dans ``resultat.rapports_ia``).
+     "etat": {...}}`` — diffuse a tous apres chaque action acceptee. Les
+  tours IA sont diffuses de la meme facon mais **un par un** (cadence
+  ``DELAI_TOUR_IA_S``), avec ``action: null`` et le rapport du tour dans
+  ``resultat.rapports_ia`` : tout le monde voit la partie avancer IA par IA.
 - ``{"type": "refus", "code": "pas_votre_tour"|...}`` — a l'emetteur seul.
 - ``{"type": "question_soumission", "territoire": id, "nom": "...",
      "regiments_vaincus": n}`` — au joueur attaquant seul, pendant une
@@ -68,7 +70,10 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
-from .partie import GestionnaireParties, ResultatAction, SessionPartie, to_jsonable
+from .partie import (
+    GestionnaireParties, MAX_CONSECUTIVE_AI_TURNS, ResultatAction,
+    SessionPartie, to_jsonable,
+)
 
 RACINE = Path(__file__).resolve().parent.parent
 DOSSIER_PARTIES = RACINE / "parties_en_cours"
@@ -78,6 +83,10 @@ DOSSIER_CLIENT = RACINE / "client"
 # Temps laisse a un humain pour repondre "soumettre ou annexer ?" avant que
 # le serveur tranche (annexion, comme x45 sans Tkinter).
 DELAI_DECISION_S = 120.0
+
+# Pause entre deux tours IA diffuses : les joueurs voient la partie avancer
+# IA par IA sur la carte au lieu de recevoir tout le bloc d'un coup.
+DELAI_TOUR_IA_S = 1.0
 
 
 class ConnexionClient:
@@ -98,9 +107,38 @@ class ConnexionClient:
 class SallePartie:
     """Les clients connectes a une meme partie + la diffusion."""
 
-    def __init__(self, session: SessionPartie) -> None:
+    def __init__(self, session: SessionPartie, delai_tour_ia: float = DELAI_TOUR_IA_S) -> None:
         self.session = session
         self.connexions: list[ConnexionClient] = []
+        self.delai_tour_ia = delai_tour_ia
+        self._tache_ia: Optional[asyncio.Task] = None
+
+    def lancer_tours_ia(self) -> None:
+        """Demarre (au besoin) la boucle qui joue et diffuse les tours IA.
+
+        Idempotent : si la boucle tourne deja, ne fait rien. Elle s'arrete
+        d'elle-meme quand c'est a un humain de jouer, a la victoire, ou
+        quand plus personne n'est connecte (elle repartira a la prochaine
+        connexion ou action).
+        """
+        if self._tache_ia is not None and not self._tache_ia.done():
+            return
+        if not self.session.tour_ia_en_attente():
+            return
+        self._tache_ia = asyncio.create_task(self._boucle_ia())
+
+    async def _boucle_ia(self) -> None:
+        for _ in range(MAX_CONSECUTIVE_AI_TURNS):
+            if not self.connexions:
+                break
+            resultat = await asyncio.to_thread(self.session.jouer_un_tour_ia)
+            if not resultat.ok:
+                break
+            await self.diffuser_resultat(resultat.joueur_ia, None, resultat)
+            if resultat.winner is not None:
+                break
+            if self.delai_tour_ia > 0:
+                await asyncio.sleep(self.delai_tour_ia)
 
     def message_presence(self) -> Dict[str, Any]:
         """Les sieges (reservataire, connecte ou non) et les spectateurs."""
@@ -145,8 +183,9 @@ class SallePartie:
 
 def creer_app(dossier_parties: Optional[Path] = None,
               dossier_cartes: Optional[Path] = None,
-              fichier_joueurs: Optional[Path] = None) -> FastAPI:
-    """Construit l'application (dossiers et registre injectables, tests)."""
+              fichier_joueurs: Optional[Path] = None,
+              delai_tour_ia: float = DELAI_TOUR_IA_S) -> FastAPI:
+    """Construit l'application (dossiers, registre et cadence injectables)."""
     app = FastAPI(title="Jeux Strat - serveur de parties")
     gestionnaire = GestionnaireParties(
         dossier_parties or DOSSIER_PARTIES,
@@ -161,7 +200,7 @@ def creer_app(dossier_parties: Optional[Path] = None,
         if session is None:
             raise HTTPException(status_code=404, detail="Partie inconnue.")
         if partie_id not in salles:
-            salles[partie_id] = SallePartie(session)
+            salles[partie_id] = SallePartie(session, delai_tour_ia=delai_tour_ia)
         return salles[partie_id]
 
     # ------------------------------------------------------------------
@@ -314,6 +353,9 @@ def creer_app(dossier_parties: Optional[Path] = None,
                 })
                 return
             await salle.diffuser_resultat(joueur, action, resultat)
+            # Si l'action a passe la main a une IA, on deroule ses tours
+            # en tache de fond, diffuses un par un.
+            salle.lancer_tours_ia()
 
         try:
             while True:
@@ -371,12 +413,10 @@ def creer_app(dossier_parties: Optional[Path] = None,
                         "sieges": session.sieges(),
                     })
                     await salle.diffuser_presence()
-                    # Si la sauvegarde chargee laissait une IA au trait, le
-                    # premier arrivant declenche les tours IA en attente.
-                    if len(salle.connexions) == 1:
-                        rapport = await asyncio.to_thread(session.jouer_tours_ia_en_attente)
-                        if rapport.ok and rapport.rapports_ia:
-                            await salle.diffuser_resultat(-1, None, rapport)
+                    # Si une IA est au trait (sauvegarde chargee, partie
+                    # neuve, ou boucle arretee faute de spectateurs), la
+                    # nouvelle connexion relance le deroule des tours IA.
+                    salle.lancer_tours_ia()
 
                 elif type_message == "action":
                     if connexion.joueur is None:

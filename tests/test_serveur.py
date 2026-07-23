@@ -175,17 +175,27 @@ class TestSessionPartie(unittest.TestCase):
 
         resultat = session.appliquer_action(joueur, {"type": "fin_de_tour"})
         self.assertTrue(resultat.ok)
-        # Les tours IA qui suivaient ont ete joues dans la foulee : soit la
-        # partie est finie, soit c'est de nouveau a un humain de jouer.
-        if resultat.winner is None:
+        # Les tours IA se jouent maintenant un par un (la couche web les
+        # diffuse avec une cadence) : on les enchaine jusqu'au prochain
+        # humain ou a la victoire.
+        vainqueur = resultat.winner
+        rapports = []
+        while vainqueur is None and session.tour_ia_en_attente():
+            suite = session.jouer_un_tour_ia()
+            self.assertTrue(suite.ok)
+            self.assertIsNotNone(suite.joueur_ia)
+            rapports.extend(suite.rapports_ia)
+            vainqueur = suite.winner
+        if vainqueur is None:
             self.assertFalse(
                 regles.is_ai_player(session.state, session.state.current_player)
             )
-        for rapport in resultat.rapports_ia:
+        for rapport in rapports:
             self.assertFalse(rapport["skipped"])
+        self.assertEqual(session.jouer_un_tour_ia().code, "rien_a_jouer")
         # Le resultat complet est serialisable tel quel pour le WebSocket.
         json.dumps(resultat.outcome)
-        json.dumps(resultat.rapports_ia)
+        json.dumps(rapports)
 
     def test_sauvegarde_aller_retour(self):
         session = SessionPartie.depuis_fichier("p1", premiere_sauvegarde(), seed=RANDOM_SEED)
@@ -244,6 +254,7 @@ class TestApplicationWeb(unittest.TestCase):
         self.app = creer_app(
             DOSSIER_PARTIES, DOSSIER_CARTES,
             fichier_joueurs=Path(self._dossier_temp.name) / "joueurs.json",
+            delai_tour_ia=0.0,  # pas de cadence dans les tests
         )
         self.client = TestClient(self.app)
 
@@ -443,6 +454,55 @@ class TestApplicationWeb(unittest.TestCase):
             # Assise, elle peut agir.
             ws.send_json({"type": "action", "action": {"type": "terminer_attaque"}})
             self.assertEqual(ws.receive_json()["type"], "resultat")
+
+    def test_websocket_tours_ia_diffuses_un_par_un(self):
+        """Les tours IA arrivent en messages separes (un etat par tour)."""
+        cartes = self.client.get("/api/cartes").json()["cartes"]
+        resume = self.client.post("/api/parties", json={
+            "carte": cartes[0]["fichier"], "joueurs": 2, "ia": 1,
+            "seed": RANDOM_SEED,
+        }).json()
+        alice = self.inscrire("Alice")
+        siege_humain = next(
+            s["joueur"] for s in resume["sieges"] if not s["ia"] and s["actif"]
+        )
+        courant_est_ia = next(
+            s["ia"] for s in resume["sieges"] if s["joueur"] == resume["joueur_courant"]
+        )
+
+        with self.client.websocket_connect(f"/ws/parties/{resume['id']}") as ws:
+            ws.send_json({"type": "rejoindre", "jeton": alice["jeton"]})
+            ws.receive_json()  # bienvenue
+            ws.receive_json()  # presence
+            if courant_est_ia:
+                # L'arrivee du premier client deroule les IA jusqu'a l'humain.
+                message = ws.receive_json()
+                self.assertEqual(message["type"], "resultat")
+                self.assertIsNone(message["action"])
+                self.assertEqual(len(message["resultat"]["rapports_ia"]), 1)
+                self.assertEqual(message["etat"]["current_player"], siege_humain)
+
+            ws.send_json({"type": "prendre_siege", "joueur": siege_humain})
+            ws.receive_json()  # siege_pris
+            ws.receive_json()  # presence
+            for action in ("terminer_attaque", "terminer_achats", "fin_de_tour"):
+                ws.send_json({"type": "action", "action": {"type": action}})
+                reponse = ws.receive_json()
+                self.assertEqual(reponse["type"], "resultat")
+
+            # Apres la fin de tour : l'IA et la cite commercante jouent,
+            # chacune dans son propre message, jusqu'au retour a l'humain.
+            joueurs_vus = []
+            while True:
+                message = ws.receive_json()
+                self.assertEqual(message["type"], "resultat")
+                self.assertIsNone(message["action"])
+                self.assertEqual(len(message["resultat"]["rapports_ia"]), 1)
+                joueurs_vus.append(message["joueur"])
+                if message["etat"]["current_player"] == siege_humain:
+                    break
+            self.assertEqual(len(joueurs_vus), 2)
+            self.assertEqual(len(set(joueurs_vus)), 2)
 
     def test_websocket_erreur_moteur(self):
         """Une exception pendant une action devient un refus, pas un silence."""
