@@ -24,6 +24,8 @@ Client vers serveur :
   deconnexion : ``{"type": "rejoindre", "jeton": "..."}`` suffit ensuite pour
   le retrouver (reconnexion). Sans jeton du tout : spectateur anonyme. Si la
   meme identite etait deja connectee, l'ancienne connexion est fermee (4000).
+- ``{"type": "prendre_siege", "joueur": 2}`` — prend un siege apres avoir
+  rejoint (spectateur identifie qui s'assoit).
 - ``{"type": "quitter_siege"}`` — libere son siege (on reste spectateur).
 - ``{"type": "action", "action": {...}}`` — vocabulaire de
   ``moteur.actions.apply_action`` (attaquer, deplacer, acheter...).
@@ -45,8 +47,11 @@ Serveur vers client :
      "regiments_vaincus": n}`` — au joueur attaquant seul, pendant une
   attaque de nation ; sans reponse sous ``DELAI_DECISION_S``, annexion.
 - ``{"type": "chat", "joueur": n|null, "nom": "...", "texte": "..."}``
-- ``{"type": "siege_quitte"}`` — accuse de reception de ``quitter_siege``.
+- ``{"type": "siege_pris", "joueur": n}`` / ``{"type": "siege_quitte"}`` —
+  accuses de reception de ``prendre_siege`` / ``quitter_siege``.
 - ``{"type": "victoire", "vainqueur": n, "raison": "..."}``
+
+Le client web (``client/``) est servi en statique a la racine ``/``.
 
 Le traitement d'une action tourne dans un thread (le moteur est synchrone) ;
 la boucle de reception continue de lire pendant ce temps, ce qui permet a la
@@ -60,12 +65,14 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.staticfiles import StaticFiles
 
 from .partie import GestionnaireParties, ResultatAction, SessionPartie, to_jsonable
 
 RACINE = Path(__file__).resolve().parent.parent
 DOSSIER_PARTIES = RACINE / "parties_en_cours"
 DOSSIER_CARTES = RACINE / "cartes_sauvegardees"
+DOSSIER_CLIENT = RACINE / "client"
 
 # Temps laisse a un humain pour repondre "soumettre ou annexer ?" avant que
 # le serveur tranche (annexion, comme x45 sans Tkinter).
@@ -375,6 +382,23 @@ def creer_app(dossier_parties: Optional[Path] = None,
                     connexion.action_en_cours = True
                     asyncio.create_task(traiter_action(action))
 
+                elif type_message == "prendre_siege":
+                    if connexion not in salle.connexions or connexion.jeton is None:
+                        await connexion.envoyer({"type": "refus", "code": "identite_requise"})
+                        continue
+                    try:
+                        joueur = int(message.get("joueur"))
+                    except (TypeError, ValueError):
+                        await connexion.envoyer({"type": "refus", "code": "siege_indisponible"})
+                        continue
+                    ok, code = session.reserver_siege(joueur, connexion.jeton, connexion.nom)
+                    if not ok:
+                        await connexion.envoyer({"type": "refus", "code": code})
+                        continue
+                    connexion.joueur = joueur
+                    await connexion.envoyer({"type": "siege_pris", "joueur": joueur})
+                    await salle.diffuser_presence()
+
                 elif type_message == "quitter_siege":
                     if connexion.joueur is None:
                         await connexion.envoyer({"type": "refus", "code": "aucun_siege"})
@@ -416,6 +440,13 @@ def creer_app(dossier_parties: Optional[Path] = None,
             if connexion in salle.connexions:
                 salle.connexions.remove(connexion)
                 await salle.diffuser_presence()
+
+    # ------------------------------------------------------------------
+    # Client web statique (enregistre apres les routes API : elles priment)
+    # ------------------------------------------------------------------
+
+    if DOSSIER_CLIENT.is_dir():
+        app.mount("/", StaticFiles(directory=DOSSIER_CLIENT, html=True), name="client")
 
     return app
 

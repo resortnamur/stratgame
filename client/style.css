@@ -1,0 +1,168 @@
+/* Style du client web — reprend l'ambiance sombre de x45 (fond 18,32,52). */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  background: rgb(18, 32, 52);
+  color: rgb(236, 240, 241);
+}
+
+h1 { font-size: 1.3rem; margin: 0; }
+h2 { font-size: 1rem; margin: 0 0 8px; color: rgb(189, 195, 199); }
+
+button {
+  background: rgb(84, 153, 199);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+button:hover { filter: brightness(1.15); }
+button.secondaire { background: rgb(52, 73, 94); }
+button.danger { background: rgb(192, 88, 77); }
+
+input, select {
+  background: rgb(28, 44, 66);
+  color: rgb(236, 240, 241);
+  border: 1px solid rgb(52, 73, 94);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.9rem;
+}
+
+.erreur { color: rgb(236, 112, 99); min-height: 1.2em; }
+
+/* --- Écran identité ------------------------------------------------- */
+
+.boite-centrale {
+  max-width: 420px;
+  margin: 18vh auto;
+  background: rgb(28, 44, 66);
+  border: 1px solid rgb(52, 73, 94);
+  border-radius: 12px;
+  padding: 28px;
+  text-align: center;
+}
+.boite-centrale input { width: 60%; margin-right: 8px; }
+
+/* --- En-têtes et panneaux ------------------------------------------- */
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 18px;
+  border-bottom: 2px solid rgb(44, 62, 80);
+}
+
+.badge-nom { color: rgb(244, 208, 63); margin-left: auto; }
+.badge-connexion { margin-left: auto; font-size: 0.85rem; color: rgb(88, 214, 141); }
+.badge-connexion.coupe { color: rgb(236, 112, 99); }
+
+.panneau {
+  background: rgb(28, 44, 66);
+  border: 1px solid rgb(52, 73, 94);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.colonnes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 16px;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.liste { list-style: none; margin: 0 0 10px; padding: 0; }
+.liste li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgb(40, 58, 82);
+}
+.liste li button { margin-left: auto; }
+
+#form-nouvelle { display: grid; gap: 8px; margin-bottom: 16px; }
+#form-nouvelle label { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+#form-nouvelle .ligne-case { justify-content: flex-start; }
+
+/* --- Écran partie ---------------------------------------------------- */
+
+.zone-partie {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 12px;
+  padding: 12px;
+}
+
+.zone-carte { position: relative; }
+
+#carte {
+  width: 100%;
+  height: auto;
+  display: block;
+  border: 1px solid rgb(52, 73, 94);
+  border-radius: 6px;
+  background: rgb(42, 118, 175);
+  cursor: crosshair;
+}
+
+#bandeau-victoire {
+  position: absolute;
+  top: 40%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(18, 32, 52, 0.95);
+  border: 2px solid rgb(244, 208, 63);
+  border-radius: 12px;
+  padding: 24px 36px;
+  font-size: 1.3rem;
+  text-align: center;
+}
+
+.zone-panneaux { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+
+#liste-sieges .pion {
+  display: inline-block;
+  width: 14px; height: 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(0, 0, 0, 0.5);
+  flex-shrink: 0;
+}
+#liste-sieges .hors-jeu { opacity: 0.45; }
+#liste-sieges .deconnecte { color: rgb(149, 165, 166); font-style: italic; }
+#liste-sieges .au-trait { outline: 1px solid rgb(255, 220, 50); border-radius: 6px; }
+
+.spectateurs { font-size: 0.85rem; color: rgb(149, 165, 166); }
+
+#detail-territoire { font-size: 0.9rem; line-height: 1.5; }
+
+.panneau-chat #messages-chat,
+.panneau-journal #journal {
+  height: 150px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  line-height: 1.4;
+  margin-bottom: 8px;
+  background: rgb(22, 36, 56);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.panneau-journal #journal { height: 120px; color: rgb(189, 195, 199); }
+
+#form-chat { display: flex; gap: 6px; }
+#form-chat input { flex: 1; min-width: 0; }
+
+#messages-chat .auteur { color: rgb(244, 208, 63); }
+
+@media (max-width: 900px) {
+  .colonnes { grid-template-columns: 1fr; }
+  .zone-partie { grid-template-columns: 1fr; }
+}

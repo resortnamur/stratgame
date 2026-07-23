@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Jeux Strat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Écran 1 : identité (nom public + jeton conservé en localStorage) -->
+<section id="ecran-identite" hidden>
+  <div class="boite-centrale">
+    <h1>Jeux Strat</h1>
+    <p>Choisis ton nom de joueur — il te restera réservé&nbsp;:</p>
+    <form id="form-identite">
+      <input id="champ-nom" maxlength="24" required placeholder="Ton nom" autocomplete="off">
+      <button>Entrer</button>
+    </form>
+    <p id="erreur-identite" class="erreur"></p>
+  </div>
+</section>
+
+<!-- Écran 2 : lobby (parties ouvertes, nouvelle partie, sauvegardes) -->
+<section id="ecran-lobby" hidden>
+  <header>
+    <h1>Jeux Strat</h1>
+    <span id="lobby-nom" class="badge-nom"></span>
+  </header>
+  <div class="colonnes">
+    <div class="panneau">
+      <h2>Parties ouvertes</h2>
+      <ul id="liste-parties" class="liste"></ul>
+      <button id="bouton-rafraichir" type="button">Rafraîchir</button>
+    </div>
+    <div class="panneau">
+      <h2>Nouvelle partie</h2>
+      <form id="form-nouvelle">
+        <label>Carte
+          <select id="champ-carte"></select>
+        </label>
+        <label>Joueurs
+          <input type="number" id="champ-joueurs" min="2" max="10" value="4">
+        </label>
+        <label>… dont IA
+          <input type="number" id="champ-ia" min="0" max="9" value="2">
+        </label>
+        <label>Mode
+          <select id="champ-mode">
+            <option value="normal">Normal</option>
+            <option value="chaos">Chaos</option>
+            <option value="gouvernement_mondial">Gouvernement mondial</option>
+          </select>
+        </label>
+        <label class="ligne-case">
+          <input type="checkbox" id="champ-tribus"> Mode tribus
+        </label>
+        <button>Créer la partie</button>
+      </form>
+      <h2>Reprendre une sauvegarde</h2>
+      <ul id="liste-sauvegardes" class="liste"></ul>
+      <p id="erreur-lobby" class="erreur"></p>
+    </div>
+  </div>
+</section>
+
+<!-- Écran 3 : la partie (carte canvas + panneaux) -->
+<section id="ecran-partie" hidden>
+  <header>
+    <button id="bouton-retour-lobby" type="button">&larr; Lobby</button>
+    <span id="info-tour"></span>
+    <span id="info-tresor"></span>
+    <span id="info-connexion" class="badge-connexion"></span>
+  </header>
+  <div class="zone-partie">
+    <div class="zone-carte">
+      <canvas id="carte" width="1200" height="620"></canvas>
+      <div id="bandeau-victoire" hidden></div>
+    </div>
+    <aside class="zone-panneaux">
+      <div class="panneau" id="panneau-sieges">
+        <h2>Joueurs</h2>
+        <ul id="liste-sieges" class="liste"></ul>
+        <div id="liste-spectateurs" class="spectateurs"></div>
+      </div>
+      <div class="panneau" id="panneau-territoire">
+        <h2>Territoire</h2>
+        <div id="detail-territoire">Clique un territoire sur la carte.</div>
+      </div>
+      <div class="panneau panneau-chat">
+        <h2>Discussion</h2>
+        <div id="messages-chat"></div>
+        <form id="form-chat">
+          <input id="champ-chat" maxlength="500" placeholder="Message…" autocomplete="off">
+          <button>Envoyer</button>
+        </form>
+      </div>
+      <div class="panneau panneau-journal">
+        <h2>Journal</h2>
+        <div id="journal"></div>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>

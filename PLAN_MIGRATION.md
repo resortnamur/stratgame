@@ -294,5 +294,39 @@ siège, refus `identite_requise`/`jeton_inconnu`.
 **L'étape 2 est terminée : le serveur couvre lobby, parties, jeu en direct
 et identités.**
 
-### Étape 3 — Client web (canvas, écran par écran) ⬜
+### Étape 3 — Client web (canvas, écran par écran) 🔶 (en cours)
+
+#### 3a — Lobby et vue de partie en direct ✅ (2026-07-23)
+
+**`client/`** (nouveau : `index.html`, `style.css`, `app.js`) — vanilla JS
+sans build, servi en statique par FastAPI à la racine `/` (monté après les
+routes API). Trois écrans :
+- **Identité** : nom → `POST /api/joueurs`, jeton conservé en localStorage.
+- **Lobby** : parties ouvertes (avec occupants), nouvelle partie (42 cartes,
+  joueurs/IA/mode/tribus), reprise d'une des sauvegardes.
+- **Partie** : carte canvas 1200×620 **fidèle à x45** (mêmes couleurs et
+  règles de rendu que `draw_territories`/`draw_bridges` : eau, boost du
+  joueur au trait, bordures jaunes/violettes/blanches, boîtes de régiments,
+  étoiles capitales, disques dorés, pastilles bonus, ponts (fragiles en
+  pointillés), liens terre, centre circulaire en carte "custom") ; panneau
+  sièges (s'asseoir/quitter), spectateurs, chat, journal, détail du
+  territoire cliqué ; bandeau victoire ; question soumission via confirm().
+  L'id de partie vit dans `location.hash` → un rechargement se reconnecte
+  et retrouve le siège (jeton). Reconnexion auto après coupure (2 s).
+
+**Serveur** : montage `StaticFiles`, et nouveau message WS
+`prendre_siege {joueur}` (s'asseoir après avoir rejoint, sans se
+reconnecter) avec accusé `siege_pris`.
+
+Tests : `tests/test_serveur.py` → 20 tests (statique servi, prendre_siege).
+Parcours complet vérifié dans le navigateur (inscription → création →
+carte rendue → siège → chat → rechargement/reconnexion), console et
+logs serveur sans erreur. Lancement : préviseur `serveur-jeu`
+(`.claude/launch.json`) ou
+`python -m uvicorn serveur.app:app --app-dir "Jeux Strat"`.
+
+#### 3b — Jouer dans le navigateur ⬜ (attaque, déplacements, fins de
+phase — sélection source/cible sur la carte)
+#### 3c — Boutique et panneaux détaillés ⬜ (achats, aperçus revenus,
+événements majeurs, religions/science/culture)
 ### Étape 4 — Déploiement gratuit (Render/Fly.io ; réveil ~30 s, état en base) ⬜

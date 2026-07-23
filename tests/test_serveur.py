@@ -391,6 +391,46 @@ class TestApplicationWeb(unittest.TestCase):
                 self.assertEqual(ws1.receive_json()["type"], "resultat")
                 self.assertEqual(ws2.receive_json()["type"], "resultat")
 
+    def test_client_statique(self):
+        reponse = self.client.get("/")
+        self.assertEqual(reponse.status_code, 200)
+        self.assertIn("text/html", reponse.headers["content-type"])
+        self.assertIn("Jeux Strat", reponse.text)
+        self.assertEqual(self.client.get("/app.js").status_code, 200)
+        self.assertEqual(self.client.get("/style.css").status_code, 200)
+        # Les routes API passent avant le statique.
+        self.assertEqual(self.client.get("/api/cartes").status_code, 200)
+
+    def test_websocket_prendre_siege(self):
+        chemin = sauvegarde_avec_humain_au_trait()
+        resume = self.ouvrir_partie(chemin.name)
+        partie_id = resume["id"]
+        joueur = resume["joueur_courant"]
+        alice = self.inscrire("Alice")
+
+        with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws:
+            # Alice entre en spectatrice identifiee puis s'assoit.
+            ws.send_json({"type": "rejoindre", "jeton": alice["jeton"]})
+            self.assertIsNone(ws.receive_json()["joueur"])  # bienvenue
+            ws.receive_json()  # presence
+            ws.send_json({"type": "prendre_siege", "joueur": joueur})
+            pris = ws.receive_json()
+            self.assertEqual((pris["type"], pris["joueur"]), ("siege_pris", joueur))
+            presence = ws.receive_json()
+            siege = next(s for s in presence["sieges"] if s["joueur"] == joueur)
+            self.assertEqual((siege["nom"], siege["connecte"]), ("Alice", True))
+            # Un deuxieme siege est refuse (une identite, un siege).
+            autre = next(
+                (s["joueur"] for s in presence["sieges"]
+                 if not s["ia"] and s["actif"] and s["joueur"] != joueur), None,
+            )
+            if autre is not None:
+                ws.send_json({"type": "prendre_siege", "joueur": autre})
+                self.assertEqual(ws.receive_json()["code"], "deja_un_siege")
+            # Assise, elle peut agir.
+            ws.send_json({"type": "action", "action": {"type": "terminer_attaque"}})
+            self.assertEqual(ws.receive_json()["type"], "resultat")
+
     def test_websocket_reconnexion(self):
         chemin = sauvegarde_avec_humain_au_trait()
         resume = self.ouvrir_partie(chemin.name)
