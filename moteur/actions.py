@@ -180,19 +180,46 @@ class AiTurnReport:
     turn_report: Optional[TurnAdvanceReport] = None
 
 
-def play_ai_turn(
+@dataclass
+class AiAttackStep:
+    """Une passe d'attaque d'un tour IA, pour la retransmission en direct.
+
+    ``territoires`` porte l'etat a jour des territoires touches (source et
+    cible), au format des entrees ``territories_state`` : le client peut
+    mettre sa carte a jour sans recevoir l'etat complet. Les mutations plus
+    larges mais rares (chaos mondial...) sont couvertes par l'etat complet
+    diffuse en fin de tour.
+    """
+
+    src_id: int
+    dst_id: int
+    result: regles.AttackResult
+    territoires: List[dict] = field(default_factory=list)
+
+
+def _territoire_snapshot(terr) -> dict:
+    return {
+        "id": terr.id,
+        "owner": terr.owner,
+        "regiments": terr.regiments,
+        "reinforcement_bonus": terr.reinforcement_bonus,
+    }
+
+
+def play_ai_turn_steps(
     state: GameState,
     cell_width: float,
     cell_height: float,
     rng=random,
     submit_decider=None,
     max_actions: int = 2000,
-) -> AiTurnReport:
-    """Joue le tour complet du joueur IA courant (miroir de process_ai_turn).
+):
+    """Deroule le tour IA courant en generant une ``AiAttackStep`` par passe.
 
-    Attaques tant que ``find_ai_attack`` propose une cible, puis phase de
-    deplacement (concentration vers la frontiere), puis fin de tour via
-    ``advance_turn``. C'est ce que le serveur appellera pour les tours IA.
+    Miroir exact de l'ancien ``play_ai_turn`` (memes appels, meme ordre de
+    tirage aleatoire) : attaques passe par passe, puis deplacements et fin
+    de tour d'un bloc. La valeur de retour du generateur (StopIteration)
+    est l'``AiTurnReport`` complet.
     """
     report = AiTurnReport()
     if state.phase != "playing" or not regles.is_ai_player(state, state.current_player):
@@ -209,11 +236,15 @@ def play_ai_turn(
             while state.phase == "playing" and regles.can_attack_specific_target(state, src, dst):
                 result = regles.resolve_attack_once(state, src, dst, rng, submit_decider)
                 report.attack_passes += 1
+                yield AiAttackStep(src.id, dst.id, result,
+                                   [_territoire_snapshot(src), _territoire_snapshot(dst)])
                 if result.conquered:
                     break
         else:
-            regles.resolve_attack_once(state, src, dst, rng, submit_decider)
+            result = regles.resolve_attack_once(state, src, dst, rng, submit_decider)
             report.attack_passes += 1
+            yield AiAttackStep(src.id, dst.id, result,
+                               [_territoire_snapshot(src), _territoire_snapshot(dst)])
         winner, reason = regles.evaluate_winner(state)
         if winner is not None:
             report.winner = winner
@@ -231,6 +262,29 @@ def play_ai_turn(
         report.winner = report.turn_report.winner
         report.winner_reason = report.turn_report.winner_reason
     return report
+
+
+def play_ai_turn(
+    state: GameState,
+    cell_width: float,
+    cell_height: float,
+    rng=random,
+    submit_decider=None,
+    max_actions: int = 2000,
+) -> AiTurnReport:
+    """Joue le tour complet du joueur IA courant (miroir de process_ai_turn).
+
+    Consomme ``play_ai_turn_steps`` d'une traite : meme chemin de code que
+    la retransmission passe par passe du serveur.
+    """
+    steps = play_ai_turn_steps(
+        state, cell_width, cell_height, rng, submit_decider, max_actions,
+    )
+    while True:
+        try:
+            next(steps)
+        except StopIteration as fin:
+            return fin.value
 
 
 # ----------------------------------------------------------------------

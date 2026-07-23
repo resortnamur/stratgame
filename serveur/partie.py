@@ -78,6 +78,9 @@ class SessionPartie:
         # Sieges reserves par identite : joueur -> {"jeton", "nom"}. La
         # reservation survit a la deconnexion (le jeton permet de revenir).
         self.reservations: Dict[int, Dict[str, str]] = {}
+        # Deroule passe par passe du tour IA courant (voir demarrer_tour_ia).
+        self._joueur_ia: Optional[int] = None
+        self._pas_ia = None
 
     # ------------------------------------------------------------------
     # Chargement / sauvegarde
@@ -269,6 +272,49 @@ class SessionPartie:
                 self.state.phase == "playing"
                 and regles.is_ai_player(self.state, self.state.current_player)
             )
+
+    def demarrer_tour_ia(self) -> Optional[int]:
+        """Prepare le deroule passe par passe du tour IA courant.
+
+        Retourne le numero du joueur IA, ou None si ce n'est pas a une IA.
+        Le tour se consomme ensuite avec ``pas_tour_ia`` ; abandonner un
+        deroule en cours est sans danger (l'etat reste coherent entre deux
+        passes, un nouveau demarrage reprend ou on en etait).
+        """
+        with self.lock:
+            if self.state.phase != "playing" or not regles.is_ai_player(
+                self.state, self.state.current_player
+            ):
+                return None
+            self._joueur_ia = self.state.current_player
+            self._pas_ia = actions.play_ai_turn_steps(
+                self.state, self.cell_width, self.cell_height, self.rng,
+            )
+            return self._joueur_ia
+
+    def pas_tour_ia(self):
+        """Avance le tour IA d'une passe d'attaque.
+
+        Retourne ``(pas, None)`` pour chaque passe (dict pret a diffuser),
+        puis ``(None, resultat)`` quand le tour est fini (deplacements et
+        fin de tour joues, rapport complet du tour).
+        """
+        with self.lock:
+            try:
+                pas = next(self._pas_ia)
+            except StopIteration as fin:
+                rapport = fin.value
+                resultat = ResultatAction(
+                    ok=True,
+                    joueur_ia=self._joueur_ia,
+                    rapports_ia=[to_jsonable(rapport)],
+                    winner=rapport.winner,
+                    winner_reason=rapport.winner_reason,
+                )
+                if rapport.winner is not None:
+                    self.state.phase = "victory"
+                return None, resultat
+            return to_jsonable(pas), None
 
     def jouer_un_tour_ia(self) -> ResultatAction:
         """Joue UN tour IA (celui du joueur courant) et retourne son rapport.

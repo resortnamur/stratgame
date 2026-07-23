@@ -44,6 +44,11 @@ Serveur vers client :
   tours IA sont diffuses de la meme facon mais **un par un** (cadence
   ``DELAI_TOUR_IA_S``), avec ``action: null`` et le rapport du tour dans
   ``resultat.rapports_ia`` : tout le monde voit la partie avancer IA par IA.
+- ``{"type": "pas_ia", "joueur": n, "pas": {"src_id", "dst_id", "result":
+     {att_text, def_text, conquered, ...}, "territoires": [...]}}`` — chaque
+  passe d'attaque d'un tour IA, a la cadence ``DELAI_PAS_IA_S`` (la vitesse
+  « IA rapide » de x45) ; ``territoires`` porte l'etat a jour des deux
+  territoires touches, l'etat complet arrivant avec le ``resultat`` final.
 - ``{"type": "refus", "code": "pas_votre_tour"|...}`` — a l'emetteur seul.
 - ``{"type": "question_soumission", "territoire": id, "nom": "...",
      "regiments_vaincus": n}`` — au joueur attaquant seul, pendant une
@@ -88,6 +93,10 @@ DELAI_DECISION_S = 120.0
 # IA par IA sur la carte au lieu de recevoir tout le bloc d'un coup.
 DELAI_TOUR_IA_S = 1.0
 
+# Pause entre deux passes d'attaque d'un meme tour IA — la vitesse
+# « IA rapide » de x45 (AI_FAST_ACTION_DELAY_MS = 260 ms).
+DELAI_PAS_IA_S = 0.26
+
 
 class ConnexionClient:
     """Un client WebSocket relie a une partie (siege humain ou spectateur)."""
@@ -107,10 +116,12 @@ class ConnexionClient:
 class SallePartie:
     """Les clients connectes a une meme partie + la diffusion."""
 
-    def __init__(self, session: SessionPartie, delai_tour_ia: float = DELAI_TOUR_IA_S) -> None:
+    def __init__(self, session: SessionPartie, delai_tour_ia: float = DELAI_TOUR_IA_S,
+                 delai_pas_ia: float = DELAI_PAS_IA_S) -> None:
         self.session = session
         self.connexions: list[ConnexionClient] = []
         self.delai_tour_ia = delai_tour_ia
+        self.delai_pas_ia = delai_pas_ia
         self._tache_ia: Optional[asyncio.Task] = None
 
     def lancer_tours_ia(self) -> None:
@@ -131,10 +142,20 @@ class SallePartie:
         for _ in range(MAX_CONSECUTIVE_AI_TURNS):
             if not self.connexions:
                 break
-            resultat = await asyncio.to_thread(self.session.jouer_un_tour_ia)
-            if not resultat.ok:
+            joueur_ia = await asyncio.to_thread(self.session.demarrer_tour_ia)
+            if joueur_ia is None:
                 break
-            await self.diffuser_resultat(resultat.joueur_ia, None, resultat)
+            # Le tour se deroule passe d'attaque par passe d'attaque, chaque
+            # passe diffusee avec ses des et les territoires touches ; le
+            # rapport final (deplacements, fin de tour) porte l'etat complet.
+            resultat = None
+            while resultat is None:
+                pas, resultat = await asyncio.to_thread(self.session.pas_tour_ia)
+                if pas is not None:
+                    await self.diffuser({"type": "pas_ia", "joueur": joueur_ia, "pas": pas})
+                    if self.delai_pas_ia > 0:
+                        await asyncio.sleep(self.delai_pas_ia)
+            await self.diffuser_resultat(joueur_ia, None, resultat)
             if resultat.winner is not None:
                 break
             if self.delai_tour_ia > 0:
@@ -184,7 +205,8 @@ class SallePartie:
 def creer_app(dossier_parties: Optional[Path] = None,
               dossier_cartes: Optional[Path] = None,
               fichier_joueurs: Optional[Path] = None,
-              delai_tour_ia: float = DELAI_TOUR_IA_S) -> FastAPI:
+              delai_tour_ia: float = DELAI_TOUR_IA_S,
+              delai_pas_ia: float = DELAI_PAS_IA_S) -> FastAPI:
     """Construit l'application (dossiers, registre et cadence injectables)."""
     app = FastAPI(title="Jeux Strat - serveur de parties")
     gestionnaire = GestionnaireParties(
@@ -200,7 +222,9 @@ def creer_app(dossier_parties: Optional[Path] = None,
         if session is None:
             raise HTTPException(status_code=404, detail="Partie inconnue.")
         if partie_id not in salles:
-            salles[partie_id] = SallePartie(session, delai_tour_ia=delai_tour_ia)
+            salles[partie_id] = SallePartie(
+                session, delai_tour_ia=delai_tour_ia, delai_pas_ia=delai_pas_ia,
+            )
         return salles[partie_id]
 
     # ------------------------------------------------------------------
@@ -290,7 +314,9 @@ def creer_app(dossier_parties: Optional[Path] = None,
         if session is None:
             await websocket.close(code=4004)
             return
-        salle = salles.setdefault(partie_id, SallePartie(session))
+        salle = salles.setdefault(partie_id, SallePartie(
+            session, delai_tour_ia=delai_tour_ia, delai_pas_ia=delai_pas_ia,
+        ))
         await websocket.accept()
         connexion = ConnexionClient(websocket)
         boucle = asyncio.get_running_loop()

@@ -255,6 +255,7 @@ class TestApplicationWeb(unittest.TestCase):
             DOSSIER_PARTIES, DOSSIER_CARTES,
             fichier_joueurs=Path(self._dossier_temp.name) / "joueurs.json",
             delai_tour_ia=0.0,  # pas de cadence dans les tests
+            delai_pas_ia=0.0,
         )
         self.client = TestClient(self.app)
 
@@ -474,12 +475,27 @@ class TestApplicationWeb(unittest.TestCase):
             ws.send_json({"type": "rejoindre", "jeton": alice["jeton"]})
             ws.receive_json()  # bienvenue
             ws.receive_json()  # presence
+
+            def prochain_resultat(passes_vues):
+                """Consomme les pas_ia (en les comptant) jusqu'au resultat."""
+                while True:
+                    message = ws.receive_json()
+                    if message["type"] == "pas_ia":
+                        self.assertIn("result", message["pas"])
+                        self.assertTrue(message["pas"]["territoires"])
+                        passes_vues.append(message["pas"])
+                        continue
+                    self.assertEqual(message["type"], "resultat")
+                    return message
+
             if courant_est_ia:
-                # L'arrivee du premier client deroule les IA jusqu'a l'humain.
-                message = ws.receive_json()
-                self.assertEqual(message["type"], "resultat")
+                # L'arrivee du premier client deroule les IA jusqu'a l'humain,
+                # chaque passe d'attaque diffusee avant le rapport du tour.
+                passes = []
+                message = prochain_resultat(passes)
                 self.assertIsNone(message["action"])
-                self.assertEqual(len(message["resultat"]["rapports_ia"]), 1)
+                rapport = message["resultat"]["rapports_ia"][0]
+                self.assertEqual(len(passes), rapport["attack_passes"])
                 self.assertEqual(message["etat"]["current_player"], siege_humain)
 
             ws.send_json({"type": "prendre_siege", "joueur": siege_humain})
@@ -487,17 +503,17 @@ class TestApplicationWeb(unittest.TestCase):
             ws.receive_json()  # presence
             for action in ("terminer_attaque", "terminer_achats", "fin_de_tour"):
                 ws.send_json({"type": "action", "action": {"type": action}})
-                reponse = ws.receive_json()
-                self.assertEqual(reponse["type"], "resultat")
+                self.assertEqual(ws.receive_json()["type"], "resultat")
 
             # Apres la fin de tour : l'IA et la cite commercante jouent,
             # chacune dans son propre message, jusqu'au retour a l'humain.
             joueurs_vus = []
             while True:
-                message = ws.receive_json()
-                self.assertEqual(message["type"], "resultat")
+                passes = []
+                message = prochain_resultat(passes)
                 self.assertIsNone(message["action"])
-                self.assertEqual(len(message["resultat"]["rapports_ia"]), 1)
+                rapport = message["resultat"]["rapports_ia"][0]
+                self.assertEqual(len(passes), rapport["attack_passes"])
                 joueurs_vus.append(message["joueur"])
                 if message["etat"]["current_player"] == siege_humain:
                     break

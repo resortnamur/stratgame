@@ -351,6 +351,27 @@ function traiterMessage(message) {
       afficherBarreActions();
       afficherEnTete();
       break;
+    case "pas_ia": {
+      // Une passe d'attaque IA en direct : on met à jour les territoires
+      // touchés et on raconte les dés, sans attendre l'état complet.
+      const etat = client.etat;
+      if (!etat) break;
+      for (const territoire of message.pas.territoires) {
+        etat.territories_state[territoire.id] = territoire;
+      }
+      const resultat = message.pas.result;
+      const nomCible = etat.territories[message.pas.dst_id].name;
+      journal(`${nomDuJoueur(message.joueur)} attaque ${nomCible} : ` +
+              `${resultat.att_text} / ${resultat.def_text}` +
+              (resultat.conquered ? " — conquis !" : ""));
+      for (const texte of [resultat.special_conquest_message,
+                           resultat.alliance_break_message,
+                           resultat.elimination_message]) {
+        if (texte) journal(texte);
+      }
+      dessinerCarte();
+      break;
+    }
     case "resultat":
       client.etat = message.etat;
       if (message.joueur === client.monSiege) client.actionDepuis = null;
@@ -632,14 +653,11 @@ function journalResultat(message) {
       journal(`${nomDuJoueur(message.joueur)} : ${libelles[action.type] || action.type}.`);
     }
   }
-  // Tour IA diffusé seul (action null) : une ligne narrative par tour.
+  // Fin d'un tour IA (les passes d'attaque ont été racontées en direct).
   const rapports = (message.resultat && message.resultat.rapports_ia) || [];
   for (const rapport of rapports) {
-    const nom = nomDuJoueur(message.joueur);
-    const passes = rapport.attack_passes || 0;
-    journal(passes
-      ? `${nom} joue son tour : ${passes} passe(s) d'attaque.`
-      : `${nom} joue son tour sans attaquer.`);
+    journal(`${nomDuJoueur(message.joueur)} termine son tour` +
+            (rapport.attack_passes ? ` (${rapport.attack_passes} passe(s) d'attaque).` : "."));
   }
 }
 

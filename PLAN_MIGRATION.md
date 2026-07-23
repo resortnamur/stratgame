@@ -340,12 +340,16 @@ Le tour complet se joue au clic dans `client/app.js` :
 - **Déplacements** : clic gauche = source, **clic droit = destination**
   (comme x45), un régiment par clic droit, la sélection reste.
 - **Spectacle des autres tours** : le serveur ne joue plus les tours IA en
-  bloc — `SessionPartie.jouer_un_tour_ia` les joue un par un et la
-  `SallePartie` les diffuse avec une cadence (`DELAI_TOUR_IA_S`, 1 s,
-  injectable pour les tests) : tous les clients voient la carte avancer
-  IA par IA (cité commerçante comprise), avec une ligne de journal par
-  tour. La boucle s'arrête sans spectateurs et repart à la connexion
-  suivante. Les actions des autres humains étaient déjà diffusées en direct.
+  bloc. `moteur/actions.play_ai_turn_steps` (générateur — `play_ai_turn` le
+  consomme : un seul chemin de code, parité x45 revérifiée) produit une
+  passe d'attaque à la fois ; la `SallePartie` diffuse chaque passe en
+  message `pas_ia` (dés, conquête, messages spéciaux, état des deux
+  territoires touchés) à la cadence **« IA rapide » de x45 (260 ms)**,
+  puis le rapport final du tour avec l'état complet (déplacements, fin de
+  tour — couvre aussi les mutations larges type chaos), 1 s entre deux
+  tours IA (cadences injectables pour les tests). La boucle s'arrête sans
+  spectateurs et repart à la connexion suivante. Les actions des autres
+  humains étaient déjà diffusées en direct.
 - Garde anti-double-clic **avec expiration** (5 s — l'interface ne reste
   jamais sourde si une réponse se perd), codes de refus du moteur traduits
   en français, question soumission via confirm().
