@@ -25,6 +25,26 @@ const COULEUR_NEUTRE = [90, 100, 110];
 const LARGEUR_CARTE = 1200;
 const HAUTEUR_CARTE = 620;
 
+// Les religions de x45 (noms, symboles et couleurs identiques).
+const RELIGIONS = [
+  { nom: "Auralis", symbole: "A*", couleur: [244, 208, 63] },
+  { nom: "Noctyra", symbole: "N)", couleur: [165, 105, 189] },
+  { nom: "Veridia", symbole: "V^", couleur: [88, 214, 141] },
+  { nom: "Pyronis", symbole: "P!", couleur: [236, 112, 99] },
+  { nom: "Mareon", symbole: "M~", couleur: [84, 153, 199] },
+  { nom: "Elyrion", symbole: "E+", couleur: [174, 235, 255] },
+];
+// Elyrion (fondée par la merveille) n'a pas de badge de lieu saint dédié.
+const RELIGION_MERVEILLE = 5;
+
+// Les trois vues de carte de x45, dans l'ordre du bouton.
+const VUES_CARTE = ["fortress", "all", "religion"];
+const LIBELLES_VUES = {
+  fortress: "Icônes : fort.",
+  all: "Icônes : tout",
+  religion: "Vue : religion",
+};
+
 // ---------------------------------------------------------------------------
 // État du client
 // ---------------------------------------------------------------------------
@@ -42,6 +62,7 @@ const client = {
   actionDepuis: null,  // horodatage de l'action en attente de réponse
   achat: null,          // article de boutique sélectionné (entrée du catalogue)
   territoiresAchat: [],  // territoires déjà cliqués pour l'achat en cours
+  vueCarte: localStorage.getItem("jeux_strat_vue") || "fortress",
   fermetureVoulue: false,
 };
 
@@ -543,6 +564,7 @@ function afficherBarreActions() {
     return;
   }
   barre.hidden = false;
+  $("bouton-vue").textContent = LIBELLES_VUES[client.vueCarte];
   const enAttaque = etat.phase === "playing" && etat.turn_phase === "attack";
   const enAchats = etat.phase === "shopping";
   const enDeplacement = etat.phase === "playing" && etat.turn_phase === "move";
@@ -752,6 +774,15 @@ $("bouton-jouer-siege").addEventListener("click", () => {
   // Basculer de siège : on libère le sien puis on prend celui au trait.
   if (client.monSiege !== null) envoyer({ type: "quitter_siege" });
   envoyer({ type: "prendre_siege", joueur: etat.current_player });
+});
+
+// Le bouton de vue cycle forteresses → toutes les icônes → religion (x45).
+$("bouton-vue").addEventListener("click", () => {
+  const suivante = VUES_CARTE[(VUES_CARTE.indexOf(client.vueCarte) + 1) % VUES_CARTE.length];
+  client.vueCarte = suivante;
+  localStorage.setItem("jeux_strat_vue", suivante);
+  $("bouton-vue").textContent = LIBELLES_VUES[suivante];
+  dessinerCarte();
 });
 
 $("bouton-fin-attaque").addEventListener("click", () =>
@@ -1007,8 +1038,15 @@ function afficherDetailTerritoire() {
     etiquettes.push("centre culturel");
   }
   for (const [type, tid] of Object.entries(etat.wonder_territories)) {
-    if (tid === id) etiquettes.push(`merveille (${type})`);
+    if (tid === id) etiquettes.push(`merveille (${MERVEILLES[type] || type})`);
   }
+  const religionInfluente = (etat.religious_influence || {})[String(id)];
+  if (religionInfluente !== undefined) {
+    etiquettes.push(`influence de ${RELIGIONS[religionInfluente].nom}`);
+  }
+  const saint = lieuSaint(etat, id);
+  if (saint !== null) etiquettes.push(`lieu saint de ${RELIGIONS[saint].nom}`);
+  if (capitalesParadisFiscal(etat).has(id)) etiquettes.push("capitale de paradis fiscal");
   if (etiquettes.length) lignes.push("Particularités : " + etiquettes.join(", "));
   zone.innerHTML = lignes.join("<br>");
 }
@@ -1088,14 +1126,22 @@ function dessinerCarte() {
       : [],
   );
 
-  // Couleur de remplissage de chaque territoire (mêmes règles que x45).
+  // Couleur de remplissage de chaque territoire (mêmes règles que x45) ;
+  // en vue religion, la couleur vient de l'influence religieuse.
+  const vueReligion = client.vueCarte === "religion";
+  const influence = etat.religious_influence || {};
   const remplissages = situations.map((situation) => {
-    const base = couleurJoueur(situation.owner);
     let couleur;
-    if (situation.owner === etat.current_player) {
-      couleur = base.map((c) => Math.min(255, Math.round(c * 1.12) + 10));
+    if (vueReligion) {
+      const religion = influence[String(situation.id)];
+      const base = religion === undefined
+        ? [58, 65, 72] : RELIGIONS[religion].couleur;
+      couleur = base.map((c) => Math.max(28, Math.round(c * 0.78)));
     } else {
-      couleur = base.map((c) => Math.round(c * 0.72));
+      const base = couleurJoueur(situation.owner);
+      couleur = situation.owner === etat.current_player
+        ? base.map((c) => Math.min(255, Math.round(c * 1.12) + 10))
+        : base.map((c) => Math.round(c * 0.72));
     }
     if (situation.id === client.selection) {
       couleur = couleur.map((c) => Math.min(255, c + 70));
@@ -1156,7 +1202,11 @@ function dessinerCarte() {
   }
 
   dessinerLiens(contexte, etat, largeurCellule, hauteurCellule);
-  dessinerEtiquettes(contexte, etat, largeurCellule, hauteurCellule);
+  if (vueReligion) {
+    dessinerVueReligion(contexte, etat, largeurCellule, hauteurCellule);
+  } else {
+    dessinerEtiquettes(contexte, etat, largeurCellule, hauteurCellule);
+  }
 }
 
 function dessinerLiens(contexte, etat, largeurCellule, hauteurCellule) {
@@ -1206,23 +1256,270 @@ function dessinerLiens(contexte, etat, largeurCellule, hauteurCellule) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Statuts calculés côté client (miroir des assistants de x45)
+// ---------------------------------------------------------------------------
+
+function comptesAmenagements(etat, tid) {
+  // Miroir de get_territory_amenagement_count : forteresse + industrie
+  // (usine/aéroport/port, exclusifs) + temple + centre culturel + université.
+  let compte = 0;
+  if (etat.fortress_territory_ids.includes(tid)) compte += 1;
+  if (etat.factory_territory_ids.includes(tid)
+      || etat.airport_territory_ids.includes(tid)
+      || etat.port_territory_ids.includes(tid)) compte += 1;
+  if (etat.temple_territory_ids.includes(tid)) compte += 1;
+  if ((etat.cultural_center_ages[String(tid)] || []).length) compte += 1;
+  if (etat.university_territory_ids.includes(tid)) compte += 1;
+  return compte;
+}
+
+function capitaleActive(etat, tid) {
+  // Miroir d'is_active_regular_capital : le badge disparaît si la capitale
+  // est occupée par un autre joueur (ou si son joueur est ONU/CC).
+  for (const [joueur, capitale] of Object.entries(etat.player_capital_ids)) {
+    if (capitale !== tid) continue;
+    const proprietaire = Number(joueur);
+    return etat.territories_state[tid].owner === proprietaire
+      && proprietaire !== etat.onu_player_id
+      && !etat.commercial_city_players.includes(proprietaire)
+      ? { nation: etat.nation_players.includes(proprietaire) }
+      : null;
+  }
+  return null;
+}
+
+function lieuSaint(etat, tid) {
+  for (const [religion, siege] of Object.entries(etat.religion_holy_sites)) {
+    if (siege === tid && Number(religion) !== RELIGION_MERVEILLE) {
+      return Number(religion);
+    }
+  }
+  return null;
+}
+
+function capitalesParadisFiscal(etat) {
+  const ids = new Set();
+  for (const liste of Object.values(etat.last_stand_bonus_territory || {})) {
+    for (const tid of liste) ids.add(tid);
+  }
+  return ids;
+}
+
+// ---------------------------------------------------------------------------
+// Badges (pictogrammes x45 transposés en canvas, mêmes couleurs)
+// ---------------------------------------------------------------------------
+
+function fondBadge(ctx, x, y, largeur, hauteur, fond, bord, arrondi = 6) {
+  ctx.beginPath();
+  ctx.roundRect(x - largeur / 2, y - hauteur / 2, largeur, hauteur, arrondi);
+  ctx.fillStyle = fond;
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = bord;
+  ctx.stroke();
+}
+
+function glypheBadge(ctx, x, y, texte, couleur, taille = 10) {
+  ctx.font = `bold ${taille}px 'Segoe UI', sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = couleur;
+  ctx.fillText(texte, x - ctx.measureText(texte).width / 2, y + 1);
+}
+
+function dessinerBadge(ctx, type, x, y, etat, tid) {
+  const g = (gauche) => x - 14 + gauche;   // repère local du badge 28x24
+  const h = (haut) => y - 12 + haut;
+  if (type === "fortress") {
+    fondBadge(ctx, x, y, 28, 24, "rgb(196,198,201)", "rgb(44,62,80)");
+    ctx.fillStyle = "rgb(52,73,94)";
+    ctx.fillRect(g(4), h(10), 20, 9);
+    for (const tourX of [4, 12, 20]) ctx.fillRect(g(tourX), h(5), 4, 13);
+    ctx.fillStyle = "rgb(236,240,241)";
+    ctx.fillRect(g(12), h(13), 4, 6);
+  } else if (type === "precious_mine") {
+    fondBadge(ctx, x, y, 28, 24, "rgb(72,62,92)", "rgb(225,215,245)");
+    ctx.beginPath();
+    ctx.moveTo(g(14), h(3));
+    ctx.lineTo(g(21), h(10));
+    ctx.lineTo(g(17), h(21));
+    ctx.lineTo(g(10), h(21));
+    ctx.lineTo(g(6), h(10));
+    ctx.closePath();
+    ctx.fillStyle = "rgb(174,235,255)";
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgb(48,95,125)";
+    ctx.stroke();
+  } else if (type.startsWith("wonder:")) {
+    const couleurs = {
+      elyrion_sanctuary: ["rgb(52,88,116)", "rgb(174,235,255)", "E"],
+      thousand_voices_theatre: ["rgb(92,50,112)", "rgb(235,188,255)", "T"],
+      atlas_observatory: ["rgb(32,68,108)", "rgb(150,215,255)", "O"],
+      golden_pact_palace: ["rgb(105,77,20)", "rgb(255,220,92)", "P"],
+    };
+    const [fond, symbole, lettre] = couleurs[type.split(":")[1]]
+      || ["rgb(70,70,70)", "rgb(235,235,235)", "?"];
+    fondBadge(ctx, x, y, 30, 26, fond, symbole, 7);
+    glypheBadge(ctx, x, y, lettre, symbole, 13);
+  } else if (type === "factory") {
+    fondBadge(ctx, x, y, 28, 24, "rgb(133,193,233)", "rgb(44,62,80)");
+    ctx.fillStyle = "rgb(28,42,56)";
+    ctx.beginPath();
+    ctx.moveTo(g(5), h(18));
+    ctx.lineTo(g(5), h(12));
+    ctx.lineTo(g(11), h(8));
+    ctx.lineTo(g(11), h(12));
+    ctx.lineTo(g(17), h(8));
+    ctx.lineTo(g(17), h(12));
+    ctx.lineTo(g(23), h(12));
+    ctx.lineTo(g(23), h(18));
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(g(18), h(4), 3, 8);
+  } else if (type === "airport") {
+    fondBadge(ctx, x, y, 28, 24, "rgb(174,214,241)", "rgb(44,62,80)");
+    ctx.fillStyle = "rgb(28,42,56)";
+    ctx.beginPath();  // fuselage vertical + ailes
+    ctx.moveTo(g(14), h(4));
+    ctx.lineTo(g(17), h(15));
+    ctx.lineTo(g(14), h(20));
+    ctx.lineTo(g(11), h(15));
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(g(4), h(12));
+    ctx.lineTo(g(24), h(12));
+    ctx.lineTo(g(18), h(15));
+    ctx.lineTo(g(10), h(15));
+    ctx.closePath();
+    ctx.fill();
+  } else if (type === "port") {
+    fondBadge(ctx, x, y, 28, 24, "rgb(118,215,196)", "rgb(44,62,80)");
+    ctx.fillStyle = "rgb(28,42,56)";
+    ctx.beginPath();  // coque
+    ctx.moveTo(g(5), h(14));
+    ctx.lineTo(g(23), h(14));
+    ctx.lineTo(g(19), h(19));
+    ctx.lineTo(g(8), h(19));
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillRect(g(10), h(8), 8, 6);
+  } else if (type === "temple" || type === "university") {
+    const [fond, trait] = type === "temple"
+      ? ["rgb(245,203,167)", "rgb(112,66,20)"]
+      : ["rgb(214,234,248)", "rgb(36,76,112)"];
+    fondBadge(ctx, x, y, 28, 24, fond, trait);
+    ctx.fillStyle = trait;
+    ctx.beginPath();  // fronton
+    ctx.moveTo(g(4), h(10));
+    ctx.lineTo(g(14), h(4));
+    ctx.lineTo(g(24), h(10));
+    ctx.closePath();
+    ctx.fill();
+    for (const px of [7, 12, 17]) ctx.fillRect(g(px), h(11), 3, 7);
+    ctx.fillRect(g(5), h(18), 18, 2);
+  } else if (type === "culture") {
+    fondBadge(ctx, x, y, 28, 24, "rgb(215,189,226)", "rgb(84,52,94)");
+    ctx.strokeStyle = "rgb(84,52,94)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(g(6), h(18));
+    ctx.lineTo(g(14), h(6));
+    ctx.lineTo(g(22), h(18));
+    ctx.moveTo(g(8), h(18));
+    ctx.lineTo(g(20), h(18));
+    ctx.stroke();
+    const nombre = (etat.cultural_center_ages[String(tid)] || []).length;
+    if (nombre > 1) glypheBadge(ctx, g(23), h(7), String(nombre), "rgb(84,52,94)");
+  } else if (type === "capital" || type === "capital_nation") {
+    if (type === "capital_nation") {
+      ctx.beginPath();
+      ctx.arc(x, y, 15, 0, 2 * Math.PI);
+      ctx.fillStyle = "rgb(255,255,210)";
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = "rgb(255,210,40)";
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.arc(x, y, 11, 0, 2 * Math.PI);
+    ctx.fillStyle = type === "capital_nation" ? "rgb(255,245,90)" : "rgb(255,245,170)";
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = type === "capital_nation" ? "rgb(120,70,0)" : "rgb(90,55,10)";
+    ctx.stroke();
+    glypheBadge(ctx, x, y, "C", "rgb(20,20,20)", 12);
+  } else if (type === "money" || type === "commercial_money") {
+    const cc = type === "commercial_money";
+    fondBadge(ctx, x, y, 28, 24,
+      cc ? "rgb(42,197,210)" : "rgb(248,218,92)",
+      cc ? "rgb(12,73,84)" : "rgb(99,73,18)");
+    glypheBadge(ctx, x, y, cc ? "CC" : "x10", cc ? "rgb(6,48,55)" : "rgb(71,48,11)");
+  } else if (type.startsWith("holy_site:")) {
+    dessinerBadgeReligion(ctx, x, y, Number(type.split(":")[1]), true);
+  }
+}
+
+function dessinerBadgeReligion(ctx, x, y, religion, saint) {
+  const definition = RELIGIONS[religion] || { symbole: "?", couleur: [200, 200, 200] };
+  ctx.beginPath();
+  ctx.arc(x, y, saint ? 14 : 10, 0, 2 * Math.PI);
+  ctx.fillStyle = rgb(definition.couleur);
+  ctx.fill();
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = saint ? "rgb(255,255,255)" : "rgb(35,35,35)";
+  ctx.stroke();
+  glypheBadge(ctx, x, y, definition.symbole, "rgb(18,24,30)");
+}
+
+function dessinerCercleAmenagements(ctx, x, y, compte, maximum, couleur) {
+  // Miroir de draw_amenagement_progress_circle : camembert de progression.
+  const rayon = 8;
+  ctx.beginPath();
+  ctx.arc(x, y, rayon, 0, 2 * Math.PI);
+  ctx.fillStyle = rgb(COULEUR_FOND);
+  ctx.fill();
+  if (compte > 0) {
+    ctx.beginPath();
+    if (compte >= maximum) {
+      ctx.arc(x, y, rayon - 2, 0, 2 * Math.PI);
+    } else {
+      ctx.moveTo(x, y);
+      ctx.arc(x, y, rayon - 2, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * (compte / maximum));
+      ctx.closePath();
+    }
+    ctx.fillStyle = couleur;
+    ctx.fill();
+  }
+  ctx.beginPath();
+  ctx.arc(x, y, rayon, 0, 2 * Math.PI);
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "rgb(235,235,235)";
+  ctx.stroke();
+}
+
 function dessinerEtiquettes(contexte, etat, largeurCellule, hauteurCellule) {
-  const capitales = new Set(Object.values(etat.player_capital_ids));
-  contexte.font = "13px 'Segoe UI', sans-serif";
+  const vueComplete = client.vueCarte === "all";
+  const capitalesPF = capitalesParadisFiscal(etat);
   contexte.textBaseline = "middle";
   for (const territoire of etat.territories) {
     if (!territoire.cells.length) continue;
     const situation = etat.territories_state[territoire.id];
+    const tid = territoire.id;
     const [ligneCentre, colonneCentre] = centreTerritoire(etat, territoire);
     const cx = (colonneCentre + 0.5) * largeurCellule;
     const cy = (ligneCentre + 0.5) * hauteurCellule;
     const base = couleurJoueur(situation.owner);
 
+    // Boîte : cercle d'aménagements + nombre de régiments (comme x45).
+    contexte.font = "13px 'Segoe UI', sans-serif";
     const texte = String(situation.regiments);
     const largeurTexte = contexte.measureText(texte).width;
-    const largeurBoite = largeurTexte + 16;
+    const largeurBoite = 22 + largeurTexte + 10;
     const hauteurBoite = 20;
     let x = Math.max(4, Math.min(LARGEUR_CARTE - largeurBoite - 4, cx - largeurBoite / 2));
+    if (situation.reinforcement_bonus > 1) x -= 10;
     let y = Math.max(2, Math.min(HAUTEUR_CARTE - hauteurBoite - 4, cy - hauteurBoite / 2));
 
     contexte.fillStyle = rgb(base.map((c) => Math.max(0, Math.round(c * 0.30) + 8)));
@@ -1232,56 +1529,132 @@ function dessinerEtiquettes(contexte, etat, largeurCellule, hauteurCellule) {
     contexte.roundRect(x, y, largeurBoite, hauteurBoite, 4);
     contexte.fill();
     contexte.stroke();
+    const couleurIcone = rgb(base.map((c) => Math.min(255, Math.round(c * 1.6) + 40)));
+    dessinerCercleAmenagements(
+      contexte, x + 12, y + hauteurBoite / 2,
+      comptesAmenagements(etat, tid), 5, couleurIcone,
+    );
+    contexte.font = "13px 'Segoe UI', sans-serif";
     contexte.fillStyle = "rgb(235,235,235)";
-    contexte.fillText(texte, x + 8, y + hauteurBoite / 2 + 1);
+    contexte.fillText(texte, x + 26, y + hauteurBoite / 2 + 1);
 
-    // Capitale : petite étoile au-dessus de la boîte.
-    if (capitales.has(territoire.id)) {
-      dessinerEtoile(contexte, cx, y - 8, 7, "rgb(255,220,50)");
-    }
-    // Territoire doré : disque or à gauche (comme x45, en plus petit).
-    if (etat.golden_territory_ids.includes(territoire.id)) {
+    // Territoire doré : disque or à gauche de la boîte.
+    if (etat.golden_territory_ids.includes(tid)) {
+      const gx = Math.max(16, Math.min(LARGEUR_CARTE - 16, x - 16));
+      const gy = Math.max(16, y + hauteurBoite / 2);
       contexte.beginPath();
-      contexte.arc(x - 11, y + hauteurBoite / 2, 8, 0, 2 * Math.PI);
+      contexte.arc(gx, gy, 12, 0, 2 * Math.PI);
       contexte.fillStyle = "rgb(255,215,0)";
       contexte.fill();
+      contexte.lineWidth = 2;
       contexte.strokeStyle = "rgb(120,90,0)";
       contexte.stroke();
       contexte.beginPath();
-      contexte.arc(x - 11, y + hauteurBoite / 2, 4, 0, 2 * Math.PI);
+      contexte.arc(gx, gy, 7, 0, 2 * Math.PI);
+      contexte.fillStyle = "rgb(255,235,120)";
+      contexte.fill();
+      contexte.beginPath();
+      contexte.arc(gx, gy, 4, 0, 2 * Math.PI);
       contexte.fillStyle = "rgb(255,250,210)";
       contexte.fill();
     }
-    // Bonus de renforts : pastille "+n" à droite.
+    // Bonus de renforts : pastille +n à droite (couleurs x45).
     if (situation.reinforcement_bonus > 1) {
-      const bx = Math.min(LARGEUR_CARTE - 10, x + largeurBoite + 11);
-      const by = y + hauteurBoite / 2;
+      const bx = Math.min(LARGEUR_CARTE - 14, x + largeurBoite + 12);
+      const by = Math.max(12, y + hauteurBoite / 2);
+      const rayon = situation.reinforcement_bonus === 2 ? 9 : 11;
       contexte.beginPath();
-      contexte.arc(bx, by, 9, 0, 2 * Math.PI);
-      contexte.fillStyle = "rgb(244,208,63)";
+      contexte.arc(bx, by, rayon, 0, 2 * Math.PI);
+      contexte.fillStyle = situation.reinforcement_bonus === 2
+        ? "rgb(241,196,15)" : "rgb(230,126,34)";
       contexte.fill();
-      contexte.fillStyle = "rgb(40,30,0)";
-      const bonus = `+${situation.reinforcement_bonus}`;
-      contexte.fillText(bonus, bx - contexte.measureText(bonus).width / 2, by + 1);
+      contexte.lineWidth = 2;
+      contexte.strokeStyle = "rgb(44,62,80)";
+      contexte.stroke();
+      glypheBadge(contexte, bx, by, `+${situation.reinforcement_bonus}`, "rgb(20,20,20)");
+    }
+
+    // Rangée de badges au-dessus de la boîte (ordre et règles de x45) :
+    // les statuts restent visibles dans toutes les vues, les aménagements
+    // secondaires seulement en vue « toutes les icônes ».
+    const badges = [];
+    if (etat.fortress_territory_ids.includes(tid)) badges.push("fortress");
+    if (etat.precious_mineral_mine_ids.includes(tid)) badges.push("precious_mine");
+    for (const [typeMerveille, siege] of Object.entries(etat.wonder_territories)) {
+      if (siege === tid) badges.push(`wonder:${typeMerveille}`);
+    }
+    const religionSainte = lieuSaint(etat, tid);
+    if (religionSainte !== null) badges.push(`holy_site:${religionSainte}`);
+    if (vueComplete) {
+      if (etat.factory_territory_ids.includes(tid)) badges.push("factory");
+      if (etat.airport_territory_ids.includes(tid)) badges.push("airport");
+      if (etat.port_territory_ids.includes(tid)) badges.push("port");
+      if (etat.temple_territory_ids.includes(tid)) badges.push("temple");
+      if ((etat.cultural_center_ages[String(tid)] || []).length) badges.push("culture");
+      if (etat.university_territory_ids.includes(tid)) badges.push("university");
+    }
+    const capitale = capitaleActive(etat, tid);
+    if (capitale) badges.push(capitale.nation ? "capital_nation" : "capital");
+    if (capitalesPF.has(tid)) {
+      badges.push(etat.commercial_city_players.includes(situation.owner)
+        ? "commercial_money" : "money");
+    }
+    if (badges.length) {
+      const espacement = 32;
+      const debut = x + largeurBoite / 2 - (badges.length - 1) * (espacement / 2);
+      const badgeY = Math.max(14, y - 14);
+      badges.forEach((type, index) => {
+        const badgeX = Math.max(16, Math.min(LARGEUR_CARTE - 16, debut + index * espacement));
+        dessinerBadge(contexte, type, badgeX, badgeY, etat, tid);
+      });
     }
   }
 }
 
-function dessinerEtoile(contexte, cx, cy, rayon, couleur) {
-  contexte.beginPath();
-  for (let i = 0; i < 10; i += 1) {
-    const angle = -Math.PI / 2 + (i * Math.PI) / 5;
-    const r = i % 2 === 0 ? rayon : rayon * 0.45;
-    const x = cx + r * Math.cos(angle);
-    const y = cy + r * Math.sin(angle);
-    if (i === 0) contexte.moveTo(x, y); else contexte.lineTo(x, y);
+function dessinerVueReligion(contexte, etat, largeurCellule, hauteurCellule) {
+  // Miroir de draw_religion_view_symbols : noms des territoires, lieux
+  // saints en grand, et légende des religions fondées.
+  contexte.textBaseline = "middle";
+  contexte.font = "12px 'Segoe UI', sans-serif";
+  for (const territoire of etat.territories) {
+    if (!territoire.cells.length) continue;
+    const [ligneCentre, colonneCentre] = centreTerritoire(etat, territoire);
+    const cx = (colonneCentre + 0.5) * largeurCellule;
+    const cy = (ligneCentre + 0.5) * hauteurCellule + 22;
+    const largeurTexte = contexte.measureText(territoire.name).width;
+    const x = Math.max(3, Math.min(LARGEUR_CARTE - largeurTexte - 3, cx - largeurTexte / 2));
+    const y = Math.max(10, Math.min(HAUTEUR_CARTE - 10, cy));
+    contexte.fillStyle = "rgb(22,28,34)";
+    contexte.strokeStyle = "rgb(210,216,222)";
+    contexte.lineWidth = 1;
+    contexte.beginPath();
+    contexte.roundRect(x - 4, y - 9, largeurTexte + 8, 18, 4);
+    contexte.fill();
+    contexte.stroke();
+    contexte.fillStyle = "rgb(245,247,250)";
+    contexte.fillText(territoire.name, x, y + 1);
   }
-  contexte.closePath();
-  contexte.fillStyle = couleur;
-  contexte.fill();
-  contexte.strokeStyle = "rgb(60,45,0)";
-  contexte.lineWidth = 1;
-  contexte.stroke();
+  for (const [religion, tid] of Object.entries(etat.religion_holy_sites)) {
+    const territoire = etat.territories[tid];
+    if (!territoire || !territoire.cells.length) continue;
+    const [ligneCentre, colonneCentre] = centreTerritoire(etat, territoire);
+    dessinerBadgeReligion(
+      contexte,
+      (colonneCentre + 0.5) * largeurCellule,
+      (ligneCentre + 0.5) * hauteurCellule,
+      Number(religion), true,
+    );
+  }
+  // Légende des religions fondées, en haut à gauche (comme x45).
+  const fondees = [...new Set(Object.values(etat.religion_founders))].sort();
+  let legendeY = 22;
+  contexte.font = "12px 'Segoe UI', sans-serif";
+  for (const religion of fondees) {
+    dessinerBadgeReligion(contexte, 30, legendeY, religion, false);
+    contexte.fillStyle = "rgb(236,240,241)";
+    contexte.fillText(RELIGIONS[religion].nom, 46, legendeY + 1);
+    legendeY += 24;
+  }
 }
 
 function territoireSousLaSouris(evenement) {

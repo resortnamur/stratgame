@@ -421,5 +421,32 @@ re-grisage), refus de corruption avec texte, don d'argent à l'IA via
 - **Panneau « Événements majeurs »** : les 8 derniers
   (`recent_major_events`), plus récent en premier.
 
+#### 3e — Rendu de carte complet (audit de fidélité) ✅ (2026-07-23)
+
+Retour d'audit contre x45 (« il manque beaucoup de choses ») :
+- **Trois vues de carte** au bouton, comme x45 : « Icônes : fort. » →
+  « Icônes : tout » → « Vue : religion » (préférence en localStorage).
+- **Cercle de progression des aménagements** dans la boîte de régiments
+  (camembert x/5 : forteresse + industrie + temple + CC + université).
+- **Tous les badges x45** (mêmes couleurs, pictogrammes canvas) :
+  forteresse, mine de minerais, merveilles (4 symboles), lieux saints
+  (visibles dans toutes les vues), badge argent PF (x10) / CC ; en vue
+  « tout » : usine, aéroport, port, temple, centre culturel (avec compte),
+  université.
+- **Capitale = badge « C »** (halo doré pour les nations), affiché
+  seulement si la capitale est encore aux mains de son propriétaire —
+  corrige l'étoile fantôme après capture (miroir d'is_active_regular_capital).
+- **Vue religion complète** : territoires colorés par influence (×0.78,
+  gris sans religion), étiquettes des noms de territoires, lieux saints
+  en grand (bord blanc), légende des religions fondées ; pas de boîtes de
+  régiments dans cette vue, comme x45.
+- Détail territoire enrichi : influence religieuse, lieu saint, capitale
+  de paradis fiscal, noms français des merveilles.
+
+Vérifié dans le navigateur pixel par pixel sur trois parties (neuve,
+partie_022 : 5 religions et 32 territoires influencés, partie_003 :
+paradis fiscal) — les trois vues, les badges attendus présents/absents
+selon la vue, et la capitale qui disparaît bien à la capture (simulation).
+
 L'étape 3 est terminée : le jeu complet se joue dans le navigateur.
 ### Étape 4 — Déploiement gratuit (Render/Fly.io ; réveil ~30 s, état en base) ⬜
