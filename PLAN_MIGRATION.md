@@ -294,7 +294,7 @@ siège, refus `identite_requise`/`jeton_inconnu`.
 **L'étape 2 est terminée : le serveur couvre lobby, parties, jeu en direct
 et identités.**
 
-### Étape 3 — Client web (canvas, écran par écran) 🔶 (en cours)
+### Étape 3 — Client web (canvas, écran par écran) ✅ (2026-07-23)
 
 #### 3a — Lobby et vue de partie en direct ✅ (2026-07-23)
 
@@ -407,6 +407,19 @@ Vérifié en direct : mercenaires ×2 (trésor décompté, régiments ajoutés,
 re-grisage), refus de corruption avec texte, don d'argent à l'IA via
 « Valider ». Couche serveur inchangée.
 
-#### 3d — Panneaux d'information ⬜ (aperçus revenus/culture/science,
-événements majeurs, panneau empire/géopolitique de x45)
+#### 3d — Panneaux d'information ✅ (2026-07-23)
+
+- **`etat_reseau` enrichi d'`apercus`** : revenu, culture et gain de
+  science par joueur actif, calculés par le moteur (l'équivalent de
+  l'en-tête boutique et du panneau géopolitique de x45).
+- **En-tête** : `Or : x (+revenu/tour) — Science : y (+gain) — Culture : z`.
+- **Panneau Joueurs = panneau géopolitique** : sous chaque joueur,
+  territoires · régiments · écus (+revenu) · science (+gain) · culture.
+- **Journal enrichi** : les événements de fin de tour (renforts détaillés,
+  sédition, marché, ressources, religion, événements d'empire, notes de
+  début de tour) sortent du `turn_report` — tours humains et IA.
+- **Panneau « Événements majeurs »** : les 8 derniers
+  (`recent_major_events`), plus récent en premier.
+
+L'étape 3 est terminée : le jeu complet se joue dans le navigateur.
 ### Étape 4 — Déploiement gratuit (Render/Fly.io ; réveil ~30 s, état en base) ⬜

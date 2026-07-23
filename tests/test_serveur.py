@@ -131,6 +131,11 @@ class TestSessionPartie(unittest.TestCase):
         etat = session.etat_reseau()
         self.assertEqual(etat["replay_history"], [])
         self.assertEqual(etat["kind"], "game")
+        # Les apercus (revenu/culture/science) couvrent les joueurs actifs.
+        actifs = regles.get_active_players(session.state)
+        self.assertEqual(sorted(etat["apercus"]), sorted(str(j) for j in actifs))
+        premier = etat["apercus"][str(actifs[0])]
+        self.assertEqual(sorted(premier), ["culture", "revenu", "science_gain"])
         # L'etat diffuse reste chargeable par le moteur (sans le replay).
         from moteur.etat import GameState
         GameState.from_payload(etat)

@@ -499,8 +499,26 @@ function toutRafraichir() {
   afficherSieges();
   afficherBarreActions();
   afficherBoutique();
+  afficherEvenements();
   afficherDetailTerritoire();
   dessinerCarte();
+}
+
+function afficherEvenements() {
+  const etat = client.etat;
+  const zone = $("liste-evenements");
+  const evenements = (etat && etat.recent_major_events) || [];
+  if (!evenements.length) {
+    zone.textContent = "Rien à signaler pour l'instant.";
+    return;
+  }
+  zone.textContent = "";
+  // Les plus récents en premier.
+  for (const evenement of [...evenements].reverse()) {
+    const ligne = document.createElement("div");
+    ligne.textContent = evenement;
+    zone.append(ligne);
+  }
 }
 
 function limiteDeplacements(etat) {
@@ -782,9 +800,14 @@ function afficherEnTete() {
   $("info-tour").textContent =
     `Tour ${etat.turn} — ${nomDuJoueur(etat.current_player)} (${phase})`;
   if (client.monSiege !== null) {
-    const or = etat.player_money[String(client.monSiege)] || 0;
-    const science = etat.player_science[String(client.monSiege)] || 0;
-    $("info-tresor").textContent = `Or : ${or} — Science : ${science}`;
+    const cle = String(client.monSiege);
+    const or = etat.player_money[cle] || 0;
+    const science = etat.player_science[cle] || 0;
+    const apercu = (etat.apercus || {})[cle];
+    $("info-tresor").textContent = apercu
+      ? `Or : ${or} (+${apercu.revenu}/tour) — Science : ${science} ` +
+        `(+${apercu.science_gain}) — Culture : ${apercu.culture}`
+      : `Or : ${or} — Science : ${science}`;
   } else {
     $("info-tresor").textContent = "Spectateur";
   }
@@ -815,6 +838,21 @@ function afficherSieges() {
       }
     } else {
       texte.textContent = `Siège ${siege.joueur} libre`;
+    }
+    // La ligne géopolitique du joueur (équivalent du panneau de x45).
+    if (etat && siege.actif) {
+      const cle = String(siege.joueur);
+      const possessions = etat.territories_state.filter((s) => s.owner === siege.joueur);
+      const regiments = possessions.reduce((somme, s) => somme + s.regiments, 0);
+      const apercu = (etat.apercus || {})[cle];
+      const stats = document.createElement("span");
+      stats.className = "statistiques";
+      stats.textContent =
+        `${possessions.length} terr. · ${regiments} rég. · ` +
+        `${etat.player_money[cle] || 0} écus` +
+        (apercu ? ` (+${apercu.revenu}) · sci ${etat.player_science[cle] || 0}` +
+                  ` (+${apercu.science_gain}) · cult ${apercu.culture}` : "");
+      texte.append(stats);
     }
     element.append(pion, texte);
 
@@ -866,6 +904,23 @@ function journal(texte) {
   zone.scrollTop = zone.scrollHeight;
 }
 
+function journalRapportTour(rapport) {
+  // Les événements d'une fin de tour (miroir de TurnAdvanceReport).
+  if (!rapport) return;
+  const textes = [];
+  if (rapport.reinforcement_report && rapport.reinforcement_report.message) {
+    textes.push(rapport.reinforcement_report.message);
+  }
+  textes.push(rapport.sedition_message, rapport.market_message);
+  textes.push(...(rapport.resource_messages || []));
+  textes.push(...(rapport.religion_messages || []));
+  textes.push(...(rapport.empire_messages || []));
+  if (rapport.begin_turn) textes.push(...(rapport.begin_turn.turn_notes || []));
+  for (const texte of textes) {
+    if (texte) journal(texte);
+  }
+}
+
 function journalResultat(message) {
   const action = message.action;
   const outcome = message.resultat && message.resultat.outcome;
@@ -895,12 +950,14 @@ function journalResultat(message) {
       };
       journal(`${nomDuJoueur(message.joueur)} : ${libelles[action.type] || action.type}.`);
     }
+    journalRapportTour(outcome.turn_report);
   }
   // Fin d'un tour IA (les passes d'attaque ont été racontées en direct).
   const rapports = (message.resultat && message.resultat.rapports_ia) || [];
   for (const rapport of rapports) {
     journal(`${nomDuJoueur(message.joueur)} termine son tour` +
             (rapport.attack_passes ? ` (${rapport.attack_passes} passe(s) d'attaque).` : "."));
+    journalRapportTour(rapport.turn_report);
   }
 }
 

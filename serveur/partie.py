@@ -199,13 +199,23 @@ class SessionPartie:
 
         L'historique (jusqu'a plusieurs centaines de Ko) ne sert qu'au mode
         replay local : il reste dans les sauvegardes mais pas sur le reseau.
-        La clé ``phase`` s'ajoute au format canonique (qui ne la stocke pas :
-        x45 ne sauvegarde qu'en phase de jeu) — le client doit distinguer
-        "playing", "shopping" et "victory".
+        Deux cles s'ajoutent au format canonique : ``phase`` (le format ne
+        la stocke pas — x45 ne sauvegarde qu'en phase de jeu) et
+        ``apercus`` — revenu, culture et gain de science par joueur actif,
+        calcules par le moteur (l'equivalent de l'en-tete de la boutique et
+        du panneau geopolitique de x45).
         """
         with self.lock:
             payload = self.state.to_payload()
             payload["phase"] = self.state.phase
+            payload["apercus"] = {
+                str(joueur): {
+                    "revenu": regles.calculate_player_income(self.state, joueur),
+                    "culture": regles.calculate_player_culture(self.state, joueur),
+                    "science_gain": regles.calculate_player_science_income(self.state, joueur),
+                }
+                for joueur in regles.get_active_players(self.state)
+            }
         payload["replay_history"] = []
         return payload
 

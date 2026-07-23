@@ -158,6 +158,21 @@ header {
 
 .spectateurs { font-size: 0.85rem; color: rgb(149, 165, 166); }
 
+#liste-sieges .statistiques {
+  display: block;
+  font-size: 0.75rem;
+  color: rgb(149, 165, 166);
+}
+
+#liste-evenements {
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: rgb(189, 195, 199);
+  max-height: 130px;
+  overflow-y: auto;
+}
+#liste-evenements div { border-bottom: 1px solid rgb(40, 58, 82); padding: 2px 0; }
+
 #detail-territoire { font-size: 0.9rem; line-height: 1.5; }
 
 /* --- Boutique -------------------------------------------------------- */
