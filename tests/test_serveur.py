@@ -431,6 +431,20 @@ class TestApplicationWeb(unittest.TestCase):
         # Les routes API passent avant le statique.
         self.assertEqual(self.client.get("/api/cartes").status_code, 200)
 
+    def test_replay_via_api(self):
+        resume = self.ouvrir_partie(premiere_sauvegarde().name)
+        reponse = self.client.get(f"/api/parties/{resume['id']}/replay")
+        self.assertEqual(reponse.status_code, 200)
+        histoire = reponse.json()["replay_history"]
+        self.assertTrue(histoire)
+        premier = histoire[0]
+        for cle in ("turn", "player", "owners", "regiments", "fortresses"):
+            self.assertIn(cle, premier)
+        # L'etat diffuse, lui, reste sans historique.
+        etat = self.client.get(f"/api/parties/{resume['id']}/etat").json()
+        self.assertEqual(etat["replay_history"], [])
+        self.assertEqual(self.client.get("/api/parties/absente/replay").status_code, 404)
+
     def test_websocket_prendre_siege(self):
         chemin = sauvegarde_avec_humain_au_trait()
         resume = self.ouvrir_partie(chemin.name)

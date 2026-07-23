@@ -448,5 +448,22 @@ partie_022 : 5 religions et 32 territoires influencés, partie_003 :
 paradis fiscal) — les trois vues, les badges attendus présents/absents
 selon la vue, et la capitale qui disparaît bien à la capture (simulation).
 
+#### 3f — Mode replay ✅ (2026-07-23)
+
+- `GET /api/parties/{id}/replay` : l'historique des instantanés, chargé à
+  la demande seulement (jusqu'à ~1 Mo — toujours exclu de l'état diffusé).
+- Bouton **Replay** dans l'en-tête de partie : lecture des instantanés du
+  moteur sur le canvas (les mêmes que x45, enregistrés à l'identique —
+  parité 1b.1) à la cadence x45 (150 ms/étape) ; pause/lecture (Espace),
+  curseur de position, libellés d'étape (« Tour 1 - J1 conquiert T69 »),
+  pause automatique en fin, relecture, Échap pour quitter. Pendant le
+  replay : barre d'actions masquée, clics de jeu désactivés, l'état réel
+  continue d'arriver en arrière-plan.
+- À savoir : les sauvegardes x45 existantes ont un historique vide (0
+  instantané sur les 23) — l'historique s'enregistre en jouant, et les
+  sauvegardes faites côté serveur le conservent.
+- L'import de cartes dans le lobby est planifié pour l'étape 4 (une fois
+  le serveur hébergé, plus de dossier local).
+
 L'étape 3 est terminée : le jeu complet se joue dans le navigateur.
 ### Étape 4 — Déploiement gratuit (Render/Fly.io ; réveil ~30 s, état en base) ⬜

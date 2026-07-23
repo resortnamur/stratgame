@@ -219,6 +219,15 @@ class SessionPartie:
         payload["replay_history"] = []
         return payload
 
+    def replay(self) -> List[dict]:
+        """L'historique replay complet (charge a la demande, hors diffusion).
+
+        Trop lourd pour accompagner chaque etat diffuse (jusqu'a ~1 Mo), il
+        n'est envoye qu'au client qui demande un replay.
+        """
+        with self.lock:
+            return list(self.state.replay_history)
+
     def resume(self) -> Dict[str, Any]:
         """Resume pour le lobby (liste des parties ouvertes)."""
         with self.lock:

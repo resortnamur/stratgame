@@ -5,7 +5,7 @@
 <title>Jeux Strat</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- ?v=... force le navigateur à reprendre les fichiers après une mise à jour -->
-<link rel="stylesheet" href="style.css?v=10">
+<link rel="stylesheet" href="style.css?v=11">
 </head>
 <body>
 
@@ -71,10 +71,17 @@
     <button id="bouton-retour-lobby" type="button">&larr; Lobby</button>
     <span id="info-tour"></span>
     <span id="info-tresor"></span>
+    <button id="bouton-replay" class="secondaire" type="button">Replay</button>
     <span id="info-connexion" class="badge-connexion"></span>
   </header>
   <div class="zone-partie">
     <div class="zone-carte">
+      <div id="barre-replay" hidden>
+        <button id="replay-pause" type="button">⏸ Pause</button>
+        <input type="range" id="replay-position" min="0" max="0" value="0" step="1">
+        <span id="replay-info"></span>
+        <button id="replay-quitter" class="danger" type="button">Quitter (Échap)</button>
+      </div>
       <div id="barre-actions" hidden>
         <button id="bouton-vue" class="secondaire" type="button"></button>
         <span id="indication-phase"></span>
@@ -122,6 +129,6 @@
   </div>
 </section>
 
-<script src="app.js?v=10"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

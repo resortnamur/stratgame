@@ -116,6 +116,20 @@ header {
   font-size: 0.9rem;
 }
 #indication-phase { color: rgb(244, 208, 63); }
+
+#barre-replay {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  background: rgb(33, 30, 58);
+  border: 1px solid rgb(94, 84, 142);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+#barre-replay input[type="range"] { flex: 1; }
+#replay-info { color: rgb(244, 208, 63); white-space: nowrap; }
 #barre-actions button { margin-left: auto; }
 #barre-actions button + button { margin-left: 0; }
 

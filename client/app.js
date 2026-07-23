@@ -63,8 +63,12 @@ const client = {
   achat: null,          // article de boutique sélectionné (entrée du catalogue)
   territoiresAchat: [],  // territoires déjà cliqués pour l'achat en cours
   vueCarte: localStorage.getItem("jeux_strat_vue") || "fortress",
+  replay: null,  // {histoire, index, enPause, minuterie} pendant un replay
   fermetureVoulue: false,
 };
+
+// Cadence du replay : la vitesse « REPLAY RAPIDE » de x45 (150 ms/étape).
+const DELAI_REPLAY_MS = 150;
 
 // Le serveur garde son propre verrou par connexion : ce délai n'est qu'un
 // filet si une réponse se perd, pour ne jamais laisser l'interface sourde.
@@ -301,6 +305,7 @@ $("form-nouvelle").addEventListener("submit", async (evenement) => {
 // ---------------------------------------------------------------------------
 
 function entrerEnPartie(partieId) {
+  quitterReplay();
   client.partieId = partieId;
   client.etat = null;
   client.monSiege = null;
@@ -559,7 +564,7 @@ function joueurAutomatique(etat, joueur) {
 function afficherBarreActions() {
   const etat = client.etat;
   const barre = $("barre-actions");
-  if (!etat || etat.phase === "victory") {
+  if (!etat || etat.phase === "victory" || client.replay) {
     barre.hidden = true;
     return;
   }
@@ -776,6 +781,125 @@ $("bouton-jouer-siege").addEventListener("click", () => {
   envoyer({ type: "prendre_siege", joueur: etat.current_player });
 });
 
+// ---------------------------------------------------------------------------
+// Mode replay — relit les instantanés enregistrés par le moteur (x45)
+// ---------------------------------------------------------------------------
+
+function etatDepuisInstantane(instantane) {
+  // Reconstruit un pseudo-état affichable par dessinerCarte : la géométrie
+  // (cellules, grille, liens terre) vient de l'état courant — elle ne
+  // change jamais — tout le reste vient de l'instantané.
+  const etat = client.etat;
+  return {
+    ...etat,
+    current_player: instantane.player,
+    turn: instantane.turn,
+    territories_state: instantane.owners.map((owner, tid) => ({
+      id: tid,
+      owner,
+      regiments: instantane.regiments[tid],
+      reinforcement_bonus: instantane.reinforcement_bonuses[tid],
+    })),
+    fortress_territory_ids: instantane.fortresses,
+    factory_territory_ids: instantane.factories,
+    airport_territory_ids: instantane.airports,
+    port_territory_ids: instantane.ports,
+    temple_territory_ids: instantane.temples,
+    university_territory_ids: instantane.universities,
+    cultural_center_ages: Object.fromEntries(
+      instantane.cultural_centers.map((tid) => [String(tid), [1]])),
+    precious_mineral_mine_ids: instantane.precious_mines,
+    sanctuary_territory_ids: instantane.sanctuaries,
+    submitted_territory_ids: instantane.submitted,
+    wonder_territories: instantane.wonders,
+    player_capital_ids: instantane.capitals,
+    commercial_city_players: instantane.commercial_players,
+    nation_players: instantane.nation_players,
+    religious_influence: instantane.religious_influence,
+    religion_holy_sites: instantane.religion_holy_sites,
+    religion_founders: Object.fromEntries(
+      Object.keys(instantane.religion_foundation_turns || {})
+        .map((religion) => [religion, Number(religion)])),
+    player_money: instantane.money,
+    player_science: instantane.science,
+    bridge_link_points: instantane.bridges,
+    fragile_bridge_links: instantane.bridges
+      .filter((pont) => pont.fragile).map((pont) => [pont.a, pont.b]),
+    last_stand_bonus_territory: {},  // absent des instantanés
+  };
+}
+
+async function demarrerReplay() {
+  if (client.replay || client.partieId === null) return;
+  let histoire;
+  try {
+    histoire = (await api(`/api/parties/${client.partieId}/replay`)).replay_history;
+  } catch (erreur) {
+    journal("Replay impossible : " + erreur.message);
+    return;
+  }
+  if (!histoire || histoire.length < 2) {
+    journal("Replay indisponible : pas assez d'instantanés enregistrés.");
+    return;
+  }
+  client.replay = { histoire, index: 0, enPause: false };
+  $("barre-replay").hidden = false;
+  $("barre-actions").hidden = true;
+  $("replay-position").max = histoire.length - 1;
+  client.replay.minuterie = setInterval(() => {
+    const replay = client.replay;
+    if (!replay || replay.enPause) return;
+    if (replay.index >= replay.histoire.length - 1) {
+      replay.enPause = true;
+      majReplay();
+      return;
+    }
+    replay.index += 1;
+    majReplay();
+  }, DELAI_REPLAY_MS);
+  majReplay();
+}
+
+function majReplay() {
+  const replay = client.replay;
+  if (!replay) return;
+  const instantane = replay.histoire[replay.index];
+  $("replay-position").value = replay.index;
+  $("replay-pause").textContent = replay.enPause ? "▶ Lecture" : "⏸ Pause";
+  $("replay-info").textContent =
+    `Étape ${replay.index + 1}/${replay.histoire.length} — tour ${instantane.turn}` +
+    (instantane.label ? ` — ${instantane.label}` : "");
+  dessinerCarte();
+}
+
+function quitterReplay() {
+  if (!client.replay) return;
+  clearInterval(client.replay.minuterie);
+  client.replay = null;
+  $("barre-replay").hidden = true;
+  afficherBarreActions();
+  dessinerCarte();
+}
+
+$("bouton-replay").addEventListener("click", demarrerReplay);
+$("replay-quitter").addEventListener("click", quitterReplay);
+$("replay-pause").addEventListener("click", () => {
+  const replay = client.replay;
+  if (!replay) return;
+  if (replay.enPause && replay.index >= replay.histoire.length - 1) {
+    replay.index = 0;  // relecture depuis le début, comme x45
+  }
+  replay.enPause = !replay.enPause;
+  majReplay();
+});
+$("replay-position").addEventListener("input", () => {
+  const replay = client.replay;
+  if (!replay) return;
+  replay.index = Number($("replay-position").value);
+  replay.enPause = true;
+  majReplay();
+});
+
 // Le bouton de vue cycle forteresses → toutes les icônes → religion (x45).
 $("bouton-vue").addEventListener("click", () => {
   const suivante = VUES_CARTE[(VUES_CARTE.indexOf(client.vueCarte) + 1) % VUES_CARTE.length];
@@ -805,8 +929,20 @@ function passerPhaseSuivante() {
 }
 
 document.addEventListener("keydown", (evenement) => {
+  if ($("ecran-partie").hidden) return;
+  // En replay : Échap quitte, Espace met en pause (comme x45).
+  if (client.replay) {
+    if (evenement.key === "Escape") {
+      evenement.preventDefault();
+      quitterReplay();
+    } else if (evenement.key === " ") {
+      evenement.preventDefault();
+      $("replay-pause").click();
+    }
+    return;
+  }
   if (evenement.key !== "Escape" && evenement.key !== "Enter") return;
-  if ($("ecran-partie").hidden || !aMonTour()) return;
+  if (!aMonTour()) return;
   const focus = document.activeElement;
   if (focus && ["INPUT", "TEXTAREA", "SELECT"].includes(focus.tagName)) {
     // Dans un champ (chat...) : Entrée y reste, Échap en sort seulement.
@@ -993,6 +1129,7 @@ function journalResultat(message) {
 }
 
 $("bouton-retour-lobby").addEventListener("click", () => {
+  quitterReplay();
   client.fermetureVoulue = true;
   if (client.ws) client.ws.close();
   entrerAuLobby();
@@ -1100,7 +1237,10 @@ function ajusterResolutionCarte() {
 window.addEventListener("resize", () => dessinerCarte());
 
 function dessinerCarte() {
-  const etat = client.etat;
+  // En replay, la carte se dessine depuis l'instantané courant.
+  const etat = client.replay
+    ? etatDepuisInstantane(client.replay.histoire[client.replay.index])
+    : client.etat;
   if (!etat) return;
   ajusterResolutionCarte();
   const carte = $("carte");
@@ -1671,14 +1811,14 @@ function territoireSousLaSouris(evenement) {
 
 // Clic gauche : sélection / attaque simple / déplacement.
 $("carte").addEventListener("click", (evenement) => {
-  if (!client.etat) return;
+  if (!client.etat || client.replay) return;
   traiterClicTerritoire(territoireSousLaSouris(evenement), false);
 });
 
 // Clic droit : assaut total, comme dans x45.
 $("carte").addEventListener("contextmenu", (evenement) => {
   evenement.preventDefault();
-  if (!client.etat) return;
+  if (!client.etat || client.replay) return;
   traiterClicTerritoire(territoireSousLaSouris(evenement), true);
 });
 

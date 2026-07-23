@@ -13,6 +13,7 @@ REST :
   "tribus": false}`` pour une partie neuve (mise en place du moteur) ;
   ``seed`` optionnel pour des tests reproductibles.
 - ``GET  /api/parties/{id}/etat``      — etat complet (sans historique replay).
+- ``GET  /api/parties/{id}/replay``    — l'historique replay (a la demande).
 - ``POST /api/parties/{id}/sauvegarder`` — ``{"fichier": "..."}`` optionnel
   (par defaut : le fichier d'origine).
 
@@ -288,6 +289,11 @@ def creer_app(dossier_parties: Optional[Path] = None,
     def etat_partie(partie_id: str):
         salle = get_salle(partie_id)
         return salle.session.etat_reseau()
+
+    @app.get("/api/parties/{partie_id}/replay")
+    def replay_partie(partie_id: str):
+        salle = get_salle(partie_id)
+        return {"replay_history": salle.session.replay()}
 
     @app.post("/api/parties/{partie_id}/sauvegarder")
     def sauvegarder_partie(partie_id: str, corps: Optional[Dict[str, Any]] = None):
