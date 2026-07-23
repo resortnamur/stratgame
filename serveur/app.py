@@ -521,6 +521,21 @@ def creer_app(dossier_parties: Optional[Path] = None,
     # Client web statique (enregistre apres les routes API : elles priment)
     # ------------------------------------------------------------------
 
+    @app.middleware("http")
+    async def revalider_la_page(request, call_next):
+        """La page d'accueil n'est jamais servie depuis le cache navigateur.
+
+        Sans cela, apres une mise a jour, le navigateur peut garder l'ancien
+        index.html (et donc les anciens ?v=) : les joueurs jouent avec le
+        vieux client sans le savoir. ``no-cache`` = revalidation a chaque
+        visite (304 si rien n'a change) ; les autres fichiers sont proteges
+        par leurs parametres ``?v=``.
+        """
+        response = await call_next(request)
+        if request.url.path in ("/", "/index.html"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     if DOSSIER_CLIENT.is_dir():
         app.mount("/", StaticFiles(directory=DOSSIER_CLIENT, html=True), name="client")
 

@@ -529,6 +529,35 @@ $("bouton-fin-achats").addEventListener("click", () =>
 $("bouton-fin-tour").addEventListener("click", () =>
   envoyerAction({ type: "fin_de_tour" }));
 
+function passerPhaseSuivante() {
+  // Miroir de x45 : Échap/Entrée terminent la phase en cours.
+  const etat = client.etat;
+  if (etat.phase === "shopping") {
+    envoyerAction({ type: "terminer_achats" });
+  } else if (etat.turn_phase === "attack") {
+    envoyerAction({ type: "terminer_attaque" });
+  } else if (etat.turn_phase === "move") {
+    envoyerAction({ type: "fin_de_tour" });
+  }
+}
+
+document.addEventListener("keydown", (evenement) => {
+  if (evenement.key !== "Escape" && evenement.key !== "Enter") return;
+  if ($("ecran-partie").hidden || !aMonTour()) return;
+  const focus = document.activeElement;
+  if (focus && ["INPUT", "TEXTAREA", "SELECT"].includes(focus.tagName)) {
+    // Dans un champ (chat...) : Entrée y reste, Échap en sort seulement.
+    if (evenement.key === "Escape") focus.blur();
+    return;
+  }
+  if (focus && focus.tagName === "BUTTON") {
+    if (evenement.key === "Enter") return;  // Entrée = le clic natif du bouton
+    focus.blur();
+  }
+  evenement.preventDefault();
+  passerPhaseSuivante();
+});
+
 function afficherEnTete() {
   const etat = client.etat;
   if (!etat) return;

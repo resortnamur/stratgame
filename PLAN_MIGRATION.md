@@ -374,7 +374,12 @@ Retours du deuxième essai réel :
 - **netteté** : canvas rendu au nombre réel de pixels affichés
   (devicePixelRatio, redessiné au redimensionnement), dessin en repère
   logique 1200×620 via transformation — plus de flou d'étirement ;
-- cache-busting `?v=n` sur app.js/style.css.
+- cache-busting `?v=n` sur app.js/style.css, et `Cache-Control: no-cache`
+  sur `/` (sans quoi le navigateur peut garder l'ancien index.html — et
+  donc l'ancien client — après une mise à jour) ;
+- **Échap/Entrée terminent la phase en cours** (attaque → achats →
+  déplacements → fin de tour), comme x45 ; dans un champ de saisie, Échap
+  ne fait qu'en sortir, Entrée y reste (envoi du chat).
 
 Vérifié en direct dans le navigateur sur une partie neuve : attaque avec
 dés au journal, phases, déplacement compté 1/5, fin de tour → tours IA
