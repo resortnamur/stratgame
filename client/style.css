@@ -104,6 +104,21 @@ header {
 
 .zone-carte { position: relative; }
 
+#barre-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  background: rgb(28, 44, 66);
+  border: 1px solid rgb(52, 73, 94);
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+#indication-phase { color: rgb(244, 208, 63); }
+#barre-actions button { margin-left: auto; }
+#barre-actions button + button { margin-left: 0; }
+
 #carte {
   width: 100%;
   height: auto;

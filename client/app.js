@@ -39,7 +39,26 @@ const client = {
   spectateurs: [],
   monSiege: null,
   selection: null,   // territoire sélectionné sur la carte
+  actionEnCours: false,
   fermetureVoulue: false,
+};
+
+// Libellés français des codes de refus du serveur et du moteur.
+const LIBELLES_REFUS = {
+  pas_votre_tour: "Ce n'est pas ton tour.",
+  siege_ia: "Ce siège est joué par l'IA.",
+  partie_terminee: "La partie est terminée.",
+  spectateur: "Prends un siège pour jouer.",
+  action_en_cours: "Action déjà en cours…",
+  phase_invalide: "Pas pendant cette phase.",
+  territoire_invalide: "Territoire invalide.",
+  attaque_invalide: "Attaque impossible (voisinage, alliance ou garnison).",
+  action_inconnue: "Action inconnue.",
+  limite: "Limite de déplacements atteinte.",
+  proprietaire: "Les deux territoires doivent être à toi.",
+  meme_territoire: "Choisis un territoire différent.",
+  garnison: "Il faut laisser au moins 1 régiment.",
+  continuite: "Pas de chemin par tes territoires.",
 };
 
 function $(id) { return document.getElementById(id); }
@@ -269,6 +288,19 @@ function envoyer(message) {
   }
 }
 
+function aMonTour() {
+  return client.etat !== null
+    && client.monSiege !== null
+    && client.monSiege === client.etat.current_player
+    && (client.etat.phase === "playing" || client.etat.phase === "shopping");
+}
+
+function envoyerAction(action) {
+  if (!aMonTour() || client.actionEnCours) return;
+  client.actionEnCours = true;
+  envoyer({ type: "action", action });
+}
+
 function traiterMessage(message) {
   switch (message.type) {
     case "bienvenue":
@@ -286,11 +318,13 @@ function traiterMessage(message) {
       break;
     case "resultat":
       client.etat = message.etat;
+      if (message.joueur === client.monSiege) client.actionEnCours = false;
       journalResultat(message);
       toutRafraichir();
       break;
     case "refus":
-      journal("Refus du serveur : " + message.code);
+      client.actionEnCours = false;
+      journal(LIBELLES_REFUS[message.code] || `Refus : ${message.code}`);
       break;
     case "chat":
       afficherMessageChat(message);
@@ -342,9 +376,52 @@ function nomDuJoueur(joueur) {
 function toutRafraichir() {
   afficherEnTete();
   afficherSieges();
+  afficherBarreActions();
   afficherDetailTerritoire();
   dessinerCarte();
 }
+
+function limiteDeplacements(etat) {
+  // Miroir de get_end_turn_move_limit : 5, ou 10 dès 10 territoires.
+  const possessions = etat.territories_state
+    .filter((s) => s.owner === etat.current_player).length;
+  return possessions >= 10 ? 10 : 5;
+}
+
+function afficherBarreActions() {
+  const etat = client.etat;
+  const barre = $("barre-actions");
+  if (!etat || !aMonTour()) {
+    barre.hidden = true;
+    return;
+  }
+  barre.hidden = false;
+  const enAttaque = etat.phase === "playing" && etat.turn_phase === "attack";
+  const enAchats = etat.phase === "shopping";
+  const enDeplacement = etat.phase === "playing" && etat.turn_phase === "move";
+  $("option-assaut").hidden = !enAttaque;
+  $("bouton-fin-attaque").hidden = !enAttaque;
+  $("bouton-fin-achats").hidden = !enAchats;
+  $("bouton-fin-tour").hidden = !enDeplacement;
+  if (enAttaque) {
+    $("indication-phase").textContent =
+      "À toi ! Clique un de tes territoires, puis une cible voisine.";
+  } else if (enAchats) {
+    $("indication-phase").textContent =
+      "Phase d'achats (boutique à venir dans le client web).";
+  } else if (enDeplacement) {
+    $("indication-phase").textContent =
+      `Déplacements : ${etat.turn_move_count}/${limiteDeplacements(etat)} — ` +
+      "clique une source puis une destination (1 régiment par clic).";
+  }
+}
+
+$("bouton-fin-attaque").addEventListener("click", () =>
+  envoyerAction({ type: "terminer_attaque" }));
+$("bouton-fin-achats").addEventListener("click", () =>
+  envoyerAction({ type: "terminer_achats" }));
+$("bouton-fin-tour").addEventListener("click", () =>
+  envoyerAction({ type: "fin_de_tour" }));
 
 function afficherEnTete() {
   const etat = client.etat;
@@ -441,8 +518,34 @@ function journal(texte) {
 }
 
 function journalResultat(message) {
-  if (message.action) {
-    journal(`${nomDuJoueur(message.joueur)} : ${message.action.type}`);
+  const action = message.action;
+  const outcome = message.resultat && message.resultat.outcome;
+  if (action && outcome) {
+    const passes = outcome.attack_passes || [];
+    if (passes.length) {
+      // Dés de la dernière passe + messages notables de toutes les passes.
+      const derniere = passes[passes.length - 1];
+      journal(`${nomDuJoueur(message.joueur)} attaque : ${derniere.att_text} / ${derniere.def_text}`);
+      if (passes.some((p) => p.conquered)) journal("Territoire conquis !");
+      for (const passe of passes) {
+        for (const texte of [passe.special_conquest_message,
+                             passe.alliance_break_message,
+                             passe.elimination_message]) {
+          if (texte) journal(texte);
+        }
+      }
+    } else if (action.type === "deplacer") {
+      journal(`${nomDuJoueur(message.joueur)} déplace un régiment.`);
+    } else if (outcome.message) {
+      journal(outcome.message);
+    } else {
+      const libelles = {
+        terminer_attaque: "fin de la phase d'attaque",
+        terminer_achats: "fin des achats",
+        fin_de_tour: "fin de tour",
+      };
+      journal(`${nomDuJoueur(message.joueur)} : ${libelles[action.type] || action.type}.`);
+    }
   }
   const rapports = (message.resultat && message.resultat.rapports_ia) || [];
   if (rapports.length) {
@@ -542,6 +645,18 @@ function dessinerCarte() {
   const situations = etat.territories_state;
   const enroule = etat.map_mode === "custom";
 
+  // Cibles attaquables depuis la source sélectionnée (teinte rouge, x45).
+  const sourceAttaque = aMonTour() && etat.phase === "playing"
+    && etat.turn_phase === "attack" && client.selection !== null
+    && situations[client.selection].owner === client.monSiege
+    ? client.selection : null;
+  const ciblesAttaquables = new Set(
+    sourceAttaque !== null
+      ? etat.territories[sourceAttaque].neighbors
+          .filter((voisin) => situations[voisin].owner !== client.monSiege)
+      : [],
+  );
+
   // Couleur de remplissage de chaque territoire (mêmes règles que x45).
   const remplissages = situations.map((situation) => {
     const base = couleurJoueur(situation.owner);
@@ -553,6 +668,12 @@ function dessinerCarte() {
     }
     if (situation.id === client.selection) {
       couleur = couleur.map((c) => Math.min(255, c + 70));
+    } else if (ciblesAttaquables.has(situation.id)) {
+      couleur = [
+        Math.min(255, couleur[0] + 50),
+        Math.max(0, couleur[1] - 10),
+        Math.max(0, couleur[2] - 10),
+      ];
     }
     return rgb(couleur);
   });
@@ -742,10 +863,61 @@ $("carte").addEventListener("click", (evenement) => {
   const ligne = Math.floor(y / (HAUTEUR_CARTE / etat.rows));
   if (ligne < 0 || ligne >= etat.rows || colonne < 0 || colonne >= etat.cols) return;
   const tid = etat.grid_territory[ligne][colonne];
-  client.selection = tid >= 0 ? tid : null;
+  traiterClicTerritoire(tid >= 0 ? tid : null);
+});
+
+function traiterClicTerritoire(tid) {
+  const etat = client.etat;
+  const source = client.selection;
+  const situation = tid !== null ? etat.territories_state[tid] : null;
+  const aMoi = situation !== null && situation.owner === client.monSiege;
+
+  if (aMonTour() && etat.phase === "playing" && tid !== null) {
+    if (tid === source) {
+      // Recliquer la source la libère (pour en choisir une autre).
+      client.selection = null;
+      afficherDetailTerritoire();
+      dessinerCarte();
+      return;
+    }
+    if (etat.turn_phase === "attack") {
+      // Source déjà choisie + clic sur un voisin ennemi : on attaque.
+      if (source !== null && !aMoi
+          && etat.territories[source].neighbors.includes(tid)
+          && etat.territories_state[source].owner === client.monSiege) {
+        envoyerAction({
+          type: $("champ-assaut").checked ? "assaut_total" : "attaquer",
+          source, cible: tid,
+        });
+        return;  // la sélection reste : on peut enchaîner les passes
+      }
+      if (aMoi) {
+        client.selection = tid;  // nouvelle source
+        afficherDetailTerritoire();
+        dessinerCarte();
+        return;
+      }
+    } else if (etat.turn_phase === "move") {
+      // Source à moi déjà choisie + clic sur un autre territoire à moi :
+      // un régiment par clic, la sélection reste pour enchaîner.
+      if (source !== null && aMoi && source !== tid
+          && etat.territories_state[source].owner === client.monSiege) {
+        envoyerAction({ type: "deplacer", source, cible: tid });
+        return;
+      }
+      if (aMoi) {
+        client.selection = tid;
+        afficherDetailTerritoire();
+        dessinerCarte();
+        return;
+      }
+    }
+  }
+  // Hors jeu (spectateur, pas mon tour, eau…) : simple sélection d'info.
+  client.selection = tid;
   afficherDetailTerritoire();
   dessinerCarte();
-});
+}
 
 // ---------------------------------------------------------------------------
 // Démarrage

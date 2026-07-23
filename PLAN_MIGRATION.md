@@ -325,8 +325,26 @@ logs serveur sans erreur. Lancement : préviseur `serveur-jeu`
 (`.claude/launch.json`) ou
 `python -m uvicorn serveur.app:app --app-dir "Jeux Strat"`.
 
-#### 3b — Jouer dans le navigateur ⬜ (attaque, déplacements, fins de
-phase — sélection source/cible sur la carte)
+#### 3b — Jouer dans le navigateur ✅ (2026-07-23)
+
+Le tour complet se joue au clic dans `client/app.js` :
+- **Barre d'actions** au-dessus de la carte, visible à son tour seulement :
+  indication de phase, case « assaut total », Terminer l'attaque / Terminer
+  les achats / Fin de tour, compteur de déplacements (5, ou 10 dès 10
+  territoires — miroir de `get_end_turn_move_limit`).
+- **Attaque** : clic source (chez soi) → cibles voisines teintées rouge
+  (comme x45) → clic cible = une passe (`attaquer`) ou l'assaut complet
+  (`assaut_total`) ; la sélection reste pour enchaîner ; recliquer la
+  source désélectionne. Dés et messages spéciaux (conquête, rupture
+  d'alliance, élimination) au journal.
+- **Déplacements** : clic source → clic destination, un régiment par clic.
+- Garde anti-double-clic (`actionEnCours`), codes de refus du moteur
+  traduits en français, question soumission via confirm().
+
+Vérifié en direct dans le navigateur sur une partie neuve : attaque avec
+dés au journal, phases, déplacement compté 1/5, fin de tour → tours IA
+**et cité commerçante** joués, revenus perçus au tour 2, barre masquée
+quand ce n'est pas son tour. Couche serveur inchangée (20 tests verts).
 #### 3c — Boutique et panneaux détaillés ⬜ (achats, aperçus revenus,
 événements majeurs, religions/science/culture)
 ### Étape 4 — Déploiement gratuit (Render/Fly.io ; réveil ~30 s, état en base) ⬜
