@@ -333,13 +333,24 @@ Le tour complet se joue au clic dans `client/app.js` :
   les achats / Fin de tour, compteur de déplacements (5, ou 10 dès 10
   territoires — miroir de `get_end_turn_move_limit`).
 - **Attaque** : clic source (chez soi) → cibles voisines teintées rouge
-  (comme x45) → clic cible = une passe (`attaquer`) ou l'assaut complet
-  (`assaut_total`) ; la sélection reste pour enchaîner ; recliquer la
+  (comme x45) → **clic gauche = une passe, clic droit = assaut total**
+  (fidèle à x45) ; la sélection reste pour enchaîner ; recliquer la
   source désélectionne. Dés et messages spéciaux (conquête, rupture
   d'alliance, élimination) au journal.
 - **Déplacements** : clic source → clic destination, un régiment par clic.
-- Garde anti-double-clic (`actionEnCours`), codes de refus du moteur
-  traduits en français, question soumission via confirm().
+- Garde anti-double-clic **avec expiration** (5 s — l'interface ne reste
+  jamais sourde si une réponse se perd), codes de refus du moteur traduits
+  en français, question soumission via confirm().
+
+Robustesse (retour du premier essai réel — interface muette) :
+- serveur : une exception pendant une action → refus `erreur_serveur` à
+  l'émetteur + traceback au log, jamais de silence ;
+- connexion remplacée (partie ouverte dans un autre onglet/appareil) :
+  badge cliquable « reprendre ici » au lieu d'une page morte ;
+- `jeton_inconnu` (registre réinitialisé) → retour à l'écran d'identité ;
+- le registre `joueurs.json` vit **à la racine du projet**, plus dans
+  `parties_en_cours/` (x45 et les tests y sondent tous les .json) ;
+- bouton « Créer la partie » inactif tant que le catalogue n'est pas chargé.
 
 Vérifié en direct dans le navigateur sur une partie neuve : attaque avec
 dés au journal, phases, déplacement compté 1/5, fin de tour → tours IA

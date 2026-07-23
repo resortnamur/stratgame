@@ -55,7 +55,7 @@
         <label class="ligne-case">
           <input type="checkbox" id="champ-tribus"> Mode tribus
         </label>
-        <button>Créer la partie</button>
+        <button id="bouton-creer" disabled>Créer la partie</button>
       </form>
       <h2>Reprendre une sauvegarde</h2>
       <ul id="liste-sauvegardes" class="liste"></ul>
@@ -76,9 +76,6 @@
     <div class="zone-carte">
       <div id="barre-actions" hidden>
         <span id="indication-phase"></span>
-        <label id="option-assaut" hidden>
-          <input type="checkbox" id="champ-assaut"> Assaut total
-        </label>
         <button id="bouton-fin-attaque" hidden>Terminer l'attaque</button>
         <button id="bouton-fin-achats" hidden>Terminer les achats</button>
         <button id="bouton-fin-tour" hidden>Fin de tour</button>

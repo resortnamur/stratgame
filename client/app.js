@@ -39,9 +39,13 @@ const client = {
   spectateurs: [],
   monSiege: null,
   selection: null,   // territoire sélectionné sur la carte
-  actionEnCours: false,
+  actionDepuis: null,  // horodatage de l'action en attente de réponse
   fermetureVoulue: false,
 };
+
+// Le serveur garde son propre verrou par connexion : ce délai n'est qu'un
+// filet si une réponse se perd, pour ne jamais laisser l'interface sourde.
+const DELAI_ACTION_MS = 5000;
 
 // Libellés français des codes de refus du serveur et du moteur.
 const LIBELLES_REFUS = {
@@ -59,6 +63,7 @@ const LIBELLES_REFUS = {
   meme_territoire: "Choisis un territoire différent.",
   garnison: "Il faut laisser au moins 1 régiment.",
   continuite: "Pas de chemin par tes territoires.",
+  erreur_serveur: "Erreur inattendue du serveur (voir ses logs) — l'action est annulée.",
 };
 
 function $(id) { return document.getElementById(id); }
@@ -172,6 +177,9 @@ function afficherCartes(cartes) {
     option.textContent = `${carte.fichier.replace(/\.json$/, "")} (${carte.territoires} terr.)`;
     champ.append(option);
   }
+  // Pas de création tant que le catalogue n'est pas là (évite d'envoyer
+  // une carte vide si on soumet très vite après l'ouverture du lobby).
+  $("bouton-creer").disabled = cartes.length === 0;
 }
 
 function afficherSauvegardes(sauvegardes) {
@@ -245,7 +253,8 @@ function connecterAuServeur() {
   client.ws = ws;
 
   ws.addEventListener("open", () => {
-    majConnexion(true);
+    client.actionDepuis = null;
+    majConnexion("connecté");
     // Avec le jeton, le serveur nous rend notre siège réservé s'il existe.
     ws.send(JSON.stringify({ type: "rejoindre", jeton: client.jeton }));
   });
@@ -255,10 +264,12 @@ function connecterAuServeur() {
   });
 
   ws.addEventListener("close", (evenement) => {
-    majConnexion(false);
     if (client.fermetureVoulue) return;
     if (evenement.code === 4000) {
-      journal("Connexion remplacée : la partie est ouverte ailleurs.");
+      // La partie a été ouverte ailleurs (autre onglet, autre appareil).
+      majConnexion("partie ouverte ailleurs — clique ici pour reprendre");
+      journal("Connexion remplacée : la partie est ouverte ailleurs. " +
+              "Clique le badge en haut à droite pour reprendre ici.");
       return;
     }
     if (evenement.code === 4004) {
@@ -267,6 +278,7 @@ function connecterAuServeur() {
       return;
     }
     // Coupure involontaire : on retente, le siège nous attend.
+    majConnexion("déconnecté");
     journal("Connexion perdue, nouvelle tentative dans 2 s…");
     setTimeout(() => {
       if (client.partieId !== null && !client.fermetureVoulue) {
@@ -276,11 +288,19 @@ function connecterAuServeur() {
   });
 }
 
-function majConnexion(connecte) {
+function majConnexion(texte) {
   const badge = $("info-connexion");
-  badge.textContent = connecte ? "connecté" : "déconnecté";
-  badge.classList.toggle("coupe", !connecte);
+  badge.textContent = texte;
+  badge.classList.toggle("coupe", texte !== "connecté");
 }
+
+// Reprendre la main quand la connexion a été remplacée par un autre onglet.
+$("info-connexion").addEventListener("click", () => {
+  if (client.partieId !== null
+      && (!client.ws || client.ws.readyState !== WebSocket.OPEN)) {
+    connecterAuServeur();
+  }
+});
 
 function envoyer(message) {
   if (client.ws && client.ws.readyState === WebSocket.OPEN) {
@@ -295,9 +315,18 @@ function aMonTour() {
     && (client.etat.phase === "playing" || client.etat.phase === "shopping");
 }
 
+function actionEnAttente() {
+  return client.actionDepuis !== null
+    && Date.now() - client.actionDepuis < DELAI_ACTION_MS;
+}
+
 function envoyerAction(action) {
-  if (!aMonTour() || client.actionEnCours) return;
-  client.actionEnCours = true;
+  if (!aMonTour() || actionEnAttente()) return;
+  if (!client.ws || client.ws.readyState !== WebSocket.OPEN) {
+    journal("Déconnecté du serveur : action impossible.");
+    return;
+  }
+  client.actionDepuis = Date.now();
   envoyer({ type: "action", action });
 }
 
@@ -306,6 +335,7 @@ function traiterMessage(message) {
     case "bienvenue":
       client.monSiege = message.joueur;
       client.etat = message.etat;
+      client.actionDepuis = null;
       if (message.joueur !== null) {
         journal(`Assis au siège ${message.joueur}.`);
       }
@@ -318,12 +348,23 @@ function traiterMessage(message) {
       break;
     case "resultat":
       client.etat = message.etat;
-      if (message.joueur === client.monSiege) client.actionEnCours = false;
+      if (message.joueur === client.monSiege) client.actionDepuis = null;
       journalResultat(message);
       toutRafraichir();
       break;
     case "refus":
-      client.actionEnCours = false;
+      client.actionDepuis = null;
+      if (message.code === "jeton_inconnu") {
+        // Le serveur ne connaît plus notre identité (registre remis à
+        // zéro…) : on repart de l'écran d'inscription.
+        localStorage.removeItem("jeux_strat_jeton");
+        localStorage.removeItem("jeux_strat_nom");
+        client.jeton = client.nom = null;
+        client.fermetureVoulue = true;
+        if (client.ws) client.ws.close();
+        montrerEcran("identite");
+        break;
+      }
       journal(LIBELLES_REFUS[message.code] || `Refus : ${message.code}`);
       break;
     case "chat":
@@ -399,13 +440,13 @@ function afficherBarreActions() {
   const enAttaque = etat.phase === "playing" && etat.turn_phase === "attack";
   const enAchats = etat.phase === "shopping";
   const enDeplacement = etat.phase === "playing" && etat.turn_phase === "move";
-  $("option-assaut").hidden = !enAttaque;
   $("bouton-fin-attaque").hidden = !enAttaque;
   $("bouton-fin-achats").hidden = !enAchats;
   $("bouton-fin-tour").hidden = !enDeplacement;
   if (enAttaque) {
     $("indication-phase").textContent =
-      "À toi ! Clique un de tes territoires, puis une cible voisine.";
+      "À toi ! Clique un de tes territoires puis une cible : " +
+      "clic gauche = une passe, clic droit = assaut total.";
   } else if (enAchats) {
     $("indication-phase").textContent =
       "Phase d'achats (boutique à venir dans le client web).";
@@ -853,20 +894,32 @@ function dessinerEtoile(contexte, cx, cy, rayon, couleur) {
   contexte.stroke();
 }
 
-$("carte").addEventListener("click", (evenement) => {
+function territoireSousLaSouris(evenement) {
   const etat = client.etat;
-  if (!etat) return;
   const cadre = $("carte").getBoundingClientRect();
   const x = (evenement.clientX - cadre.left) * (LARGEUR_CARTE / cadre.width);
   const y = (evenement.clientY - cadre.top) * (HAUTEUR_CARTE / cadre.height);
   const colonne = Math.floor(x / (LARGEUR_CARTE / etat.cols));
   const ligne = Math.floor(y / (HAUTEUR_CARTE / etat.rows));
-  if (ligne < 0 || ligne >= etat.rows || colonne < 0 || colonne >= etat.cols) return;
+  if (ligne < 0 || ligne >= etat.rows || colonne < 0 || colonne >= etat.cols) return null;
   const tid = etat.grid_territory[ligne][colonne];
-  traiterClicTerritoire(tid >= 0 ? tid : null);
+  return tid >= 0 ? tid : null;
+}
+
+// Clic gauche : sélection / attaque simple / déplacement.
+$("carte").addEventListener("click", (evenement) => {
+  if (!client.etat) return;
+  traiterClicTerritoire(territoireSousLaSouris(evenement), false);
 });
 
-function traiterClicTerritoire(tid) {
+// Clic droit : assaut total, comme dans x45.
+$("carte").addEventListener("contextmenu", (evenement) => {
+  evenement.preventDefault();
+  if (!client.etat) return;
+  traiterClicTerritoire(territoireSousLaSouris(evenement), true);
+});
+
+function traiterClicTerritoire(tid, assautTotal) {
   const etat = client.etat;
   const source = client.selection;
   const situation = tid !== null ? etat.territories_state[tid] : null;
@@ -881,12 +934,13 @@ function traiterClicTerritoire(tid) {
       return;
     }
     if (etat.turn_phase === "attack") {
-      // Source déjà choisie + clic sur un voisin ennemi : on attaque.
+      // Source déjà choisie + clic sur un voisin ennemi : on attaque
+      // (clic gauche = une passe, clic droit = assaut total, comme x45).
       if (source !== null && !aMoi
           && etat.territories[source].neighbors.includes(tid)
           && etat.territories_state[source].owner === client.monSiege) {
         envoyerAction({
-          type: $("champ-assaut").checked ? "assaut_total" : "attaquer",
+          type: assautTotal ? "assaut_total" : "attaquer",
           source, cible: tid,
         });
         return;  // la sélection reste : on peut enchaîner les passes

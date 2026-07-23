@@ -61,6 +61,7 @@ la boucle de reception continue de lire pendant ce temps, ce qui permet a la
 from __future__ import annotations
 
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -290,6 +291,15 @@ def creer_app(dossier_parties: Optional[Path] = None,
                 resultat = await asyncio.to_thread(
                     session.appliquer_action, joueur, action, submit_decider,
                 )
+            except Exception:
+                # Le client ne doit jamais rester sans reponse : une erreur
+                # imprevue du moteur devient un refus (et va dans le log).
+                logging.exception("Erreur pendant l'action %r (partie %s)", action, partie_id)
+                try:
+                    await connexion.envoyer({"type": "refus", "code": "erreur_serveur"})
+                except Exception:
+                    pass
+                return
             finally:
                 connexion.action_en_cours = False
             if not resultat.ok and resultat.outcome is None:

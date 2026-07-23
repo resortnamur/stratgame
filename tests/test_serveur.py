@@ -28,8 +28,21 @@ DOSSIER_CARTES = RACINE / "cartes_sauvegardees"
 RANDOM_SEED = 20260722
 
 
+def sauvegardes_de_partie() -> list:
+    """Les vraies sauvegardes du dossier (ignore tout autre .json)."""
+    fichiers = []
+    for chemin in sorted(DOSSIER_PARTIES.glob("*.json")):
+        try:
+            payload = json.loads(chemin.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(payload, dict) and payload.get("kind") == "game":
+            fichiers.append(chemin)
+    return fichiers
+
+
 def premiere_sauvegarde() -> Path:
-    fichiers = sorted(DOSSIER_PARTIES.glob("*.json"))
+    fichiers = sauvegardes_de_partie()
     if not fichiers:
         raise unittest.SkipTest("Aucune sauvegarde dans parties_en_cours.")
     return fichiers[0]
@@ -37,7 +50,7 @@ def premiere_sauvegarde() -> Path:
 
 def sauvegarde_avec_humain_au_trait() -> Path:
     """Une sauvegarde ou c'est a un joueur humain de jouer, phase d'attaque."""
-    for chemin in sorted(DOSSIER_PARTIES.glob("*.json")):
+    for chemin in sauvegardes_de_partie():
         session = SessionPartie.depuis_fichier("sonde", chemin, seed=RANDOM_SEED)
         state = session.state
         if (
@@ -430,6 +443,29 @@ class TestApplicationWeb(unittest.TestCase):
             # Assise, elle peut agir.
             ws.send_json({"type": "action", "action": {"type": "terminer_attaque"}})
             self.assertEqual(ws.receive_json()["type"], "resultat")
+
+    def test_websocket_erreur_moteur(self):
+        """Une exception pendant une action devient un refus, pas un silence."""
+        chemin = sauvegarde_avec_humain_au_trait()
+        resume = self.ouvrir_partie(chemin.name)
+        partie_id = resume["id"]
+        joueur = resume["joueur_courant"]
+        alice = self.inscrire("Alice")
+
+        session = self.app.state.gestionnaire.parties[partie_id]
+        def explose(*args, **kwargs):
+            raise RuntimeError("panne simulee")
+        session.appliquer_action = explose
+
+        with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws:
+            ws.send_json({"type": "rejoindre", "jeton": alice["jeton"], "joueur": joueur})
+            ws.receive_json()  # bienvenue
+            ws.receive_json()  # presence
+            ws.send_json({"type": "action", "action": {"type": "terminer_attaque"}})
+            self.assertEqual(ws.receive_json()["code"], "erreur_serveur")
+            # La connexion reste utilisable apres l'erreur.
+            ws.send_json({"type": "chat", "texte": "toujours la"})
+            self.assertEqual(ws.receive_json()["type"], "chat")
 
     def test_websocket_reconnexion(self):
         chemin = sauvegarde_avec_humain_au_trait()

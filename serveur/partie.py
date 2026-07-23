@@ -304,9 +304,11 @@ class GestionnaireParties:
                  fichier_joueurs: Optional[Path] = None) -> None:
         self.dossier_sauvegardes = Path(dossier_sauvegardes)
         self.dossier_cartes = Path(dossier_cartes) if dossier_cartes is not None else None
+        # Le registre vit a cote du dossier des sauvegardes, pas dedans :
+        # x45 et les tests sondent tous les .json de parties_en_cours.
         self.registre = RegistreJoueurs(
             fichier_joueurs if fichier_joueurs is not None
-            else self.dossier_sauvegardes / "joueurs.json"
+            else self.dossier_sauvegardes.parent / "joueurs.json"
         )
         self.parties: Dict[str, SessionPartie] = {}
         self._compteur = 0
