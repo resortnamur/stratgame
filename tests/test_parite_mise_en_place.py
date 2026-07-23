@@ -34,9 +34,9 @@ MAPS_DIR = RACINE / "cartes_sauvegardees"
 ORIGINAL_PATH = RACINE / "x45-original.py"
 RANDOM_SEED = 20260723
 
-# Un echantillon de cartes representatif (continents, continents denses,
-# custom toroidales petites et grandes) et trois configurations de partie.
-MAP_FILES = ["Alpha.json", "JOY.json", "CRAB01.json", "GIGA02.json", "TOILE01.json", "Zwin.json"]
+# Un echantillon de cartes representatif du catalogue actuel (customs
+# toroidales 144x180, de 62 a 100 territoires) et trois configurations.
+MAP_FILES = ["4blocs.json", "4starslink.json", "GIGA02.json", "GIGA09.json", "GIGA11.json", "MEGA01.json"]
 CONFIGS = [
     {"num_players": 4, "ai_player_count": 2, "difficulty_level": "normal", "tribes_mode": False},
     {"num_players": 5, "ai_player_count": 3, "difficulty_level": "chaos", "tribes_mode": True},
