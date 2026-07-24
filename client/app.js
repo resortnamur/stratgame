@@ -287,6 +287,50 @@ function afficherSauvegardes(sauvegardes) {
 
 $("bouton-rafraichir").addEventListener("click", rafraichirLobby);
 
+// Import d'une carte : lecture locale du .json, envoi au serveur (qui la
+// valide en la chargeant dans le moteur), puis sélection dans la liste.
+const MESSAGES_IMPORT = {
+  carte_invalide: "Ce fichier n'est pas une carte lisible par le jeu.",
+  carte_trop_grosse: "Carte trop volumineuse.",
+  nom_fichier_invalide: "Nom de fichier invalide (un nom simple en .json).",
+};
+
+$("bouton-importer-carte").addEventListener("click", () => {
+  $("champ-import-carte").click();
+});
+
+$("champ-import-carte").addEventListener("change", async () => {
+  const fichier = $("champ-import-carte").files[0];
+  $("champ-import-carte").value = "";
+  if (!fichier) return;
+  $("erreur-lobby").textContent = "";
+  let carte;
+  try {
+    carte = JSON.parse(await fichier.text());
+  } catch (erreur) {
+    $("erreur-lobby").textContent = "Ce fichier n'est pas un JSON lisible.";
+    return;
+  }
+  const nom = fichier.name.endsWith(".json") ? fichier.name : fichier.name + ".json";
+  await importerCarte(nom, carte, false);
+});
+
+async function importerCarte(nom, carte, remplacer) {
+  try {
+    const fiche = await api("/api/cartes", { nom, carte, remplacer });
+    await rafraichirLobby();
+    $("champ-carte").value = fiche.fichier;
+  } catch (erreur) {
+    if (erreur.message === "carte_existante") {
+      if (confirm(`La carte « ${nom} » existe déjà. La remplacer ?`)) {
+        return importerCarte(nom, carte, true);
+      }
+      return;
+    }
+    $("erreur-lobby").textContent = MESSAGES_IMPORT[erreur.message] || erreur.message;
+  }
+}
+
 $("form-nouvelle").addEventListener("submit", async (evenement) => {
   evenement.preventDefault();
   $("erreur-lobby").textContent = "";

@@ -494,4 +494,49 @@ Derniers réglages (retours d'usage) :
   replay s'affichait par défaut).
 
 L'étape 3 est terminée : le jeu complet se joue dans le navigateur.
-### Étape 4 — Déploiement gratuit (Render/Fly.io ; réveil ~30 s, état en base) ⬜
+### Étape 4 — Déploiement gratuit (Render + Neon ; réveil ~30 s, état en base) 🔶
+
+#### 4a — Couche de stockage fichiers/base ✅ (2026-07-24)
+
+Le disque des hébergeurs gratuits est effacé à chaque redémarrage : les
+écritures doivent survivre ailleurs. **`serveur/stockage.py`** (nouveau) —
+un contrat commun (`lister`/`versions`/`lire`/`ecrire`, noms assainis
+contre l'évasion de chemin) et trois implémentations :
+- `StockageFichiers` — un dossier de .json (le local, comportement inchangé) ;
+- `StockageSql` — une table `documents(collection, nom, contenu, version)`,
+  agnostique du pilote : psycopg (Postgres) en production, sqlite3 dans les
+  tests, **mêmes requêtes** (seul le marqueur de paramètre change),
+  connexion neuve par opération (robuste face aux Postgres serverless) ;
+- `StockageMixte` — les fichiers du dépôt en lecture (23 sauvegardes,
+  42 cartes) + la base en écriture ; la base prime en cas de doublon.
+
+`GestionnaireParties`, `SessionPartie` (source = nom de document) et
+`RegistreJoueurs` passent par ce contrat ; `DATABASE_URL` (env) branche le
+mode hébergé dans `creer_app`. Les catalogues du lobby gardent un cache de
+métadonnées par version : plus de relecture des Mo de JSON à chaque
+affichage. Tests : `tests/test_stockage.py` (11 tests — contrat des trois
+backends, registre en base, sauvegarde en surcouche sans toucher au dépôt,
+import de cartes) ; `tests/test_serveur.py` vert sans modification.
+
+#### 4b — Import de cartes dans le lobby ✅ (2026-07-24)
+
+`POST /api/cartes` `{"nom", "carte", "remplacer"}` : nom assaini, taille
+plafonnée (5 Mo), la carte doit **vraiment se charger dans le moteur**
+(`GameState.from_map_payload`) et avoir des territoires ; 409 sans
+`remplacer` si le nom existe. Lobby : bouton « Importer une carte… »
+(FileReader → POST), question de remplacement via confirm(), carte
+sélectionnée dans la liste après import. Sur le serveur hébergé, les
+cartes importées vont en base. Vérifié dans le navigateur : import,
+apparition dans la liste, partie créée sur la carte importée (25 tests
+serveur verts).
+
+#### 4c — Dossier de déploiement ✅ (2026-07-24) / mise en ligne ⬜
+
+`requirements.txt` (fastapi, uvicorn, psycopg — importé seulement si
+`DATABASE_URL` est définie), `render.yaml` (service web Free, un seul
+worker : les parties vivent en mémoire), `DEPLOIEMENT.md` pas à pas :
+GitHub (compte resortnamur) → Neon (Postgres gratuit durable ; le Postgres
+gratuit de Render expire après 30 jours, Fly.io n'a plus d'offre gratuite)
+→ Render (Blueprint). Reste à faire par le propriétaire des comptes :
+créer le dépôt GitHub, le compte Neon et le compte Render, puis suivre
+DEPLOIEMENT.md.

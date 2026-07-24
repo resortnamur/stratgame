@@ -6,6 +6,9 @@ REST :
   client garde le jeton (localStorage) pour rejoindre et se reconnecter.
 - ``GET  /api/sauvegardes``            — sauvegardes chargeables.
 - ``GET  /api/cartes``                 — cartes pour une partie neuve.
+- ``POST /api/cartes``                 — importe une carte : ``{"nom":
+  "MaCarte.json", "carte": {...}, "remplacer": false}`` ; 409 si le nom
+  existe deja et que ``remplacer`` est faux.
 - ``GET  /api/parties``                — parties ouvertes (resume + sieges).
 - ``POST /api/parties``                — ouvre une partie :
   ``{"sauvegarde": "partie_001.json"}`` pour recharger une sauvegarde, ou
@@ -72,6 +75,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -82,6 +86,7 @@ from .partie import (
     GestionnaireParties, MAX_CONSECUTIVE_AI_TURNS, ResultatAction,
     SessionPartie, to_jsonable,
 )
+from .stockage import nom_est_valide
 
 RACINE = Path(__file__).resolve().parent.parent
 DOSSIER_PARTIES = RACINE / "parties_en_cours"
@@ -209,13 +214,21 @@ def creer_app(dossier_parties: Optional[Path] = None,
               dossier_cartes: Optional[Path] = None,
               fichier_joueurs: Optional[Path] = None,
               delai_tour_ia: float = DELAI_TOUR_IA_S,
-              delai_pas_ia: float = DELAI_PAS_IA_S) -> FastAPI:
-    """Construit l'application (dossiers, registre et cadence injectables)."""
+              delai_pas_ia: float = DELAI_PAS_IA_S,
+              database_url: Optional[str] = None) -> FastAPI:
+    """Construit l'application (dossiers, registre, cadence et base injectables).
+
+    ``database_url`` (en production : la variable d'environnement
+    ``DATABASE_URL``) branche les ecritures — sauvegardes, cartes importees,
+    registre des joueurs — sur un Postgres qui survit aux redemarrages ;
+    les fichiers du depot restent lisibles. Sans elle : tout en fichiers.
+    """
     app = FastAPI(title="Jeux Strat - serveur de parties")
     gestionnaire = GestionnaireParties(
         dossier_parties or DOSSIER_PARTIES,
         dossier_cartes if dossier_cartes is not None else DOSSIER_CARTES,
         fichier_joueurs=fichier_joueurs,
+        database_url=database_url,
     )
     salles: Dict[str, SallePartie] = {}
     app.state.gestionnaire = gestionnaire
@@ -249,6 +262,19 @@ def creer_app(dossier_parties: Optional[Path] = None,
     @app.get("/api/cartes")
     def lister_cartes():
         return {"cartes": gestionnaire.lister_cartes()}
+
+    @app.post("/api/cartes")
+    def importer_carte(corps: Dict[str, Any]):
+        """Importe une carte : ``{"nom": "x.json", "carte": {...},
+        "remplacer": false}``. 409 si le nom existe deja sans remplacer."""
+        try:
+            return gestionnaire.importer_carte(
+                corps.get("nom"), corps.get("carte"),
+                remplacer=bool(corps.get("remplacer")),
+            )
+        except ValueError as erreur:
+            code = 409 if str(erreur) == "carte_existante" else 422
+            raise HTTPException(status_code=code, detail=str(erreur))
 
     @app.get("/api/parties")
     def lister_parties():
@@ -306,16 +332,13 @@ def creer_app(dossier_parties: Optional[Path] = None,
     def sauvegarder_partie(partie_id: str, corps: Optional[Dict[str, Any]] = None):
         salle = get_salle(partie_id)
         fichier = (corps or {}).get("fichier")
-        chemin = None
-        if fichier is not None:
-            chemin = (gestionnaire.dossier_sauvegardes / str(fichier)).resolve()
-            if chemin.parent != gestionnaire.dossier_sauvegardes.resolve():
-                raise HTTPException(status_code=422, detail="Nom de fichier invalide.")
+        if fichier is not None and not nom_est_valide(fichier):
+            raise HTTPException(status_code=422, detail="Nom de fichier invalide.")
         try:
-            cible = salle.session.sauvegarder(chemin)
+            cible = salle.session.sauvegarder(fichier)
         except ValueError:
             raise HTTPException(status_code=422, detail="Aucun fichier cible.")
-        return {"fichier": cible.name}
+        return {"fichier": cible}
 
     # ------------------------------------------------------------------
     # WebSocket
@@ -555,4 +578,5 @@ def creer_app(dossier_parties: Optional[Path] = None,
     return app
 
 
-app = creer_app()
+# En production (Render...), DATABASE_URL branche les ecritures sur Postgres.
+app = creer_app(database_url=os.environ.get("DATABASE_URL"))

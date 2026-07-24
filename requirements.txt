@@ -1,0 +1,6 @@
+# Dependances du serveur web (etape 4 : deploiement).
+# En local, seuls fastapi et uvicorn sont necessaires ; psycopg ne sert
+# que si DATABASE_URL est definie (stockage en base sur le serveur heberge).
+fastapi==0.139.2
+uvicorn[standard]==0.51.0
+psycopg[binary]==3.2.*

@@ -24,6 +24,10 @@ from moteur import actions, mise_en_place, regles
 from moteur.etat import GameState
 
 from .joueurs import RegistreJoueurs
+from .stockage import (
+    StockageFichiers, StockageMixte, assainir_nom, nom_est_valide,
+    stockage_postgres,
+)
 
 # Dimensions logiques d'une cellule, heritees de la zone de carte de x45
 # (1200 x 620 pixels) : la geometrie des ponts est exprimee en pixels dans
@@ -66,11 +70,14 @@ class ResultatAction:
 class SessionPartie:
     """Une partie ouverte sur le serveur, jouable par plusieurs clients."""
 
-    def __init__(self, partie_id: str, state: GameState, source: Optional[Path] = None,
-                 seed: Optional[int] = None) -> None:
+    def __init__(self, partie_id: str, state: GameState, source: Optional[str] = None,
+                 seed: Optional[int] = None, stockage=None) -> None:
         self.id = partie_id
         self.state = state
+        # ``source`` est le nom du document d'origine dans ``stockage``
+        # (module ``stockage``) : la sauvegarde par defaut y retourne.
         self.source = source
+        self.stockage = stockage
         self.rng = random.Random(seed)
         self.lock = threading.Lock()
         self.cell_width = LOGICAL_MAP_WIDTH / state.cols
@@ -88,10 +95,22 @@ class SessionPartie:
 
     @classmethod
     def depuis_fichier(cls, partie_id: str, chemin: Path, seed: Optional[int] = None) -> "SessionPartie":
+        """Charge une sauvegarde depuis un fichier (usage local et tests)."""
+        chemin = Path(chemin)
+        return cls.depuis_stockage(
+            partie_id, StockageFichiers(chemin.parent), chemin.name, seed=seed,
+        )
+
+    @classmethod
+    def depuis_stockage(cls, partie_id: str, stockage, nom: str,
+                        seed: Optional[int] = None) -> "SessionPartie":
         """Charge une sauvegarde x45/moteur et applique les sanitisations."""
-        payload = json.loads(Path(chemin).read_text(encoding="utf-8"))
+        contenu = stockage.lire(nom)
+        if contenu is None:
+            raise FileNotFoundError(nom)
+        payload = json.loads(contenu)
         state = GameState.from_payload(payload)
-        session = cls(partie_id, state, source=Path(chemin), seed=seed)
+        session = cls(partie_id, state, source=nom, seed=seed, stockage=stockage)
         regles.sanitize_after_load(state, session.rng, phase_before_load="start_menu")
         return session
 
@@ -122,17 +141,28 @@ class SessionPartie:
         actions.begin_player_turn(state, state.current_player, rng)
         return session
 
-    def sauvegarder(self, chemin: Optional[Path] = None) -> Path:
-        """Ecrit la partie au format canonique (schema v13, comme x45)."""
-        cible = Path(chemin) if chemin is not None else self.source
-        if cible is None:
+    def sauvegarder(self, cible=None) -> str:
+        """Ecrit la partie au format canonique (schema v13, comme x45).
+
+        ``cible`` : un nom de document dans le stockage de la session (par
+        defaut : le document d'origine), ou un ``Path`` explicite (usage
+        local et tests — la session bascule alors sur ce dossier).
+        Retourne le nom du document ecrit.
+        """
+        if isinstance(cible, Path):
+            self.stockage = StockageFichiers(cible.parent)
+            nom = cible.name
+        elif cible is not None:
+            nom = assainir_nom(cible)
+        else:
+            nom = self.source
+        if nom is None or self.stockage is None:
             raise ValueError("Aucun fichier cible pour la sauvegarde.")
         with self.lock:
             payload = self.state.to_payload()
-        cible.parent.mkdir(parents=True, exist_ok=True)
-        cible.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        self.source = cible
-        return cible
+        self.stockage.ecrire(nom, json.dumps(payload, ensure_ascii=False))
+        self.source = nom
+        return nom
 
     # ------------------------------------------------------------------
     # Sieges et etat diffuse
@@ -363,7 +393,7 @@ class SessionPartie:
                 "phase_tour": self.state.turn_phase,
                 "num_players": self.state.num_players,
                 "sieges": self.sieges(),
-                "source": self.source.name if self.source else None,
+                "source": self.source,
             }
 
     # ------------------------------------------------------------------
@@ -488,76 +518,125 @@ class SessionPartie:
 
 
 class GestionnaireParties:
-    """Les parties ouvertes du serveur + les catalogues (sauvegardes, cartes)."""
+    """Les parties ouvertes du serveur + les catalogues (sauvegardes, cartes).
+
+    Les catalogues vivent dans des stockages (module ``stockage``) : des
+    dossiers de fichiers en local ; avec ``database_url``, les fichiers du
+    depot restent lisibles et tout ce que les joueurs ecrivent (sauvegardes,
+    cartes importees, registre) va en base — le disque des hebergeurs
+    gratuits ne survit pas aux redemarrages.
+    """
+
+    # Taille maximale d'une carte importee (les plus grosses cartes du depot
+    # font ~400 Ko : 5 Mo laissent de la marge sans ouvrir la porte a tout).
+    TAILLE_CARTE_MAX = 5_000_000
 
     def __init__(self, dossier_sauvegardes: Path, dossier_cartes: Optional[Path] = None,
-                 fichier_joueurs: Optional[Path] = None) -> None:
-        self.dossier_sauvegardes = Path(dossier_sauvegardes)
-        self.dossier_cartes = Path(dossier_cartes) if dossier_cartes is not None else None
-        # Le registre vit a cote du dossier des sauvegardes, pas dedans :
-        # x45 et les tests sondent tous les .json de parties_en_cours.
-        self.registre = RegistreJoueurs(
-            fichier_joueurs if fichier_joueurs is not None
-            else self.dossier_sauvegardes.parent / "joueurs.json"
+                 fichier_joueurs: Optional[Path] = None,
+                 database_url: Optional[str] = None) -> None:
+        base_sauvegardes = StockageFichiers(Path(dossier_sauvegardes))
+        base_cartes = (
+            StockageFichiers(Path(dossier_cartes)) if dossier_cartes is not None else None
         )
+        if database_url:
+            self.stockage_sauvegardes = StockageMixte(
+                base_sauvegardes, stockage_postgres(database_url, "sauvegardes"),
+            )
+            self.stockage_cartes = StockageMixte(
+                base_cartes, stockage_postgres(database_url, "cartes"),
+            )
+            self.registre = RegistreJoueurs(
+                stockage=stockage_postgres(database_url, "config"),
+            )
+        else:
+            self.stockage_sauvegardes = base_sauvegardes
+            self.stockage_cartes = base_cartes
+            # Le registre vit a cote du dossier des sauvegardes, pas dedans :
+            # x45 et les tests sondent tous les .json de parties_en_cours.
+            self.registre = RegistreJoueurs(
+                fichier_joueurs if fichier_joueurs is not None
+                else Path(dossier_sauvegardes).parent / "joueurs.json"
+            )
         self.parties: Dict[str, SessionPartie] = {}
         self._compteur = 0
         self._lock = threading.Lock()
+        # Metadonnees de catalogue par nom, gardees tant que la version du
+        # document ne change pas : le lobby ne relit pas des Mo de JSON (ni
+        # la base) a chaque affichage.
+        self._meta_sauvegardes: Dict[str, tuple] = {}
+        self._meta_cartes: Dict[str, tuple] = {}
+
+    @staticmethod
+    def _meta_sauvegarde(nom: str, payload: dict) -> Optional[Dict[str, Any]]:
+        if payload.get("kind") != "game":
+            return None
+        return {
+            "fichier": nom,
+            "num_players": payload.get("num_players"),
+            "tour": payload.get("turn"),
+            "ai_player_count": payload.get("ai_player_count"),
+        }
+
+    @staticmethod
+    def _meta_carte(nom: str, payload: dict) -> Optional[Dict[str, Any]]:
+        # Les cartes anciennes n'ont pas de cle "kind" ; on ecarte juste
+        # les sauvegardes de partie et les fichiers sans carte.
+        if payload.get("kind") == "game" or not isinstance(payload.get("territories"), list):
+            return None
+        return {
+            "fichier": nom,
+            "map_mode": payload.get("map_mode", "standard"),
+            "territoires": len(payload["territories"]),
+        }
+
+    def _lister_catalogue(self, stockage, cache: Dict[str, tuple],
+                          extraire) -> List[Dict[str, Any]]:
+        if stockage is None:
+            return []
+        versions = stockage.versions()
+        for nom in list(cache):
+            if nom not in versions:
+                del cache[nom]
+        resultats = []
+        for nom in sorted(versions):
+            entree = cache.get(nom)
+            if entree is None or entree[0] != versions[nom]:
+                meta = None
+                contenu = stockage.lire(nom)
+                if contenu is not None:
+                    try:
+                        payload = json.loads(contenu)
+                    except ValueError:
+                        payload = None
+                    if isinstance(payload, dict):
+                        meta = extraire(nom, payload)
+                cache[nom] = (versions[nom], meta)
+            meta = cache[nom][1]
+            if meta is not None:
+                resultats.append(dict(meta))
+        return resultats
 
     def lister_sauvegardes(self) -> List[Dict[str, Any]]:
-        resultats = []
-        for chemin in sorted(self.dossier_sauvegardes.glob("*.json")):
-            try:
-                payload = json.loads(chemin.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            if payload.get("kind") != "game":
-                continue
-            resultats.append({
-                "fichier": chemin.name,
-                "num_players": payload.get("num_players"),
-                "tour": payload.get("turn"),
-                "ai_player_count": payload.get("ai_player_count"),
-            })
-        return resultats
+        return self._lister_catalogue(
+            self.stockage_sauvegardes, self._meta_sauvegardes, self._meta_sauvegarde,
+        )
 
     def lister_cartes(self) -> List[Dict[str, Any]]:
-        if self.dossier_cartes is None:
-            return []
-        resultats = []
-        for chemin in sorted(self.dossier_cartes.glob("*.json")):
-            try:
-                payload = json.loads(chemin.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            # Les cartes anciennes n'ont pas de cle "kind" ; on ecarte juste
-            # les sauvegardes de partie et les fichiers sans carte.
-            if payload.get("kind") == "game" or not isinstance(payload.get("territories"), list):
-                continue
-            resultats.append({
-                "fichier": chemin.name,
-                "map_mode": payload.get("map_mode", "standard"),
-                "territoires": len(payload["territories"]),
-            })
-        return resultats
+        return self._lister_catalogue(
+            self.stockage_cartes, self._meta_cartes, self._meta_carte,
+        )
 
     def _nouvel_id(self) -> str:
         with self._lock:
             self._compteur += 1
             return f"p{self._compteur}"
 
-    @staticmethod
-    def _chemin_sous(dossier: Optional[Path], fichier: str) -> Path:
-        if dossier is None:
-            raise FileNotFoundError(fichier)
-        chemin = (dossier / fichier).resolve()
-        if chemin.parent != dossier.resolve() or not chemin.is_file():
-            raise FileNotFoundError(fichier)
-        return chemin
-
     def ouvrir(self, fichier: str, seed: Optional[int] = None) -> SessionPartie:
-        chemin = self._chemin_sous(self.dossier_sauvegardes, fichier)
-        session = SessionPartie.depuis_fichier(self._nouvel_id(), chemin, seed=seed)
+        if not nom_est_valide(fichier):
+            raise FileNotFoundError(fichier)
+        session = SessionPartie.depuis_stockage(
+            self._nouvel_id(), self.stockage_sauvegardes, fichier, seed=seed,
+        )
         self.parties[session.id] = session
         return session
 
@@ -570,14 +649,48 @@ class GestionnaireParties:
         tribes_mode: bool = False,
         seed: Optional[int] = None,
     ) -> SessionPartie:
-        chemin = self._chemin_sous(self.dossier_cartes, fichier_carte)
-        carte_payload = json.loads(chemin.read_text(encoding="utf-8"))
+        contenu = (
+            self.stockage_cartes.lire(fichier_carte)
+            if self.stockage_cartes is not None else None
+        )
+        if contenu is None:
+            raise FileNotFoundError(fichier_carte)
+        carte_payload = json.loads(contenu)
         session = SessionPartie.nouvelle(
             self._nouvel_id(), carte_payload, num_players, ai_player_count,
             difficulty_level=difficulty_level, tribes_mode=tribes_mode, seed=seed,
         )
+        # Les sauvegardes futures de cette partie neuve iront au catalogue.
+        session.stockage = self.stockage_sauvegardes
         self.parties[session.id] = session
         return session
+
+    def importer_carte(self, nom: Any, payload: Any, remplacer: bool = False) -> Dict[str, Any]:
+        """Valide et range une carte fournie par un client (lobby).
+
+        Refus par ``ValueError`` : ``nom_fichier_invalide``,
+        ``carte_invalide`` (le moteur ne sait pas la charger),
+        ``carte_trop_grosse``, ``carte_existante`` (sans ``remplacer``).
+        Retourne la fiche catalogue de la carte rangee.
+        """
+        nom = assainir_nom(nom)
+        meta = (
+            self._meta_carte(nom, payload) if isinstance(payload, dict) else None
+        )
+        if meta is None or not meta["territoires"] or self.stockage_cartes is None:
+            raise ValueError("carte_invalide")
+        contenu = json.dumps(payload, ensure_ascii=False)
+        if len(contenu) > self.TAILLE_CARTE_MAX:
+            raise ValueError("carte_trop_grosse")
+        try:
+            # La carte doit vraiment se charger : geometrie, voisins, liens.
+            GameState.from_map_payload(payload)
+        except Exception:
+            raise ValueError("carte_invalide")
+        if not remplacer and self.stockage_cartes.lire(nom) is not None:
+            raise ValueError("carte_existante")
+        self.stockage_cartes.ecrire(nom, contenu)
+        return meta
 
     def fermer(self, partie_id: str) -> bool:
         return self.parties.pop(partie_id, None) is not None

@@ -39,6 +39,7 @@ input, select {
 }
 
 .erreur { color: rgb(236, 112, 99); min-height: 1.2em; }
+.note-import { color: rgb(150, 160, 175); font-size: 0.85em; margin: 0.2em 0 0.5em; }
 
 /* --- Écran identité ------------------------------------------------- */
 

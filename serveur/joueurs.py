@@ -5,9 +5,10 @@ aux autres clients) a un nom public unique. Le client conserve son jeton
 (localStorage) et le presente en rejoignant une partie : c'est lui qui permet
 de retrouver son siege apres une coupure ou un changement d'appareil.
 
-Persistance : un simple fichier JSON ``{jeton: nom}``, relu au demarrage et
-reecrit a chaque inscription. Suffisant pour un serveur a une seule
-instance ; l'etat en base viendra avec le deploiement (etape 4).
+Persistance : un document JSON ``{jeton: nom}`` dans un stockage (module
+``stockage``) — un fichier ``joueurs.json`` en local, une ligne en base sur
+le serveur heberge. Relu au demarrage, reecrit a chaque inscription :
+suffisant pour un serveur a une seule instance.
 """
 
 from __future__ import annotations
@@ -18,21 +19,32 @@ import uuid
 from pathlib import Path
 from typing import Dict, Optional
 
+from .stockage import StockageFichiers
+
 # Nom public : 1 a 24 caracteres une fois les espaces normalises.
 LONGUEUR_NOM_MAX = 24
 
 
 class RegistreJoueurs:
-    """Le carnet des identites connues du serveur, adosse a un fichier."""
+    """Le carnet des identites connues du serveur, adosse a un stockage."""
 
-    def __init__(self, fichier: Path) -> None:
-        self.fichier = Path(fichier)
+    def __init__(self, fichier: Optional[Path] = None, *, stockage=None,
+                 nom_document: str = "joueurs.json") -> None:
+        if stockage is None:
+            if fichier is None:
+                raise ValueError("RegistreJoueurs : fichier ou stockage requis.")
+            fichier = Path(fichier)
+            stockage = StockageFichiers(fichier.parent)
+            nom_document = fichier.name
+        self.stockage = stockage
+        self.nom_document = nom_document
         self._lock = threading.Lock()
         self._noms_par_jeton: Dict[str, str] = {}
-        if self.fichier.is_file():
+        contenu = stockage.lire(nom_document)
+        if contenu is not None:
             try:
-                payload = json.loads(self.fichier.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
+                payload = json.loads(contenu)
+            except ValueError:
                 payload = None
             if isinstance(payload, dict):
                 self._noms_par_jeton = {
@@ -73,8 +85,7 @@ class RegistreJoueurs:
         return self._noms_par_jeton.get(jeton)
 
     def _ecrire(self) -> None:
-        self.fichier.parent.mkdir(parents=True, exist_ok=True)
-        self.fichier.write_text(
+        self.stockage.ecrire(
+            self.nom_document,
             json.dumps(self._noms_par_jeton, ensure_ascii=False),
-            encoding="utf-8",
         )

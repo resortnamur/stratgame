@@ -431,6 +431,49 @@ class TestApplicationWeb(unittest.TestCase):
         # Les routes API passent avant le statique.
         self.assertEqual(self.client.get("/api/cartes").status_code, 200)
 
+    def test_import_de_carte_via_api(self):
+        cartes = self.client.get("/api/cartes").json()["cartes"]
+        self.assertTrue(cartes)
+        payload = json.loads(
+            (DOSSIER_CARTES / cartes[0]["fichier"]).read_text(encoding="utf-8"),
+        )
+
+        # L'import va dans un dossier temporaire (app dediee) pour ne pas
+        # ecrire dans cartes_sauvegardees.
+        with tempfile.TemporaryDirectory() as dossier:
+            app = creer_app(DOSSIER_PARTIES, Path(dossier) / "cartes",
+                            fichier_joueurs=Path(dossier) / "joueurs.json")
+            client = TestClient(app)
+            reponse = client.post("/api/cartes", json={
+                "nom": "Carte importée.json", "carte": payload,
+            })
+            self.assertEqual(reponse.status_code, 200)
+            self.assertEqual(reponse.json()["fichier"], "Carte importée.json")
+            self.assertEqual(
+                [c["fichier"] for c in client.get("/api/cartes").json()["cartes"]],
+                ["Carte importée.json"],
+            )
+            # Doublon : 409, puis accepte avec "remplacer".
+            self.assertEqual(client.post("/api/cartes", json={
+                "nom": "Carte importée.json", "carte": payload,
+            }).status_code, 409)
+            self.assertEqual(client.post("/api/cartes", json={
+                "nom": "Carte importée.json", "carte": payload, "remplacer": True,
+            }).status_code, 200)
+            # Refus types : nom hors dossier, contenu illisible.
+            self.assertEqual(client.post("/api/cartes", json={
+                "nom": "../evasion.json", "carte": payload,
+            }).status_code, 422)
+            self.assertEqual(client.post("/api/cartes", json={
+                "nom": "vide.json", "carte": {"territories": []},
+            }).status_code, 422)
+            # Une partie neuve se cree depuis la carte importee.
+            reponse = client.post("/api/parties", json={
+                "carte": "Carte importée.json", "joueurs": 3, "ia": 1,
+                "seed": RANDOM_SEED,
+            })
+            self.assertEqual(reponse.status_code, 200)
+
     def test_bilans_via_api(self):
         resume = self.ouvrir_partie(premiere_sauvegarde().name)
         reponse = self.client.get(f"/api/parties/{resume['id']}/bilans")

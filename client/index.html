@@ -5,7 +5,7 @@
 <title>Jeux Strat</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- ?v=... force le navigateur à reprendre les fichiers après une mise à jour -->
-<link rel="stylesheet" href="style.css?v=17">
+<link rel="stylesheet" href="style.css?v=18">
 </head>
 <body>
 
@@ -58,6 +58,10 @@
         </label>
         <button id="bouton-creer" disabled>Créer la partie</button>
       </form>
+      <h2>Importer une carte</h2>
+      <p class="note-import">Un fichier de carte du jeu (<code>cartes_sauvegardees/*.json</code>).</p>
+      <input type="file" id="champ-import-carte" accept=".json,application/json" hidden>
+      <button id="bouton-importer-carte" type="button">Importer une carte…</button>
       <h2>Reprendre une sauvegarde</h2>
       <ul id="liste-sauvegardes" class="liste"></ul>
       <p id="erreur-lobby" class="erreur"></p>
@@ -137,6 +141,6 @@
   </div>
 </section>
 
-<script src="app.js?v=17"></script>
+<script src="app.js?v=18"></script>
 </body>
 </html>

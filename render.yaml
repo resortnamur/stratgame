@@ -1,0 +1,20 @@
+# Blueprint Render : cree le service web du jeu depuis le depot GitHub.
+# (Render > New > Blueprint, ou service web manuel avec ces memes valeurs.)
+#
+# Un seul processus uvicorn, sans workers supplementaires : les parties
+# vivent en memoire, il ne doit y avoir qu'une seule instance.
+services:
+  - type: web
+    name: jeux-strat
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn serveur.app:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      # L'URL du Postgres (Neon) : a renseigner dans le tableau de bord
+      # Render — jamais dans le depot. Sans elle, le serveur demarre en
+      # mode fichiers et PERD les ecritures a chaque redemarrage.
+      - key: DATABASE_URL
+        sync: false
