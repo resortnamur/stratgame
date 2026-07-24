@@ -397,8 +397,12 @@ function connecterAuServeur() {
       return;
     }
     if (evenement.code === 4004) {
-      journal("Partie inconnue du serveur.");
+      // Partie disparue (le serveur a redémarré) : retour au lobby, où
+      // la partie se reprend depuis sa sauvegarde.
       entrerAuLobby();
+      $("erreur-lobby").textContent =
+        "Cette partie n'existe plus (le serveur a redémarré). " +
+        "Reprends-la depuis sa sauvegarde.";
       return;
     }
     // Coupure involontaire : on retente, le siège nous attend.

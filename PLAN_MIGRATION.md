@@ -530,13 +530,34 @@ cartes importées vont en base. Vérifié dans le navigateur : import,
 apparition dans la liste, partie créée sur la carte importée (25 tests
 serveur verts).
 
-#### 4c — Dossier de déploiement ✅ (2026-07-24) / mise en ligne ⬜
+#### 4c — Dossier de déploiement ✅ (2026-07-24)
 
 `requirements.txt` (fastapi, uvicorn, psycopg — importé seulement si
 `DATABASE_URL` est définie), `render.yaml` (service web Free, un seul
 worker : les parties vivent en mémoire), `DEPLOIEMENT.md` pas à pas :
 GitHub (compte resortnamur) → Neon (Postgres gratuit durable ; le Postgres
 gratuit de Render expire après 30 jours, Fly.io n'a plus d'offre gratuite)
-→ Render (Blueprint). Reste à faire par le propriétaire des comptes :
-créer le dépôt GitHub, le compte Neon et le compte Render, puis suivre
-DEPLOIEMENT.md.
+→ Render (Blueprint).
+
+#### 4d — Mise en ligne ✅ (2026-07-24)
+
+**Le jeu est en ligne : https://stratgame.onrender.com** — dépôt GitHub
+`resortnamur/stratgame` (branche `master`), Postgres Neon, service Render
+`stratgame` (plan Free : réveil ~30-60 s après 15 min sans visite ;
+`WEB_CONCURRENCY=1` posé par Render, conforme). Chaque `git push`
+redéploie automatiquement (~2-3 min) ; les parties en cours, en mémoire,
+ne survivent pas à un déploiement — les sauvegardes si.
+
+Vérifié en ligne : lobby (18 cartes + 23 sauvegardes du dépôt), création
+de partie, WebSocket en direct (tours IA diffusés), sauvegarde via l'API,
+puis **restart du service** : l'identité (409 nom_pris à la réinscription)
+et la sauvegarde de test ont survécu dans Neon et la sauvegarde se rouvre.
+Correctif issu du test : une partie disparue (redémarrage) ferme le
+WebSocket avec le code 4004 **après** le handshake (avant : 403 avant
+handshake, invisible du navigateur → reconnexion en boucle) ; le client
+revient au lobby avec un message clair. `tests/test_serveur.py` : 26 tests.
+
+**L'étape 4 est terminée : le jeu complet se joue en ligne, état durable
+en base.** Reste connu, non bloquant : pas de bouton « Sauvegarder » dans
+l'interface web (l'API existe : `POST /api/parties/{id}/sauvegarder`) ;
+pas de code d'accès au lobby (assumé entre amis).

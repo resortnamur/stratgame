@@ -348,6 +348,11 @@ def creer_app(dossier_parties: Optional[Path] = None,
     async def ws_partie(websocket: WebSocket, partie_id: str):
         session = gestionnaire.parties.get(partie_id)
         if session is None:
+            # Accepter avant de fermer : sans handshake, le navigateur ne
+            # recoit jamais le code 4004 (il voit un 403 et retente en
+            # boucle — le cas d'un onglet reste sur une partie disparue
+            # apres un redemarrage du serveur).
+            await websocket.accept()
             await websocket.close(code=4004)
             return
         salle = salles.setdefault(partie_id, SallePartie(

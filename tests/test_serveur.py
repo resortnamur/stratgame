@@ -604,6 +604,19 @@ class TestApplicationWeb(unittest.TestCase):
             self.assertEqual(len(joueurs_vus), 2)
             self.assertEqual(len(set(joueurs_vus)), 2)
 
+    def test_websocket_partie_inconnue(self):
+        """Une partie disparue ferme avec le code 4004 APRES le handshake.
+
+        Sans handshake accepte, le navigateur ne voit qu'un echec (403) et
+        retente en boucle — le cas d'un onglet reste sur une partie qui
+        vivait en memoire avant un redemarrage du serveur.
+        """
+        from starlette.websockets import WebSocketDisconnect
+        with self.client.websocket_connect("/ws/parties/absente") as ws:
+            with self.assertRaises(WebSocketDisconnect) as contexte:
+                ws.receive_json()
+        self.assertEqual(contexte.exception.code, 4004)
+
     def test_websocket_erreur_moteur(self):
         """Une exception pendant une action devient un refus, pas un silence."""
         chemin = sauvegarde_avec_humain_au_trait()
