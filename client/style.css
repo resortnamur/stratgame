@@ -187,17 +187,95 @@ header {
   cursor: crosshair;
 }
 
+/* --- Message flash (action refusée) ---------------------------------- */
+
+#message-flash {
+  position: absolute;
+  left: 50%;
+  top: 64px;
+  transform: translateX(-50%);
+  max-width: 85%;
+  background: rgba(64, 22, 22, 0.96);
+  border: 2px solid rgb(236, 112, 99);
+  border-radius: 10px;
+  padding: 10px 22px;
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: rgb(250, 219, 216);
+  text-align: center;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  z-index: 5;
+}
+#message-flash.apparition { animation: flash-pop 3.5s ease forwards; }
+@keyframes flash-pop {
+  0% { opacity: 0; transform: translateX(-50%) scale(0.85); }
+  6% { opacity: 1; transform: translateX(-50%) scale(1.04); }
+  10% { transform: translateX(-50%) scale(1); }
+  82% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* --- Écran de victoire ------------------------------------------------ */
+
 #bandeau-victoire {
   position: absolute;
-  top: 40%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: rgba(18, 32, 52, 0.95);
-  border: 2px solid rgb(244, 208, 63);
-  border-radius: 12px;
-  padding: 24px 36px;
-  font-size: 1.3rem;
+  inset: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 18, 32, 0.72);
+  border-radius: 6px;
+  z-index: 6;
+}
+#bandeau-victoire .carte-victoire {
+  position: relative;
+  background: linear-gradient(160deg, rgb(34, 52, 78), rgb(20, 34, 56));
+  border: 3px solid rgb(244, 208, 63);
+  border-radius: 16px;
+  padding: 26px 46px;
   text-align: center;
+  box-shadow: 0 0 40px rgba(244, 208, 63, 0.35), 0 10px 30px rgba(0, 0, 0, 0.6);
+  animation: victoire-pop 0.6s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+@keyframes victoire-pop {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+#bandeau-victoire .feux { font-size: 1.6rem; letter-spacing: 8px; }
+#bandeau-victoire .titre-victoire {
+  font-size: 2.4rem;
+  font-weight: 800;
+  letter-spacing: 3px;
+  margin: 6px 0;
+  color: rgb(244, 208, 63);
+  text-shadow: 0 0 18px rgba(244, 208, 63, 0.55);
+  animation: victoire-pulse 1.6s ease-in-out infinite alternate;
+}
+@keyframes victoire-pulse {
+  from { text-shadow: 0 0 8px rgba(244, 208, 63, 0.35); }
+  to { text-shadow: 0 0 26px rgba(244, 208, 63, 0.85); }
+}
+#bandeau-victoire .vainqueur { font-size: 1.4rem; font-weight: 700; margin: 4px 0 10px; }
+#bandeau-victoire .raison {
+  font-size: 1rem;
+  color: rgb(214, 222, 230);
+  max-width: 420px;
+  margin: 0 auto 16px;
+  line-height: 1.45;
+}
+#bandeau-victoire .boutons-victoire { display: flex; gap: 10px; justify-content: center; }
+
+#confettis { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+#confettis span {
+  position: absolute;
+  top: -20px;
+  border-radius: 2px;
+  animation: confetti-chute linear infinite;
+}
+@keyframes confetti-chute {
+  to { transform: translateY(1000px) rotate(720deg); }
 }
 
 .zone-panneaux { display: flex; flex-direction: column; gap: 12px; min-width: 0; }

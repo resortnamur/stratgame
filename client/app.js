@@ -65,6 +65,7 @@ const client = {
   vueCarte: localStorage.getItem("jeux_strat_vue") || "fortress",
   replay: null,  // {histoire, index, enPause, minuterie} pendant un replay
   bilans: null,  // dernier état des lieux par joueur (GET /bilans)
+  victoire: null,  // {vainqueur, raison} une fois la partie gagnée
   fermetureVoulue: false,
 };
 
@@ -362,6 +363,7 @@ function entrerEnPartie(partieId) {
   client.etat = null;
   client.monSiege = null;
   client.selection = null;
+  client.victoire = null;
   location.hash = "partie=" + partieId;
   $("messages-chat").textContent = "";
   $("journal").textContent = "";
@@ -544,10 +546,12 @@ function traiterMessage(message) {
         break;
       }
       // Le refus d'un achat porte le texte de la boutique : on le préfère
-      // au libellé générique du code.
+      // au libellé générique du code. Flash sur la carte + trace au journal.
       const detail = message.resultat && message.resultat.outcome
         && message.resultat.outcome.message;
-      journal(detail || LIBELLES_REFUS[message.code] || `Refus : ${message.code}`);
+      const texteRefus = detail || LIBELLES_REFUS[message.code] || `Refus : ${message.code}`;
+      flash(texteRefus);
+      journal(texteRefus);
       break;
     case "chat":
       afficherMessageChat(message);
@@ -600,13 +604,10 @@ function traiterMessage(message) {
       envoyer({ type: "decision_soumission", reponse: !annexer });
       break;
     }
-    case "victoire": {
-      const bandeau = $("bandeau-victoire");
-      bandeau.textContent =
-        `Victoire de ${nomDuJoueur(message.vainqueur)} — ${message.raison}`;
-      bandeau.hidden = false;
+    case "victoire":
+      client.victoire = { vainqueur: message.vainqueur, raison: message.raison };
+      afficherVictoire();
       break;
-    }
     default:
       break;
   }
@@ -1013,11 +1014,17 @@ function clicCarteBoutique(tid) {
   if (!article || !article.cibles || tid === null) return false;
   const attendu = article.cibles[client.territoiresAchat.length];
   const proprietaire = client.etat.territories_state[tid].owner;
-  if (attendu === "mien" && proprietaire !== client.monSiege) return false;
-  if (attendu === "ennemi" && proprietaire === client.monSiege) return false;
+  const cibleRefusee = () => {
+    flash(`${article.libelle} : ${CONSIGNES_CIBLE[attendu] || "cible invalide"}.`);
+    return false;
+  };
+  if (attendu === "mien" && proprietaire !== client.monSiege) return cibleRefusee();
+  if (attendu === "ennemi" && proprietaire === client.monSiege) return cibleRefusee();
   // "benef" désigne un joueur par l'un de ses territoires : ni soi-même,
   // ni un territoire neutre (personne à qui donner).
-  if (attendu === "benef" && (proprietaire < 0 || proprietaire === client.monSiege)) return false;
+  if (attendu === "benef" && (proprietaire < 0 || proprietaire === client.monSiege)) {
+    return cibleRefusee();
+  }
   client.territoiresAchat.push(tid);
   if (client.territoiresAchat.length >= article.cibles.length) {
     envoyerAchat();
@@ -1099,6 +1106,7 @@ async function demarrerReplay() {
   client.replay = { histoire, index: 0, enPause: false };
   $("barre-replay").hidden = false;
   $("barre-actions").hidden = true;
+  $("bandeau-victoire").hidden = true;  // rien ne doit gâcher le replay
   $("replay-position").max = histoire.length - 1;
   client.replay.minuterie = setInterval(() => {
     const replay = client.replay;
@@ -1132,6 +1140,7 @@ function quitterReplay() {
   client.replay = null;
   $("barre-replay").hidden = true;
   afficherBarreActions();
+  afficherVictoire();  // l'écran de victoire revient une fois le replay fini
   dessinerCarte();
 }
 
@@ -1338,6 +1347,97 @@ function journal(texte) {
   ligne.textContent = texte;
   zone.append(ligne);
   zone.scrollTop = zone.scrollHeight;
+}
+
+// Message flash au-dessus de la carte : impossible à rater, disparaît seul.
+// Pour tout ce qui est refusé (serveur ou clic invalide) — le journal garde
+// la trace, le flash prévient sur le moment.
+let minuterieFlash = null;
+
+function flash(texte) {
+  const zone = $("message-flash");
+  zone.textContent = texte;
+  zone.hidden = false;
+  zone.classList.remove("apparition");
+  void zone.offsetWidth;  // relance l'animation si un flash était en cours
+  zone.classList.add("apparition");
+  clearTimeout(minuterieFlash);
+  minuterieFlash = setTimeout(() => { zone.hidden = true; }, 3500);
+}
+
+// ---------------------------------------------------------------------------
+// Écran de victoire — spectaculaire, expliqué, et effacé pendant le replay
+// ---------------------------------------------------------------------------
+
+function lancerConfettis(conteneur) {
+  const confettis = document.createElement("div");
+  confettis.id = "confettis";
+  for (let i = 0; i < 90; i += 1) {
+    const piece = document.createElement("span");
+    const taille = 6 + Math.random() * 7;
+    piece.style.left = `${Math.random() * 100}%`;
+    piece.style.width = `${taille}px`;
+    piece.style.height = `${taille * 0.45}px`;
+    piece.style.background = rgb(COULEURS_JOUEURS[i % COULEURS_JOUEURS.length]);
+    piece.style.animationDelay = `${Math.random() * 4}s`;
+    piece.style.animationDuration = `${2.5 + Math.random() * 2.5}s`;
+    confettis.append(piece);
+  }
+  conteneur.append(confettis);
+}
+
+function afficherVictoire() {
+  const bandeau = $("bandeau-victoire");
+  const info = client.victoire;
+  if (!info || client.replay) {
+    bandeau.hidden = true;
+    return;
+  }
+  const nom = nomDuJoueur(info.vainqueur);
+  const cEstMoi = info.vainqueur === client.monSiege;
+  bandeau.textContent = "";
+  lancerConfettis(bandeau);
+
+  const carte = document.createElement("div");
+  carte.className = "carte-victoire";
+  const feux = document.createElement("div");
+  feux.className = "feux";
+  feux.textContent = "🎆 🏆 🎆";
+  const titre = document.createElement("div");
+  titre.className = "titre-victoire";
+  titre.textContent = cEstMoi ? "TU AS GAGNÉ !" : "VICTOIRE !";
+  const vainqueur = document.createElement("div");
+  vainqueur.className = "vainqueur";
+  vainqueur.style.color = rgb(couleurJoueur(info.vainqueur));
+  vainqueur.textContent = cEstMoi
+    ? `${nom}, l'histoire retiendra ton nom 🎉`
+    : `${nom} remporte la partie 🎉`;
+  const raison = document.createElement("div");
+  raison.className = "raison";
+  raison.textContent = (info.raison || "") +
+    (client.etat ? ` (tour ${client.etat.turn})` : "");
+
+  const boutons = document.createElement("div");
+  boutons.className = "boutons-victoire";
+  const versReplay = document.createElement("button");
+  versReplay.type = "button";
+  versReplay.textContent = "🎬 Revoir la partie";
+  versReplay.addEventListener("click", demarrerReplay);
+  const voirCarte = document.createElement("button");
+  voirCarte.type = "button";
+  voirCarte.className = "secondaire";
+  voirCarte.textContent = "Voir la carte";
+  voirCarte.addEventListener("click", () => { bandeau.hidden = true; });
+  const versLobby = document.createElement("button");
+  versLobby.type = "button";
+  versLobby.className = "secondaire";
+  versLobby.textContent = "← Retour au lobby";
+  versLobby.addEventListener("click", () => $("bouton-retour-lobby").click());
+  boutons.append(versReplay, voirCarte, versLobby);
+
+  carte.append(feux, titre, vainqueur, raison, boutons);
+  bandeau.append(carte);
+  bandeau.hidden = false;
 }
 
 function journalRapportTour(rapport) {
