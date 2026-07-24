@@ -92,7 +92,9 @@ const MERVEILLES = {
 const CATALOGUE_ACHATS = [
   { id: "mercenaires", libelle: "Mercenaires — 50/rég.", cibles: ["mien"], quantite: true },
   { id: "vendre_territoire", libelle: "Vendre terr. +10/rég.", cibles: ["mien"], style: "special" },
-  { id: "donner_territoire", libelle: "Donner territoire", cibles: ["mien"], joueur: true, style: "special" },
+  // Le bénéficiaire du don se désigne sur la carte : 2e clic sur un de ses
+  // territoires (c'est son propriétaire qui reçoit, pas le territoire).
+  { id: "donner_territoire", libelle: "Donner territoire", cibles: ["mien", "benef"], style: "special" },
   { id: "donner_argent", libelle: "Donner argent", joueur: true, montant: true, style: "special" },
   { id: "forteresse", libelle: "Forteresse — 100", cibles: ["mien"], cout: 100 },
   { id: "detruire_forteresse", libelle: "Détruire forteresse — 100", cibles: ["tout"], cout: 100 },
@@ -121,6 +123,7 @@ const CONSIGNES_CIBLE = {
   mien: "clique un de tes territoires",
   ennemi: "clique un territoire adverse",
   tout: "clique un territoire",
+  benef: "clique un territoire du joueur bénéficiaire",
 };
 
 // Libellés français des codes de refus du serveur et du moteur.
@@ -984,7 +987,15 @@ function envoyerAchat() {
   const action = { type: "acheter", achat: article.id };
   if (article.cibles) {
     action.territoire = client.territoiresAchat[0];
-    if (article.cibles.length > 1) action.territoire_b = client.territoiresAchat[1];
+    if (article.cibles.length > 1) {
+      const second = client.territoiresAchat[1];
+      if (article.cibles[1] === "benef") {
+        // Le 2e clic désigne le bénéficiaire : le propriétaire du territoire.
+        action.joueur = client.etat.territories_state[second].owner;
+      } else {
+        action.territoire_b = second;
+      }
+    }
   }
   if (article.quantite) action.quantite = Number($("achat-quantite").value);
   if (article.montant) action.montant = Number($("achat-montant").value);
@@ -1004,6 +1015,9 @@ function clicCarteBoutique(tid) {
   const proprietaire = client.etat.territories_state[tid].owner;
   if (attendu === "mien" && proprietaire !== client.monSiege) return false;
   if (attendu === "ennemi" && proprietaire === client.monSiege) return false;
+  // "benef" désigne un joueur par l'un de ses territoires : ni soi-même,
+  // ni un territoire neutre (personne à qui donner).
+  if (attendu === "benef" && (proprietaire < 0 || proprietaire === client.monSiege)) return false;
   client.territoiresAchat.push(tid);
   if (client.territoiresAchat.length >= article.cibles.length) {
     envoyerAchat();
