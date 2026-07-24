@@ -1,6 +1,6 @@
 # Mettre le jeu en ligne (gratuit) — Render + Neon
 
-Objectif : une adresse publique (`https://jeux-strat.onrender.com` ou
+Objectif : une adresse publique (`https://stratgame.onrender.com` ou
 similaire) où chacun joue depuis son navigateur. Deux services gratuits :
 
 - **Render** héberge le serveur (FastAPI + WebSockets). Offre gratuite :
@@ -18,11 +18,11 @@ fonctionnent exactement comme avant).
 ## 1. Pousser le dépôt sur GitHub
 
 Sur github.com (compte `resortnamur`) : **New repository**, nom
-`jeux-strat` (privé ou public, les deux marchent avec Render), **sans**
+`stratgame` (privé ou public, les deux marchent avec Render), **sans**
 README ni .gitignore initial. Puis, depuis le dossier `Jeux Strat` :
 
 ```bash
-git remote add origin https://github.com/resortnamur/jeux-strat.git
+git remote add origin https://github.com/resortnamur/stratgame.git
 ```
 
 ```bash
@@ -46,9 +46,9 @@ au premier démarrage.
 ## 3. Créer le service Render
 
 1. https://render.com → **Sign up** (là aussi, le compte GitHub simplifie
-   la suite) → autoriser Render à voir le dépôt `jeux-strat`.
+   la suite) → autoriser Render à voir le dépôt `stratgame`.
 2. **New → Blueprint** → choisir le dépôt : Render lit `render.yaml` et
-   propose le service `jeux-strat` (plan Free).
+   propose le service `stratgame` (plan Free).
 3. À l'étape des variables d'environnement, renseigner `DATABASE_URL`
    avec la chaîne Neon copiée plus haut.
 4. Déployer. Le premier build prend quelques minutes ; l'adresse publique

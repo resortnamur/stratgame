@@ -5,7 +5,7 @@
 # vivent en memoire, il ne doit y avoir qu'une seule instance.
 services:
   - type: web
-    name: jeux-strat
+    name: stratgame
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
