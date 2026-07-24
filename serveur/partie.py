@@ -224,6 +224,36 @@ class SessionPartie:
                 del self.reservations[joueur]
             return joueur
 
+    def definir_mode_auto(self, joueur: Any, actif: bool) -> tuple:
+        """Confie le siege ``joueur`` a l'IA (``actif``) ou lui rend la main.
+
+        Retourne ``(ok, code)``. Seuls les sieges humains d'origine se
+        basculent : les IA de base et l'ONU restent au moteur
+        (``siege_indisponible``). Redemander le mode courant reussit
+        (idempotent). Si le joueur confie son propre tour de boutique a
+        l'IA, la partie revient en phase de jeu : l'IA ne fait pas
+        d'achats en cours de tour (elle achete en fin de tour), la
+        boucle des tours IA peut alors prendre le relais.
+        """
+        with self.lock:
+            state = self.state
+            if state.phase not in ("playing", "shopping"):
+                return (False, "partie_terminee")
+            if (
+                not isinstance(joueur, int) or isinstance(joueur, bool)
+                or not 0 <= joueur < state.num_players
+                or joueur in state.base_ai_players
+                or regles.is_onu_player(state, joueur)
+            ):
+                return (False, "siege_indisponible")
+            actif = bool(actif)
+            if actif == regles.is_ai_player(state, joueur):
+                return (True, "ok")
+            regles.set_auto_mode_for_player(state, joueur, actif, self.rng)
+            if actif and joueur == state.current_player and state.phase == "shopping":
+                state.phase = "playing"
+            return (True, "ok")
+
     def etat_reseau(self) -> Dict[str, Any]:
         """L'etat complet a diffuser aux clients, sans l'historique replay.
 
@@ -470,9 +500,21 @@ class SessionPartie:
 
         Retourne ``(pas, None)`` pour chaque passe (dict pret a diffuser),
         puis ``(None, resultat)`` quand le tour est fini (deplacements et
-        fin de tour joues, rapport complet du tour).
+        fin de tour joues, rapport complet du tour). Si le joueur du tour
+        a repris la main entre deux passes (mode auto desactive), le
+        deroule est abandonne : ``(None, resultat)`` avec le code
+        ``tour_repris``, l'etat restant coherent (c'est a lui de jouer).
         """
         with self.lock:
+            if (
+                self._joueur_ia is not None
+                and self.state.current_player == self._joueur_ia
+                and not regles.is_ai_player(self.state, self._joueur_ia)
+            ):
+                self._pas_ia = None
+                return None, ResultatAction(
+                    ok=True, code="tour_repris", joueur_ia=self._joueur_ia,
+                )
             try:
                 pas = next(self._pas_ia)
             except StopIteration as fin:

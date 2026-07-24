@@ -202,6 +202,69 @@ class TestSessionPartie(unittest.TestCase):
         json.dumps(resultat.outcome)
         json.dumps(rapports)
 
+    def test_mode_auto_bascule_et_reprise(self):
+        chemin = sauvegarde_avec_humain_au_trait()
+        session = SessionPartie.depuis_fichier("p1", chemin, seed=RANDOM_SEED)
+        state = session.state
+        joueur = state.current_player
+
+        # Seuls les sieges humains d'origine se basculent.
+        ia_de_base = next(iter(state.base_ai_players), None)
+        if ia_de_base is not None:
+            self.assertEqual(
+                session.definir_mode_auto(ia_de_base, True), (False, "siege_indisponible"),
+            )
+        self.assertEqual(session.definir_mode_auto(999, True), (False, "siege_indisponible"))
+        self.assertEqual(session.definir_mode_auto(None, True), (False, "siege_indisponible"))
+
+        # Redemander le mode courant est idempotent.
+        self.assertEqual(session.definir_mode_auto(joueur, False), (True, "ok"))
+        self.assertFalse(regles.is_ai_player(state, joueur))
+
+        # Confie a l'IA : le moteur voit une IA, la boucle a de quoi jouer,
+        # les actions du joueur sont arbitrees comme pour tout siege IA.
+        self.assertEqual(session.definir_mode_auto(joueur, True), (True, "ok"))
+        self.assertTrue(regles.is_ai_player(state, joueur))
+        self.assertTrue(session.tour_ia_en_attente())
+        refus = session.appliquer_action(joueur, {"type": "terminer_attaque"})
+        self.assertEqual((refus.ok, refus.code), (False, "siege_ia"))
+
+        # Reprise : redevient humain, son tour repart en phase d'attaque.
+        self.assertEqual(session.definir_mode_auto(joueur, False), (True, "ok"))
+        self.assertFalse(regles.is_ai_player(state, joueur))
+        self.assertEqual(state.turn_phase, "attack")
+        self.assertFalse(session.tour_ia_en_attente())
+        self.assertTrue(session.appliquer_action(joueur, {"type": "terminer_attaque"}).ok)
+
+    def test_mode_auto_pendant_la_boutique(self):
+        chemin = sauvegarde_avec_humain_au_trait()
+        session = SessionPartie.depuis_fichier("p1", chemin, seed=RANDOM_SEED)
+        joueur = session.state.current_player
+        self.assertTrue(session.appliquer_action(joueur, {"type": "terminer_attaque"}).ok)
+        self.assertEqual(session.state.phase, "shopping")
+        # Confier sa boutique a l'IA rend la main au jeu : la boucle IA
+        # peut prendre le relais (l'IA achete en fin de tour).
+        self.assertEqual(session.definir_mode_auto(joueur, True), (True, "ok"))
+        self.assertEqual(session.state.phase, "playing")
+        self.assertTrue(session.tour_ia_en_attente())
+
+    def test_mode_auto_reprise_interrompt_le_tour_ia(self):
+        chemin = sauvegarde_avec_humain_au_trait()
+        session = SessionPartie.depuis_fichier("p1", chemin, seed=RANDOM_SEED)
+        joueur = session.state.current_player
+        self.assertEqual(session.definir_mode_auto(joueur, True), (True, "ok"))
+        self.assertEqual(session.demarrer_tour_ia(), joueur)
+        # Le joueur reprend la main entre deux passes : le deroule s'arrete
+        # sans jouer la fin du tour, c'est a lui de jouer.
+        self.assertEqual(session.definir_mode_auto(joueur, False), (True, "ok"))
+        pas, resultat = session.pas_tour_ia()
+        self.assertIsNone(pas)
+        self.assertEqual(resultat.code, "tour_repris")
+        self.assertEqual(resultat.joueur_ia, joueur)
+        self.assertEqual(session.state.current_player, joueur)
+        self.assertFalse(session.tour_ia_en_attente())
+        self.assertTrue(session.appliquer_action(joueur, {"type": "terminer_attaque"}).ok)
+
     def test_sauvegarde_aller_retour(self):
         session = SessionPartie.depuis_fichier("p1", premiere_sauvegarde(), seed=RANDOM_SEED)
         with tempfile.TemporaryDirectory() as dossier:
@@ -539,6 +602,55 @@ class TestApplicationWeb(unittest.TestCase):
             # Assise, elle peut agir.
             ws.send_json({"type": "action", "action": {"type": "terminer_attaque"}})
             self.assertEqual(ws.receive_json()["type"], "resultat")
+
+    def test_websocket_mode_auto(self):
+        # Une partie neuve sans IA : le joueur 0 (humain) est au trait.
+        # Bob bascule un siege qui n'est PAS au trait, la bascule ne
+        # declenche donc pas la boucle des tours IA (test deterministe).
+        cartes = self.client.get("/api/cartes").json()["cartes"]
+        resume = self.client.post("/api/parties", json={
+            "carte": cartes[0]["fichier"], "joueurs": 3, "ia": 0,
+            "seed": RANDOM_SEED,
+        }).json()
+        partie_id = resume["id"]
+        courant = resume["joueur_courant"]
+        autre = next(
+            s["joueur"] for s in resume["sieges"]
+            if not s["ia"] and s["actif"] and s["joueur"] != courant
+        )
+        bob = self.inscrire("Bob")
+
+        with self.client.websocket_connect(f"/ws/parties/{partie_id}") as ws:
+            # Sans siege : refuse.
+            ws.send_json({"type": "rejoindre", "jeton": bob["jeton"]})
+            ws.receive_json()  # bienvenue
+            ws.receive_json()  # presence
+            ws.send_json({"type": "mode_auto", "actif": True})
+            self.assertEqual(ws.receive_json()["code"], "aucun_siege")
+
+            # Bob s'assoit et confie son siege a l'IA : diffusion a tous,
+            # le siege devient IA mais garde son reservataire.
+            ws.send_json({"type": "prendre_siege", "joueur": autre})
+            ws.receive_json()  # siege_pris
+            ws.receive_json()  # presence
+            ws.send_json({"type": "mode_auto", "actif": True})
+            message = ws.receive_json()
+            self.assertEqual(message["type"], "mode_auto")
+            self.assertEqual(
+                (message["joueur"], message["actif"], message["nom"]),
+                (autre, True, "Bob"),
+            )
+            presence = ws.receive_json()
+            siege = next(s for s in presence["sieges"] if s["joueur"] == autre)
+            self.assertEqual((siege["ia"], siege["nom"]), (True, "Bob"))
+
+            # Bob reprend la main quand il le souhaite.
+            ws.send_json({"type": "mode_auto", "actif": False})
+            message = ws.receive_json()
+            self.assertEqual((message["type"], message["actif"]), ("mode_auto", False))
+            presence = ws.receive_json()
+            siege = next(s for s in presence["sieges"] if s["joueur"] == autre)
+            self.assertEqual((siege["ia"], siege["nom"]), (False, "Bob"))
 
     def test_websocket_tours_ia_diffuses_un_par_un(self):
         """Les tours IA arrivent en messages separes (un etat par tour)."""

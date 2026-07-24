@@ -192,6 +192,29 @@ def prepare_ai_behavior_for_turn(state: GameState, player: int, rng=random) -> N
         state.ai_current_behavior[player] = profile
 
 
+def set_auto_mode_for_player(state: GameState, player: int, enabled: bool, rng=random) -> None:
+    """Bascule un joueur en mode IA (``enabled``) ou humain (miroir de x45).
+
+    En mode IA le joueur recoit la personnalite "standard" ; au retour en
+    mode humain, si c'est son tour, la phase revient a l'attaque (comme
+    x45 : l'humain reprend son tour depuis le debut).
+    """
+    if player < 0 or is_onu_player(state, player):
+        return
+    if enabled:
+        state.human_controlled_players.discard(player)
+        if player not in state.base_ai_players:
+            state.auto_controlled_players.add(player)
+        assign_ai_personality_to_player(state, player, "standard", rng)
+    else:
+        state.auto_controlled_players.discard(player)
+        state.human_controlled_players.add(player)
+        state.ai_personalities.pop(player, None)
+        state.ai_current_behavior.pop(player, None)
+        if player == state.current_player and state.phase == "playing":
+            state.turn_phase = "attack"
+
+
 # ----------------------------------------------------------------------
 # Cites commercantes
 # ----------------------------------------------------------------------

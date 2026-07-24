@@ -33,6 +33,11 @@ Client vers serveur :
 - ``{"type": "prendre_siege", "joueur": 2}`` — prend un siege apres avoir
   rejoint (spectateur identifie qui s'assoit).
 - ``{"type": "quitter_siege"}`` — libere son siege (on reste spectateur).
+- ``{"type": "mode_auto", "actif": true}`` — confie son siege a l'IA (pause,
+  abandon temporaire...) ; ``false`` pour reprendre la main, y compris au
+  milieu d'un tour que l'IA etait en train de jouer. Le siege reste reserve :
+  personne d'autre ne peut le prendre, et on ne peut pas basculer un autre
+  siege (IA de base ou humain).
 - ``{"type": "action", "action": {...}}`` — vocabulaire de
   ``moteur.actions.apply_action`` (attaquer, deplacer, acheter...).
 - ``{"type": "decision_soumission", "reponse": true}`` — reponse a une
@@ -62,6 +67,8 @@ Serveur vers client :
 - ``{"type": "chat", "joueur": n|null, "nom": "...", "texte": "..."}``
 - ``{"type": "siege_pris", "joueur": n}`` / ``{"type": "siege_quitte"}`` —
   accuses de reception de ``prendre_siege`` / ``quitter_siege``.
+- ``{"type": "mode_auto", "joueur": n, "actif": bool, "nom": "..."}`` — a
+  tous : le siege ``n`` vient de passer a l'IA (ou de revenir a son humain).
 - ``{"type": "victoire", "vainqueur": n, "raison": "..."}``
 
 Le client web (``client/``) est servi en statique a la racine ``/``.
@@ -524,6 +531,28 @@ def creer_app(dossier_parties: Optional[Path] = None,
                     connexion.joueur = None
                     await connexion.envoyer({"type": "siege_quitte"})
                     await salle.diffuser_presence()
+
+                elif type_message == "mode_auto":
+                    if connexion.joueur is None:
+                        await connexion.envoyer({"type": "refus", "code": "aucun_siege"})
+                        continue
+                    actif = bool(message.get("actif"))
+                    ok, code = session.definir_mode_auto(connexion.joueur, actif)
+                    if not ok:
+                        await connexion.envoyer({"type": "refus", "code": code})
+                        continue
+                    await salle.diffuser({
+                        "type": "mode_auto",
+                        "joueur": connexion.joueur,
+                        "actif": actif,
+                        "nom": connexion.nom,
+                    })
+                    await salle.diffuser_presence()
+                    # Siege confie a l'IA pendant son propre tour : la boucle
+                    # IA prend le relais (elle s'arretera d'elle-meme au
+                    # prochain humain). La reprise en main au milieu d'un
+                    # tour IA est vue par la boucle entre deux passes.
+                    salle.lancer_tours_ia()
 
                 elif type_message == "chat":
                     if connexion not in salle.connexions or connexion.nom is None:

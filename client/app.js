@@ -143,6 +143,7 @@ const LIBELLES_REFUS = {
   identite_requise: "Identité requise : passe par l'écran d'accueil pour choisir ton nom.",
   siege_indisponible: "Ce siège n'est pas disponible.",
   deja_un_siege: "Tu occupes déjà un siège (quitte-le d'abord).",
+  aucun_siege: "Tu n'occupes aucun siège.",
 };
 
 function $(id) { return document.getElementById(id); }
@@ -436,10 +437,17 @@ function envoyer(message) {
   }
 }
 
+function enModeAuto(joueur) {
+  // Siège humain confié à l'IA (bouton « Laisser l'IA jouer »).
+  return client.etat !== null && joueur !== null
+    && (client.etat.auto_controlled_players || []).includes(joueur);
+}
+
 function aMonTour() {
   return client.etat !== null
     && client.monSiege !== null
     && client.monSiege === client.etat.current_player
+    && !enModeAuto(client.monSiege)
     && (client.etat.phase === "playing" || client.etat.phase === "shopping");
 }
 
@@ -552,6 +560,34 @@ function traiterMessage(message) {
       journal("Siège libéré : tu es spectateur.");
       toutRafraichir();
       break;
+    case "mode_auto": {
+      // Un siège humain vient d'être confié à l'IA (ou repris). L'état
+      // complet n'est pas rediffusé pour ça : on met la liste à jour ici,
+      // la présence (drapeaux « ia » des sièges) suit dans la foulée.
+      const etat = client.etat;
+      if (etat) {
+        const autos = new Set(etat.auto_controlled_players || []);
+        if (message.actif) autos.add(message.joueur);
+        else autos.delete(message.joueur);
+        etat.auto_controlled_players = [...autos];
+        // Miroir du serveur : reprendre la main pendant son tour ramène en
+        // phase d'attaque ; confier sa boutique à l'IA rend la main au jeu.
+        if (!message.actif && message.joueur === etat.current_player
+            && etat.phase === "playing") {
+          etat.turn_phase = "attack";
+        }
+        if (message.actif && message.joueur === etat.current_player
+            && etat.phase === "shopping") {
+          etat.phase = "playing";
+        }
+      }
+      const nom = message.nom || nomDuJoueur(message.joueur);
+      journal(message.actif
+        ? `${nom} laisse l'IA jouer à sa place.`
+        : `${nom} reprend la main.`);
+      toutRafraichir();
+      break;
+    }
     case "question_soumission": {
       // OK = annexer (le choix par défaut) ; Annuler = soumettre (tribut).
       const annexer = confirm(
@@ -767,10 +803,21 @@ function afficherBarreActions() {
   const enAchats = etat.phase === "shopping";
   const enDeplacement = etat.phase === "playing" && etat.turn_phase === "move";
   const monTour = aMonTour();
+  const monAuto = client.monSiege !== null && enModeAuto(client.monSiege);
   $("bouton-fin-attaque").hidden = !(monTour && enAttaque);
   $("bouton-fin-achats").hidden = !(monTour && enAchats);
   $("bouton-fin-tour").hidden = !(monTour && enDeplacement);
   $("bouton-jouer-siege").hidden = true;
+  // La bascule humain ↔ IA de son propre siège, toujours à portée de main.
+  $("bouton-mode-ia").hidden = client.monSiege === null;
+  $("bouton-mode-ia").textContent = monAuto ? "Reprendre la main" : "Laisser l'IA jouer";
+
+  if (monAuto) {
+    $("indication-phase").textContent = etat.current_player === client.monSiege
+      ? "L'IA joue ton tour — « Reprendre la main » pour continuer toi-même."
+      : "Ton siège est en mode IA — reprends la main quand tu veux.";
+    return;
+  }
 
   if (monTour) {
     if (enAttaque) {
@@ -1108,6 +1155,10 @@ $("bouton-fin-achats").addEventListener("click", () =>
   envoyerAction({ type: "terminer_achats" }));
 $("bouton-fin-tour").addEventListener("click", () =>
   envoyerAction({ type: "fin_de_tour" }));
+$("bouton-mode-ia").addEventListener("click", () => {
+  if (client.monSiege === null) return;
+  envoyer({ type: "mode_auto", actif: !enModeAuto(client.monSiege) });
+});
 
 function passerPhaseSuivante() {
   // Miroir de x45 : Échap/Entrée terminent la phase en cours.
@@ -1188,7 +1239,11 @@ function afficherSieges() {
     pion.style.background = rgb(couleurJoueur(siege.joueur));
 
     const texte = document.createElement("span");
-    if (siege.ia) {
+    if (siege.ia && siege.nom) {
+      // Siège humain confié à l'IA : le réservataire garde son nom.
+      texte.textContent = `${siege.nom}${siege.joueur === client.monSiege ? " (toi)" : ""}` +
+        ` — IA aux commandes${personnaliteIA(etat, siege.joueur)}`;
+    } else if (siege.ia) {
       texte.textContent = `IA ${siege.joueur}${personnaliteIA(etat, siege.joueur)}`;
     } else if (siege.nom) {
       texte.textContent = siege.nom + (siege.joueur === client.monSiege ? " (toi)" : "");
@@ -1216,20 +1271,27 @@ function afficherSieges() {
     }
     element.append(pion, texte);
 
-    if (!siege.ia && siege.actif) {
-      if (siege.joueur === client.monSiege) {
+    if (siege.actif && siege.joueur === client.monSiege) {
+      // Mon siège : bascule humain ↔ IA, et départ (une fois la main reprise).
+      const basculer = document.createElement("button");
+      basculer.textContent = siege.ia ? "Reprendre la main" : "Laisser l'IA jouer";
+      basculer.className = "secondaire";
+      basculer.addEventListener("click", () =>
+        envoyer({ type: "mode_auto", actif: !siege.ia }));
+      element.append(basculer);
+      if (!siege.ia) {
         const bouton = document.createElement("button");
         bouton.textContent = "Quitter";
         bouton.className = "danger";
         bouton.addEventListener("click", () => envoyer({ type: "quitter_siege" }));
         element.append(bouton);
-      } else if (!siege.nom && client.monSiege === null) {
-        const bouton = document.createElement("button");
-        bouton.textContent = "S'asseoir";
-        bouton.addEventListener("click", () =>
-          envoyer({ type: "prendre_siege", joueur: siege.joueur }));
-        element.append(bouton);
       }
+    } else if (!siege.ia && siege.actif && !siege.nom && client.monSiege === null) {
+      const bouton = document.createElement("button");
+      bouton.textContent = "S'asseoir";
+      bouton.addEventListener("click", () =>
+        envoyer({ type: "prendre_siege", joueur: siege.joueur }));
+      element.append(bouton);
     }
     liste.append(element);
   }
