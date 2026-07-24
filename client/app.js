@@ -459,6 +459,17 @@ function traiterMessage(message) {
       journalResultat(message);
       toutRafraichir();
       planifierBilans();
+      // Comme x45 : après le dernier déplacement autorisé, le tour se
+      // termine tout seul (le joueur ne peut de toute façon plus rien faire).
+      if (message.joueur === client.monSiege
+          && message.action && message.action.type === "deplacer"
+          && aMonTour() && client.etat.phase === "playing"
+          && client.etat.turn_phase === "move"
+          && client.etat.turn_move_count >= limiteDeplacements(client.etat)) {
+        journal(`${limiteDeplacements(client.etat)} déplacements effectués : ` +
+                "fin de tour automatique.");
+        envoyerAction({ type: "fin_de_tour" });
+      }
       break;
     case "refus":
       client.actionDepuis = null;
@@ -1355,14 +1366,22 @@ function dessinerCarte() {
   ajusterResolutionCarte();
   const carte = $("carte");
   const contexte = carte.getContext("2d");
-  contexte.setTransform(
-    carte.width / LARGEUR_CARTE, 0, 0, carte.height / HAUTEUR_CARTE, 0, 0,
-  );
+  // Les cellules et bordures se dessinent en pixels ENTIERS de l'écran :
+  // avec des cellules de ~7 px, l'anti-aliasing des coordonnées
+  // fractionnaires rendait la carte floue (pygame pose des pixels francs).
+  contexte.setTransform(1, 0, 0, 1, 0, 0);
   const largeurCellule = LARGEUR_CARTE / etat.cols;
   const hauteurCellule = HAUTEUR_CARTE / etat.rows;
   const grille = etat.grid_territory;
   const situations = etat.territories_state;
   const enroule = etat.map_mode === "custom";
+  // Bornes entières de chaque colonne/ligne : aucune couture, aucun flou.
+  const bordsX = Array.from({ length: etat.cols + 1 },
+    (_, c) => Math.round(c * carte.width / etat.cols));
+  const bordsY = Array.from({ length: etat.rows + 1 },
+    (_, r) => Math.round(r * carte.height / etat.rows));
+  const echelle = carte.width / LARGEUR_CARTE;
+  const epaisseur = (logique) => Math.max(1, Math.round(logique * echelle));
 
   // Cibles attaquables depuis la source sélectionnée (teinte rouge, x45).
   const sourceAttaque = aMonTour() && etat.phase === "playing"
@@ -1406,51 +1425,53 @@ function dessinerCarte() {
   });
 
   contexte.fillStyle = rgb(COULEUR_EAU);
-  contexte.fillRect(0, 0, LARGEUR_CARTE, HAUTEUR_CARTE);
+  contexte.fillRect(0, 0, carte.width, carte.height);
   for (let r = 0; r < etat.rows; r += 1) {
     for (let c = 0; c < etat.cols; c += 1) {
       const tid = grille[r][c];
       if (tid < 0) continue;
       contexte.fillStyle = remplissages[tid];
       contexte.fillRect(
-        Math.floor(c * largeurCellule), Math.floor(r * hauteurCellule),
-        Math.ceil(largeurCellule) + 1, Math.ceil(hauteurCellule) + 1,
+        bordsX[c], bordsY[r],
+        bordsX[c + 1] - bordsX[c], bordsY[r + 1] - bordsY[r],
       );
     }
   }
 
   // Bordures : fines entre territoires, jaunes pour le joueur au trait,
-  // violettes (soumis) ou blanches (sanctuaire) épaisses.
+  // violettes (soumis) ou blanches (sanctuaire) épaisses — dessinées en
+  // rectangles pleins à l'intérieur de la cellule (pixels nets).
   function styleBordure(tid) {
-    if (etat.submitted_territory_ids.includes(tid)) return ["rgb(185,90,255)", 4];
-    if (etat.sanctuary_territory_ids.includes(tid)) return ["rgb(230,245,255)", 4];
+    if (etat.submitted_territory_ids.includes(tid)) return ["rgb(185,90,255)", epaisseur(4)];
+    if (etat.sanctuary_territory_ids.includes(tid)) return ["rgb(230,245,255)", epaisseur(4)];
     const proprietaire = situations[tid].owner;
-    if (proprietaire === etat.current_player) return ["rgb(255,220,50)", 2];
+    if (proprietaire === etat.current_player) return ["rgb(255,220,50)", epaisseur(2)];
     return ["rgb(20,20,20)", 1];
   }
-  contexte.lineCap = "butt";
   for (let r = 0; r < etat.rows; r += 1) {
     for (let c = 0; c < etat.cols; c += 1) {
       const tid = grille[r][c];
       if (tid < 0) continue;
-      const [couleur, epaisseur] = styleBordure(tid);
-      const x0 = c * largeurCellule, y0 = r * hauteurCellule;
-      const x1 = x0 + largeurCellule, y1 = y0 + hauteurCellule;
+      const [couleur, ep] = styleBordure(tid);
+      const x0 = bordsX[c], y0 = bordsY[r];
+      const largeur = bordsX[c + 1] - x0, hauteur = bordsY[r + 1] - y0;
       const haut = enroule ? grille[(r - 1 + etat.rows) % etat.rows][c] : (r > 0 ? grille[r - 1][c] : null);
       const bas = enroule ? grille[(r + 1) % etat.rows][c] : (r < etat.rows - 1 ? grille[r + 1][c] : null);
       const gauche = enroule ? grille[r][(c - 1 + etat.cols) % etat.cols] : (c > 0 ? grille[r][c - 1] : null);
       const droite = enroule ? grille[r][(c + 1) % etat.cols] : (c < etat.cols - 1 ? grille[r][c + 1] : null);
-      contexte.strokeStyle = couleur;
-      contexte.lineWidth = epaisseur;
-      contexte.beginPath();
-      if (haut !== tid) { contexte.moveTo(x0, y0); contexte.lineTo(x1, y0); }
-      if (bas !== tid) { contexte.moveTo(x0, y1); contexte.lineTo(x1, y1); }
-      if (gauche !== tid) { contexte.moveTo(x0, y0); contexte.lineTo(x0, y1); }
-      if (droite !== tid) { contexte.moveTo(x1, y0); contexte.lineTo(x1, y1); }
-      contexte.stroke();
+      contexte.fillStyle = couleur;
+      if (haut !== tid) contexte.fillRect(x0, y0, largeur, ep);
+      if (bas !== tid) contexte.fillRect(x0, y0 + hauteur - ep, largeur, ep);
+      if (gauche !== tid) contexte.fillRect(x0, y0, ep, hauteur);
+      if (droite !== tid) contexte.fillRect(x0 + largeur - ep, y0, ep, hauteur);
     }
   }
 
+  // Le reste (liens, étiquettes, badges) se dessine en repère logique
+  // 1200×620 : formes lisses, l'anti-aliasing y est bienvenu.
+  contexte.setTransform(
+    carte.width / LARGEUR_CARTE, 0, 0, carte.height / HAUTEUR_CARTE, 0, 0,
+  );
   dessinerLiens(contexte, etat, largeurCellule, hauteurCellule);
   if (vueReligion) {
     dessinerVueReligion(contexte, etat, largeurCellule, hauteurCellule);

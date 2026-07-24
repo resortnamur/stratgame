@@ -483,5 +483,15 @@ selon la vue, et la capitale qui disparaît bien à la capture (simulation).
 - **Panneaux repliables** : clic sur le titre de chaque encart de droite
   (chevron ▾/▸), choix mémorisé par panneau en localStorage.
 
+Derniers réglages (retours d'usage) :
+- **Rendu net** : cellules et bordures dessinées en pixels entiers de
+  l'écran (rectangles pleins, zéro anti-aliasing — comme pygame) ; seuls
+  liens, étiquettes et badges gardent le repère logique lissé. C'était la
+  dernière source de flou par rapport à x45.
+- **Fin de tour automatique** après le dernier déplacement autorisé,
+  comme x45 (« 10 déplacements effectués : fin de tour automatique »).
+- L'attribut `hidden` prime désormais sur tout `display` CSS (la barre de
+  replay s'affichait par défaut).
+
 L'étape 3 est terminée : le jeu complet se joue dans le navigateur.
 ### Étape 4 — Déploiement gratuit (Render/Fly.io ; réveil ~30 s, état en base) ⬜
