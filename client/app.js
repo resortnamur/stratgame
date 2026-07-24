@@ -505,11 +505,12 @@ function traiterMessage(message) {
       toutRafraichir();
       break;
     case "question_soumission": {
-      const reponse = confirm(
+      // OK = annexer (le choix par défaut) ; Annuler = soumettre (tribut).
+      const annexer = confirm(
         `${message.nom} est conquis (${message.regiments_vaincus} régiments vaincus).\n` +
-        "OK = soumettre (tribut), Annuler = annexer.",
+        "OK = annexer, Annuler = soumettre (tribut).",
       );
-      envoyer({ type: "decision_soumission", reponse });
+      envoyer({ type: "decision_soumission", reponse: !annexer });
       break;
     }
     case "victoire": {
