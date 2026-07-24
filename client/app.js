@@ -528,6 +528,30 @@ function traiterMessage(message) {
 // Panneaux (tour, sièges, chat, journal, territoire)
 // ---------------------------------------------------------------------------
 
+// Libellés français des profils IA (personnalité fixe + comportement tiré
+// au sort à chaque tour pour les « variables »).
+const LIBELLES_PROFILS_IA = {
+  standard: "standard",
+  aggressive: "agressive",
+  very_aggressive: "très agressive",
+  defensive: "défensive",
+  variable: "variable",
+};
+
+function personnaliteIA(etat, joueur) {
+  if (!etat) return "";
+  const profil = (etat.ai_personalities || {})[String(joueur)];
+  if (!profil) return "";
+  let libelle = LIBELLES_PROFILS_IA[profil] || profil;
+  if (profil === "variable") {
+    const humeur = (etat.ai_current_behavior || {})[String(joueur)];
+    if (humeur) {
+      libelle += `, ce tour : ${LIBELLES_PROFILS_IA[humeur] || humeur}`;
+    }
+  }
+  return ` (${libelle})`;
+}
+
 function nomDuJoueur(joueur) {
   const siege = client.sieges.find((s) => s.joueur === joueur);
   if (siege && siege.nom) return siege.nom;
@@ -810,7 +834,7 @@ function afficherParamsBoutique() {
     zone.append(label);
   }
 
-  if (article.quantite) ajouterChampNombre("achat-quantite", "Quantité", 5, 1);
+  if (article.quantite) ajouterChampNombre("achat-quantite", "Quantité", 1, 1);
   if (article.montant) ajouterChampNombre("achat-montant", "Montant", 100, 1);
   if (article.joueur) ajouterChoixJoueur("achat-joueur", "Bénéficiaire");
   if (article.allie) ajouterChoixJoueur("achat-allie", "Allié (IA)");
@@ -1116,7 +1140,7 @@ function afficherSieges() {
 
     const texte = document.createElement("span");
     if (siege.ia) {
-      texte.textContent = `IA ${siege.joueur}`;
+      texte.textContent = `IA ${siege.joueur}${personnaliteIA(etat, siege.joueur)}`;
     } else if (siege.nom) {
       texte.textContent = siege.nom + (siege.joueur === client.monSiege ? " (toi)" : "");
       if (!siege.connecte) {
