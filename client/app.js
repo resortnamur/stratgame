@@ -372,6 +372,25 @@ function entrerEnPartie(partieId) {
   connecterAuServeur();
 }
 
+// La version du client en cours d'exécution : le ?v= de son propre script.
+const VERSION_CLIENT = (document.querySelector("script[src*='app.js']") || { src: "" })
+  .src.match(/app\.js\?v=\d+/);
+
+async function clientPerime() {
+  // Le serveur sert-il une version plus récente du client ? La page
+  // d'accueil est en no-cache : on y lit le ?v= attendu. Sans cela, un
+  // onglet resté ouvert pendant une mise à jour (le serveur redémarre,
+  // la connexion coupe) continuerait de jouer avec l'ancien client —
+  // anciens boutons, anciennes règles d'affichage.
+  try {
+    const html = await (await fetch("/", { cache: "no-cache" })).text();
+    const attendu = html.match(/app\.js\?v=\d+/);
+    return Boolean(VERSION_CLIENT && attendu && VERSION_CLIENT[0] !== attendu[0]);
+  } catch (erreur) {
+    return false;  // serveur injoignable : la reconnexion réessaiera
+  }
+}
+
 function connecterAuServeur() {
   if (client.ws) {
     client.fermetureVoulue = true;
@@ -404,20 +423,29 @@ function connecterAuServeur() {
     }
     if (evenement.code === 4004) {
       // Partie disparue (le serveur a redémarré) : retour au lobby, où
-      // la partie se reprend depuis sa sauvegarde.
+      // la partie se reprend depuis sa sauvegarde. Un redémarrage est
+      // souvent une mise à jour : si le client a vieilli, on recharge.
       entrerAuLobby();
       $("erreur-lobby").textContent =
         "Cette partie n'existe plus (le serveur a redémarré). " +
         "Reprends-la depuis sa sauvegarde.";
+      clientPerime().then((perime) => { if (perime) location.reload(); });
       return;
     }
     // Coupure involontaire : on retente, le siège nous attend.
     majConnexion("déconnecté");
     journal("Connexion perdue, nouvelle tentative dans 2 s…");
-    setTimeout(() => {
-      if (client.partieId !== null && !client.fermetureVoulue) {
-        connecterAuServeur();
+    setTimeout(async () => {
+      if (client.partieId === null || client.fermetureVoulue) return;
+      if (await clientPerime()) {
+        // Le jeu a été mis à jour pendant qu'on jouait : on recharge la
+        // page — l'identité (localStorage), la partie (hash d'URL) et le
+        // siège (jeton) sont retrouvés automatiquement.
+        journal("Mise à jour du jeu : rechargement de la page…");
+        location.reload();
+        return;
       }
+      connecterAuServeur();
     }, 2000);
   });
 }
