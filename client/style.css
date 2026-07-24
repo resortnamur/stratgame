@@ -2,6 +2,10 @@
 
 * { box-sizing: border-box; }
 
+/* L'attribut hidden doit toujours gagner, même sur les blocs en flex
+   (sans cela, display:flex rend visible une barre pourtant cachée). */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font-family: "Segoe UI", system-ui, sans-serif;
