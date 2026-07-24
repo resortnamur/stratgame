@@ -70,6 +70,44 @@ header {
   padding: 12px;
 }
 
+/* Panneaux repliables (colonne de droite) : clic sur le titre. */
+.zone-panneaux .panneau h2 {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  justify-content: space-between;
+}
+.zone-panneaux .panneau h2::after { content: "▾"; color: rgb(100, 120, 145); }
+.zone-panneaux .panneau.replie h2 { margin-bottom: 0; }
+.zone-panneaux .panneau.replie h2::after { content: "▸"; }
+.zone-panneaux .panneau.replie > *:not(h2) { display: none; }
+
+#detail-empire { font-size: 0.85rem; line-height: 1.5; }
+#detail-empire .ok { color: rgb(88, 214, 141); font-weight: bold; }
+#detail-empire .manque { color: rgb(236, 112, 99); font-weight: bold; }
+#detail-empire .conditions { margin-top: 4px; }
+
+#tableau-situation { overflow-x: auto; }
+#tableau-situation table {
+  border-collapse: collapse;
+  font-size: 0.75rem;
+  width: 100%;
+}
+#tableau-situation th, #tableau-situation td {
+  padding: 3px 5px;
+  text-align: right;
+  border-bottom: 1px solid rgb(40, 58, 82);
+  white-space: nowrap;
+}
+#tableau-situation th { color: rgb(149, 165, 166); font-weight: normal; }
+#tableau-situation td:first-child, #tableau-situation th:first-child { text-align: left; }
+#tableau-situation .pion {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 3px;
+  margin-right: 4px;
+}
+
 .colonnes {
   display: grid;
   grid-template-columns: 1fr 1fr;

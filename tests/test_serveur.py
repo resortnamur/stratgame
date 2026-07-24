@@ -431,6 +431,28 @@ class TestApplicationWeb(unittest.TestCase):
         # Les routes API passent avant le statique.
         self.assertEqual(self.client.get("/api/cartes").status_code, 200)
 
+    def test_bilans_via_api(self):
+        resume = self.ouvrir_partie(premiere_sauvegarde().name)
+        reponse = self.client.get(f"/api/parties/{resume['id']}/bilans")
+        self.assertEqual(reponse.status_code, 200)
+        donnees = reponse.json()
+        self.assertGreater(donnees["total_territoires"], 0)
+        self.assertGreaterEqual(
+            donnees["seuil_trois_quarts"], donnees["total_territoires"] * 3 // 4,
+        )
+        self.assertTrue(donnees["bilans"])
+        premier = next(iter(donnees["bilans"].values()))
+        for cle in ("territoires", "regiments", "amenagements", "nation"):
+            self.assertIn(cle, premier)
+        self.assertEqual(premier["amenagements"]["total"], sum(
+            valeur for cle, valeur in premier["amenagements"].items() if cle != "total"
+        ))
+        conditions = premier["nation"]["conditions"]
+        self.assertEqual(len(conditions), 4)
+        for condition in conditions:
+            self.assertIn("libelle", condition)
+            self.assertIn("ok", condition)
+
     def test_replay_via_api(self):
         resume = self.ouvrir_partie(premiere_sauvegarde().name)
         reponse = self.client.get(f"/api/parties/{resume['id']}/replay")

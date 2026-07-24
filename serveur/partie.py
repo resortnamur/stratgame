@@ -219,6 +219,130 @@ class SessionPartie:
         payload["replay_history"] = []
         return payload
 
+    def bilans(self) -> Dict[str, Any]:
+        """L'état des lieux de chaque joueur actif (panneau empire de x45).
+
+        Tout est calculé par les règles du moteur : aménagements possédés,
+        bonus, conditions d'accès au statut de nation (bloc d'un seul
+        tenant, structures requises, capitale, délai de conservation) et
+        progression vers la victoire.
+        """
+        with self.lock:
+            state = self.state
+            total = len(state.territories)
+            seuil = (total * 3 + 3) // 4  # 3/4 arrondi supérieur, comme x45
+            bilans = {}
+            for joueur in regles.get_active_players(state):
+                possessions = {t.id for t in state.territories if t.owner == joueur}
+                regiments = sum(t.regiments for t in state.territories if t.owner == joueur)
+                amenagements = {
+                    "forteresses": len(state.fortress_territory_ids & possessions),
+                    "usines": len(state.factory_territory_ids & possessions),
+                    "aeroports": len(state.airport_territory_ids & possessions),
+                    "ports": len(state.port_territory_ids & possessions),
+                    "temples": len(state.temple_territory_ids & possessions),
+                    "centres_culturels": sum(
+                        1 for tid in possessions
+                        if regles.get_cultural_center_count(state, tid) > 0
+                    ),
+                    "universites": len(state.university_territory_ids & possessions),
+                }
+                amenagements["total"] = sum(amenagements.values())
+                bonus = {}
+                for territoire in state.territories:
+                    if territoire.owner == joueur and territoire.reinforcement_bonus > 1:
+                        cle = f"+{territoire.reinforcement_bonus}"
+                        bonus[cle] = bonus.get(cle, 0) + 1
+                bilans[str(joueur)] = {
+                    "territoires": len(possessions),
+                    "regiments": regiments,
+                    "amenagements": amenagements,
+                    "bonus": bonus,
+                    "mines": len(set(state.precious_mineral_mine_ids) & possessions),
+                    "dores": len(set(state.golden_territory_ids) & possessions),
+                    "nation": self._bilan_nation(joueur, possessions),
+                }
+            return {
+                "bilans": bilans,
+                "total_territoires": total,
+                "seuil_trois_quarts": seuil,
+                "nb_dores": len(state.golden_territory_ids),
+            }
+
+    def _bilan_nation(self, joueur: int, possessions: set) -> Dict[str, Any]:
+        """Les conditions de nation pour un joueur (verrou déjà pris)."""
+        state = self.state
+        composantes = regles.get_owned_components(state, joueur)
+        candidates = [
+            c for c in composantes if len(c) >= regles.NATION_MIN_TERRITORIES
+        ]
+        sortes_par_composante = {
+            id(c): self._sortes_structures(c) for c in composantes
+        }
+        # Le bloc le plus prometteur : parmi les assez grands, celui qui a le
+        # plus de sortes de structures ; sinon le plus grand tout court.
+        cible = max(
+            candidates or composantes,
+            key=lambda c: (sum(sortes_par_composante[id(c)].values()), len(c)),
+            default=[],
+        )
+        sortes = self._sortes_structures(cible)
+        manquantes = [nom for nom, present in sortes.items() if not present]
+        est_nation = joueur in state.nation_players
+        depart = state.nation_qualification_start_turns.get(joueur)
+        if est_nation:
+            tours_restants = 0
+        elif depart is not None:
+            tours_restants = max(
+                0, regles.NATION_QUALIFICATION_DELAY_TURNS - (state.turn - depart),
+            )
+        else:
+            tours_restants = regles.NATION_QUALIFICATION_DELAY_TURNS
+        return {
+            "est_nation": est_nation,
+            "taille_bloc": len(cible),
+            "conditions": [
+                {
+                    "libelle": f"Un bloc d'au moins {regles.NATION_MIN_TERRITORIES} territoires d'un seul tenant",
+                    "ok": len(cible) >= regles.NATION_MIN_TERRITORIES,
+                    "detail": f"{len(cible)}/{regles.NATION_MIN_TERRITORIES}",
+                },
+                {
+                    "libelle": "Toutes les structures dans ce bloc",
+                    "ok": not manquantes,
+                    "detail": "complètes" if not manquantes else "manque : " + ", ".join(manquantes),
+                },
+                {
+                    "libelle": "Capitale active dans ce bloc",
+                    "ok": bool(cible) and regles.component_has_active_regular_capital(
+                        state, joueur, cible,
+                    ),
+                    "detail": "",
+                },
+                {
+                    "libelle": f"Conserver le tout {regles.NATION_QUALIFICATION_DELAY_TURNS} tours",
+                    "ok": est_nation,
+                    "detail": "acquis" if est_nation else f"{tours_restants} tour(s) restant(s)",
+                },
+            ],
+        }
+
+    def _sortes_structures(self, composante: List[int]) -> Dict[str, bool]:
+        """Les 7 sortes de structures requises présentes dans un bloc."""
+        state = self.state
+        bloc = set(composante)
+        return {
+            "forteresse": bool(state.fortress_territory_ids & bloc),
+            "usine": bool(state.factory_territory_ids & bloc),
+            "port": bool(state.port_territory_ids & bloc),
+            "aéroport": bool(state.airport_territory_ids & bloc),
+            "temple": bool(state.temple_territory_ids & bloc),
+            "centre culturel": any(
+                regles.get_cultural_center_count(state, tid) > 0 for tid in bloc
+            ),
+            "université": bool(state.university_territory_ids & bloc),
+        }
+
     def replay(self) -> List[dict]:
         """L'historique replay complet (charge a la demande, hors diffusion).
 

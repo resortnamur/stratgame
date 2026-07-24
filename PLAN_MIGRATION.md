@@ -465,5 +465,23 @@ selon la vue, et la capitale qui disparaît bien à la capture (simulation).
 - L'import de cartes dans le lobby est planifié pour l'étape 4 (une fois
   le serveur hébergé, plus de dossier local).
 
+#### 3g — Bilans et panneaux à la carte ✅ (2026-07-23)
+
+- **`GET /api/parties/{id}/bilans`** : état des lieux par joueur actif,
+  calculé par les règles du moteur — territoires, régiments, aménagements
+  par type, bonus de renforts, mines, dorés, et surtout les **conditions
+  d'accès au statut de nation** (bloc connexe ≥ 10, les 7 structures dans
+  le bloc avec la liste des manquantes, capitale active, délai de 10
+  tours avec le décompte). Le client les recharge après chaque action
+  (throttle 1,2 s).
+- **Panneau « Mon empire »** : le bilan de son siège, checklist de nation
+  ✓/✗ avec détails actionnables (« manque : port, université », « 5/10 »).
+- **Panneau « Situation générale »** : tableau de tous les joueurs —
+  territoires, régiments, écus, revenu, science, culture, aménagements,
+  nation — trié par territoires.
+- **Détail territoire** : nombre de voisins.
+- **Panneaux repliables** : clic sur le titre de chaque encart de droite
+  (chevron ▾/▸), choix mémorisé par panneau en localStorage.
+
 L'étape 3 est terminée : le jeu complet se joue dans le navigateur.
 ### Étape 4 — Déploiement gratuit (Render/Fly.io ; réveil ~30 s, état en base) ⬜

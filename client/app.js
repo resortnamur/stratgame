@@ -64,6 +64,7 @@ const client = {
   territoiresAchat: [],  // territoires déjà cliqués pour l'achat en cours
   vueCarte: localStorage.getItem("jeux_strat_vue") || "fortress",
   replay: null,  // {histoire, index, enPause, minuterie} pendant un replay
+  bilans: null,  // dernier état des lieux par joueur (GET /bilans)
   fermetureVoulue: false,
 };
 
@@ -139,6 +140,9 @@ const LIBELLES_REFUS = {
   garnison: "Il faut laisser au moins 1 régiment.",
   continuite: "Pas de chemin par tes territoires.",
   erreur_serveur: "Erreur inattendue du serveur (voir ses logs) — l'action est annulée.",
+  identite_requise: "Identité requise : passe par l'écran d'accueil pour choisir ton nom.",
+  siege_indisponible: "Ce siège n'est pas disponible.",
+  deja_un_siege: "Tu occupes déjà un siège (quitte-le d'abord).",
 };
 
 function $(id) { return document.getElementById(id); }
@@ -419,6 +423,7 @@ function traiterMessage(message) {
         journal(`Assis au siège ${message.joueur}.`);
       }
       toutRafraichir();
+      chargerBilans();
       break;
     case "presence":
       client.sieges = message.sieges;
@@ -453,6 +458,7 @@ function traiterMessage(message) {
       if (message.joueur === client.monSiege) client.actionDepuis = null;
       journalResultat(message);
       toutRafraichir();
+      planifierBilans();
       break;
     case "refus":
       client.actionDepuis = null;
@@ -480,6 +486,7 @@ function traiterMessage(message) {
       client.monSiege = message.joueur;
       journal(`Assis au siège ${message.joueur}.`);
       toutRafraichir();
+      chargerBilans();
       break;
     case "siege_quitte":
       client.monSiege = null;
@@ -526,8 +533,110 @@ function toutRafraichir() {
   afficherBarreActions();
   afficherBoutique();
   afficherEvenements();
+  afficherEmpire();
+  afficherSituation();
   afficherDetailTerritoire();
   dessinerCarte();
+}
+
+// ---------------------------------------------------------------------------
+// Bilans (état des lieux) — chargés du serveur, throttlés pendant les IA
+// ---------------------------------------------------------------------------
+
+let minuterieBilans = null;
+
+async function chargerBilans() {
+  if (client.partieId === null) return;
+  try {
+    client.bilans = await api(`/api/parties/${client.partieId}/bilans`);
+    afficherEmpire();
+    afficherSituation();
+  } catch (erreur) {
+    // Silencieux : les panneaux garderont le dernier bilan connu.
+  }
+}
+
+function planifierBilans() {
+  if (minuterieBilans) return;
+  minuterieBilans = setTimeout(() => {
+    minuterieBilans = null;
+    chargerBilans();
+  }, 1200);
+}
+
+function afficherEmpire() {
+  const zone = $("detail-empire");
+  if (client.monSiege === null) {
+    zone.textContent = "Prends un siège pour voir ton bilan.";
+    return;
+  }
+  const donnees = client.bilans;
+  const bilan = donnees && donnees.bilans[String(client.monSiege)];
+  if (!bilan) {
+    zone.textContent = "Bilan en cours de chargement…";
+    return;
+  }
+  const amenagements = bilan.amenagements;
+  const lignes = [
+    `<strong>${bilan.territoires}</strong> territoires ` +
+      `(victoire aux ¾ : ${donnees.seuil_trois_quarts}) — ` +
+      `<strong>${bilan.regiments}</strong> régiments`,
+    `Territoires dorés : ${bilan.dores}/${donnees.nb_dores}` +
+      (bilan.mines ? ` — mines de minerais : ${bilan.mines}` : ""),
+    `Aménagements (${amenagements.total}) : ` +
+      `${amenagements.forteresses} forteresse(s), ${amenagements.usines} usine(s), ` +
+      `${amenagements.aeroports} aéroport(s), ${amenagements.ports} port(s), ` +
+      `${amenagements.temples} temple(s), ${amenagements.centres_culturels} centre(s) culturel(s), ` +
+      `${amenagements.universites} université(s)`,
+  ];
+  if (Object.keys(bilan.bonus).length) {
+    lignes.push("Bonus de renforts : " + Object.entries(bilan.bonus)
+      .map(([valeur, nombre]) => `${nombre} territoire(s) ${valeur}`).join(", "));
+  }
+  lignes.push(bilan.nation.est_nation
+    ? "<strong>Statut de nation : acquis ✓</strong>"
+    : "<strong>Vers le statut de nation :</strong>");
+  const conditions = bilan.nation.conditions.map((condition) =>
+    `<span class="${condition.ok ? "ok" : "manque"}">${condition.ok ? "✓" : "✗"}</span> ` +
+    condition.libelle + (condition.detail ? ` — ${condition.detail}` : ""));
+  zone.innerHTML = lignes.join("<br>")
+    + "<div class='conditions'>" + conditions.join("<br>") + "</div>";
+}
+
+function afficherSituation() {
+  const zone = $("tableau-situation");
+  const etat = client.etat;
+  const donnees = client.bilans;
+  if (!etat || !donnees) {
+    zone.textContent = "Chargement…";
+    return;
+  }
+  const colonnes = ["Joueur", "Terr.", "Rég.", "Écus", "+Rev", "Sci", "Cult", "Amén.", "Nation"];
+  const lignes = [];
+  for (const [cle, bilan] of Object.entries(donnees.bilans)) {
+    const joueur = Number(cle);
+    const apercu = (etat.apercus || {})[cle] || {};
+    lignes.push({
+      joueur,
+      cellules: [
+        `<span class="pion" style="background:${rgb(couleurJoueur(joueur))}"></span>${nomDuJoueur(joueur)}`,
+        bilan.territoires,
+        bilan.regiments,
+        etat.player_money[cle] || 0,
+        `+${apercu.revenu ?? "?"}`,
+        etat.player_science[cle] || 0,
+        apercu.culture ?? "?",
+        bilan.amenagements.total,
+        bilan.nation.est_nation ? "✓" : "",
+      ],
+    });
+  }
+  lignes.sort((a, b) => b.cellules[1] - a.cellules[1]);  // par territoires
+  zone.innerHTML =
+    "<table><tr>" + colonnes.map((c) => `<th>${c}</th>`).join("") + "</tr>" +
+    lignes.map((ligne) =>
+      "<tr>" + ligne.cellules.map((c) => `<td>${c}</td>`).join("") + "</tr>",
+    ).join("") + "</table>";
 }
 
 function afficherEvenements() {
@@ -1152,6 +1261,7 @@ function afficherDetailTerritoire() {
     `<strong>${territoire.name}</strong>`,
     `Propriétaire : ${situation.owner >= 0 ? nomDuJoueur(situation.owner) : "neutre"}`,
     `Régiments : ${situation.regiments}`,
+    `Voisins : ${territoire.neighbors.length}`,
   ];
   if (situation.reinforcement_bonus > 1) {
     lignes.push(`Bonus de renforts : +${situation.reinforcement_bonus}`);
@@ -1887,7 +1997,25 @@ function traiterClicTerritoire(tid, boutonDroit) {
 // Démarrage
 // ---------------------------------------------------------------------------
 
+function initialiserPanneauxRepliables() {
+  // Chaque panneau de la colonne de droite se replie d'un clic sur son
+  // titre ; le choix est retenu d'une session à l'autre.
+  for (const panneau of document.querySelectorAll(".zone-panneaux .panneau")) {
+    const titre = panneau.querySelector("h2");
+    if (!titre || !panneau.id) continue;
+    const cle = "jeux_strat_" + panneau.id;
+    if (localStorage.getItem(cle) === "replie") panneau.classList.add("replie");
+    titre.addEventListener("click", () => {
+      panneau.classList.toggle("replie");
+      localStorage.setItem(
+        cle, panneau.classList.contains("replie") ? "replie" : "ouvert",
+      );
+    });
+  }
+}
+
 function demarrer() {
+  initialiserPanneauxRepliables();
   if (!client.jeton || !client.nom) {
     montrerEcran("identite");
     return;
