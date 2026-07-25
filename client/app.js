@@ -666,6 +666,12 @@ function traiterMessage(message) {
       toutRafraichir();
       break;
     }
+    case "modale_suivante":
+      // L'encart vient d'être consommé : l'état à jour porte le suivant
+      // de la file (ou plus rien).
+      client.etat = message.etat;
+      toutRafraichir();
+      break;
     case "question_soumission": {
       // OK = annexer (le choix par défaut) ; Annuler = soumettre (tribut).
       const annexer = confirm(
@@ -728,11 +734,46 @@ function toutRafraichir() {
   afficherBarreActions();
   afficherBoutique();
   afficherEvenements();
+  afficherEncartEvenements();
   afficherEmpire();
   afficherSituation();
   afficherDetailTerritoire();
   dessinerCarte();
 }
+
+// ---------------------------------------------------------------------------
+// Encart des événements importants : superposé à la carte au début du tour
+// du joueur (alimenté par la file de modales du moteur, comme les pop-ups
+// de x45). Le bouton « Compris — jouer » le consomme côté serveur.
+// ---------------------------------------------------------------------------
+
+function afficherEncartEvenements() {
+  const encart = $("encart-evenements");
+  const etat = client.etat;
+  const modale = etat && etat.major_event_modal;
+  const visible = Boolean(
+    modale
+    && !client.replay
+    && client.monSiege !== null
+    && client.monSiege === etat.current_player
+    && (etat.phase === "playing" || etat.phase === "shopping"),
+  );
+  encart.hidden = !visible;
+  if (!visible) return;
+  $("titre-encart").textContent = modale.title || "Événements importants";
+  const liste = $("liste-encart");
+  liste.textContent = "";
+  for (const evenement of modale.events || []) {
+    const item = document.createElement("li");
+    item.textContent = evenement;
+    liste.append(item);
+  }
+}
+
+$("bouton-encart").addEventListener("click", () => {
+  $("encart-evenements").hidden = true;
+  envoyer({ type: "modale_lue" });
+});
 
 // ---------------------------------------------------------------------------
 // Bilans (état des lieux) — chargés du serveur, throttlés pendant les IA

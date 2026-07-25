@@ -5,7 +5,7 @@
 <title>Jeux Strat</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- ?v=... force le navigateur à reprendre les fichiers après une mise à jour -->
-<link rel="stylesheet" href="style.css?v=20">
+<link rel="stylesheet" href="style.css?v=21">
 </head>
 <body>
 
@@ -99,6 +99,13 @@
       <canvas id="carte" width="1200" height="620"></canvas>
       <div id="message-flash" hidden></div>
       <div id="bandeau-victoire" hidden></div>
+      <div id="encart-evenements" hidden>
+        <div class="boite-evenements">
+          <h2 id="titre-encart"></h2>
+          <ul id="liste-encart"></ul>
+          <button id="bouton-encart" type="button">Compris — jouer</button>
+        </div>
+      </div>
     </div>
     <aside class="zone-panneaux">
       <div class="panneau" id="panneau-sieges">
@@ -144,6 +151,6 @@
   </div>
 </section>
 
-<script src="app.js?v=28"></script>
+<script src="app.js?v=29"></script>
 </body>
 </html>

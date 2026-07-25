@@ -19,7 +19,7 @@ import random
 import threading
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from moteur import actions, mise_en_place, regles
 from moteur.etat import GameState
@@ -521,6 +521,24 @@ class SessionPartie:
             if outcome.winner is not None:
                 self.state.phase = "victory"
             return resultat
+
+    def consommer_modale_evenements(self, joueur: Optional[int]) -> Tuple[bool, str]:
+        """Retire l'encart d'evenements courant (bouton « Compris » du client).
+
+        Seul le joueur au trait peut le consommer : l'encart lui est destine
+        (il est cree au debut de son tour ou pendant celui-ci). S'il reste
+        des encarts en file, le suivant prend la place.
+        """
+        with self.lock:
+            if joueur is None or joueur != self.state.current_player:
+                return (False, "pas_votre_tour")
+            if self.state.major_event_modal is None:
+                return (False, "aucune_modale")
+            if self.state.major_event_modal_queue:
+                self.state.major_event_modal = self.state.major_event_modal_queue.pop(0)
+            else:
+                self.state.major_event_modal = None
+            return (True, "ok")
 
     def tour_ia_en_attente(self) -> bool:
         """Vrai si c'est a un joueur automatique (IA, cite...) de jouer."""

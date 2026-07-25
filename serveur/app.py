@@ -588,6 +588,20 @@ def creer_app(dossier_parties: Optional[Path] = None,
                             "texte": texte,
                         })
 
+                elif type_message == "modale_lue":
+                    # Le joueur au trait a lu l'encart des evenements : on le
+                    # retire de l'etat et on lui renvoie l'etat a jour (pour
+                    # enchainer sur l'encart suivant s'il y en a un).
+                    ok, code = session.consommer_modale_evenements(connexion.joueur)
+                    if not ok:
+                        await connexion.envoyer({"type": "refus", "code": code})
+                        continue
+                    await salle.sauvegarder_auto()
+                    await connexion.envoyer({
+                        "type": "modale_suivante",
+                        "etat": session.etat_reseau(),
+                    })
+
                 elif type_message == "decision_soumission":
                     future = connexion.decision_future
                     if future is not None and not future.done():
