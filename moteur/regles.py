@@ -49,18 +49,45 @@ WONDER_DEFINITIONS = {
     "elyrion_sanctuary": {
         "name": "Sanctuaire d'Elyrion",
         "effect": "Fonde Elyrion, religion conquerante liee au territoire",
+        "kind": "science",
     },
     "thousand_voices_theatre": {
         "name": "Theatre des Mille Voix",
         "effect": "Double la culture de son controleur",
+        "kind": "science",
     },
     "atlas_observatory": {
         "name": "Observatoire d'Atlas",
         "effect": "Double la science effective de son controleur",
+        "kind": "science",
     },
     "golden_pact_palace": {
         "name": "Palais du Pacte d'Or",
         "effect": "Fait de son controleur l'unique allie de la Cite commercante",
+        "kind": "science",
+    },
+    # Merveilles culturelles : memes regles d'exclusivite (une seule
+    # merveille par territoire, chaque merveille unique sur la carte),
+    # mais debloquees par la culture plutot que par la science.
+    "ivory_rampart": {
+        "name": "Rempart d'Ivoire",
+        "effect": "Protege ce territoire de toute attaque des joueurs IA",
+        "kind": "culture",
+    },
+    "croesus_fountain": {
+        "name": "Fontaine de Cresus",
+        "effect": "Multiplie par 5 l'argent produit par ce territoire",
+        "kind": "culture",
+    },
+    "aurelia_capitol": {
+        "name": "Capitole d'Aurelia",
+        "effect": "Ouvre le statut de nation si la capitale de son proprietaire s'y trouve",
+        "kind": "culture",
+    },
+    "daedalus_forge": {
+        "name": "Forge de Dedale",
+        "effect": "Ponts construits ou detruits gratuitement depuis ce territoire",
+        "kind": "culture",
     },
 }
 
@@ -114,6 +141,7 @@ RELIGION_SPREAD_INTERVAL_BY_TEMPLE_COUNT = {
 }
 SCIENCE_WONDER_THRESHOLD = 100
 AI_SCIENCE_WONDER_THRESHOLD = 50
+CULTURE_WONDER_THRESHOLD = 100
 MERCENARY_COST = 50
 FORTRESS_COST = 100
 FACTORY_COST = 100
@@ -871,6 +899,11 @@ def player_controls_wonder(state: GameState, player: int, wonder_type: str) -> b
     return get_wonder_controller(state, wonder_type) == player
 
 
+def is_territory_protected_from_ai_attacks(state: GameState, territory_id: int) -> bool:
+    """Le Rempart d'Ivoire protege son territoire des attaques des IA."""
+    return state.wonder_territories.get("ivory_rampart") == territory_id
+
+
 def get_player_temple_count(state: GameState, player: int) -> int:
     if player < 0 or is_onu_player(state, player):
         return 0
@@ -949,13 +982,20 @@ def calculate_territory_income(state: GameState, territory: Territory) -> int:
     is_regular_capital = is_active_regular_capital(state, territory.id)
     if is_tax_haven_capital or is_regular_capital:
         income *= CAPITAL_INCOME_MULTIPLIER
+    if state.wonder_territories.get("croesus_fountain") == territory.id:
+        # Fontaine de Cresus : l'argent du territoire est quintuple, en
+        # plus des autres multiplicateurs eventuels.
+        income *= 5
     return income
 
 
 def calculate_submitted_territory_income(state: GameState, territory: Territory) -> int:
     base_income = max(1, len(territory.neighbors))
     industrial_count = get_industrial_structure_count(state, territory.id)
-    return base_income + (base_income * industrial_count)
+    income = base_income + (base_income * industrial_count)
+    if state.wonder_territories.get("croesus_fountain") == territory.id:
+        income *= 5
+    return income
 
 
 def calculate_submitted_territory_tribute(state: GameState, player: int) -> int:
@@ -1788,11 +1828,27 @@ def component_has_active_regular_capital(state: GameState, player: int, territor
     return capital_id is not None and capital_id in territory_set
 
 
+def player_qualifies_for_nation_via_capitol(state: GameState, player: int) -> bool:
+    """Capitole d'Aurelia : la capitale posee sur la merveille ouvre a elle
+    seule le statut de nation, sans exigence de taille ni de structures."""
+    capitol_id = state.wonder_territories.get("aurelia_capitol")
+    if capitol_id is None or not (0 <= capitol_id < len(state.territories)):
+        return False
+    if state.territories[capitol_id].owner != player:
+        return False
+    return component_has_active_regular_capital(state, player, [capitol_id])
+
+
 def find_player_nation_component(
     state: GameState, player: int, require_capital: bool = True,
 ) -> Optional[List[int]]:
     if player < 0 or is_onu_player(state, player):
         return None
+    if player_qualifies_for_nation_via_capitol(state, player):
+        capitol_id = state.wonder_territories["aurelia_capitol"]
+        for component in get_owned_components(state, player):
+            if capitol_id in component:
+                return component
     for component in get_owned_components(state, player):
         if len(component) < NATION_MIN_TERRITORIES:
             continue
@@ -2290,6 +2346,8 @@ def can_attack_specific_target(state: GameState, src: Territory, dst: Territory)
         return False
     if src.owner in state.commercial_city_players and is_any_capital_territory(state, dst.id):
         return False
+    if is_ai_player(state, src.owner) and is_territory_protected_from_ai_attacks(state, dst.id):
+        return False
     if is_attack_blocked_by_alliance(state, src.owner, dst.owner):
         return False
     return True
@@ -2309,6 +2367,8 @@ def resolve_attack_once(
     """
     if src.owner in state.commercial_city_players and is_any_capital_territory(state, dst.id):
         return AttackResult("attaque interdite", "capitale protegee des Cites commercantes", False)
+    if is_ai_player(state, src.owner) and is_territory_protected_from_ai_attacks(state, dst.id):
+        return AttackResult("attaque interdite", "territoire protege par le Rempart d'Ivoire", False)
     alliance_break_message = break_alliance_due_to_human_attack(state, src.owner, dst.owner) or ""
     if src.regiments >= 5 and can_player_attack_with_four_dice(state, src.owner):
         att_dice = 4
@@ -2755,6 +2815,28 @@ def can_player_build_wonder(state: GameState, player: int) -> bool:
     return has_science_level(state, player, get_wonder_science_threshold(state, player))
 
 
+def is_cultural_wonder_type(wonder_type: Optional[str]) -> bool:
+    definition = WONDER_DEFINITIONS.get(wonder_type or "")
+    return bool(definition) and definition.get("kind") == "culture"
+
+
+def can_player_build_cultural_wonder(state: GameState, player: int) -> bool:
+    return calculate_player_culture(state, player) >= CULTURE_WONDER_THRESHOLD
+
+
+def can_player_build_wonder_type(state: GameState, player: int, wonder_type: str) -> bool:
+    if is_cultural_wonder_type(wonder_type):
+        return can_player_build_cultural_wonder(state, player)
+    return can_player_build_wonder(state, player)
+
+
+def get_buildable_wonder_types(state: GameState, player: int) -> List[str]:
+    return [
+        wonder_type for wonder_type in get_available_wonder_types(state)
+        if can_player_build_wonder_type(state, player, wonder_type)
+    ]
+
+
 def get_wonder_type_at_territory(state: GameState, territory_id: int) -> Optional[str]:
     for wonder_type, wonder_territory_id in state.wonder_territories.items():
         if wonder_territory_id == territory_id:
@@ -2867,7 +2949,7 @@ def annex_territory_by_culture(state: GameState, territory_id: int, player: int)
     return previous_owner
 
 
-def trigger_culture_expansions_if_due(state: GameState, player: int) -> Tuple[List[str], int]:
+def trigger_culture_expansions_if_due(state: GameState, player: int, rng=random) -> Tuple[List[str], int]:
     if player < 0 or is_onu_player(state, player):
         return [], 0
 
@@ -2877,13 +2959,23 @@ def trigger_culture_expansions_if_due(state: GameState, player: int) -> Tuple[Li
     if reached_milestone <= previous_milestone:
         return [], culture
 
-    # Tous les paliers deja franchis sont regroupes en une seule vague
-    # d'annexion. Le palier maximal est consomme meme si aucun territoire
-    # voisin n'est disponible.
+    # Chaque palier de 50 franchi n'annexe plus qu'UN seul territoire
+    # voisin, tire au hasard parmi les cibles contigues. Un palier est
+    # consomme meme si aucun voisin n'est disponible. Les paliers franchis
+    # pendant la vague (centres culturels annexes) sont consommes de la
+    # meme facon.
+    consumed_milestone = previous_milestone
+    annexed_ids: List[int] = []
+    while consumed_milestone < reached_milestone:
+        consumed_milestone += 50
+        target_ids = get_culture_expansion_target_ids(state, player)
+        if target_ids:
+            territory_id = rng.choice(sorted(target_ids))
+            annex_territory_by_culture(state, territory_id, player)
+            annexed_ids.append(territory_id)
+        culture = calculate_player_culture(state, player)
+        reached_milestone = max(reached_milestone, max(0, int(culture) // 50 * 50))
     state.culture_expansion_milestones[player] = reached_milestone
-    target_ids = get_culture_expansion_target_ids(state, player)
-    for territory_id in sorted(target_ids):
-        annex_territory_by_culture(state, territory_id, player)
 
     refresh_last_stand_bonus_state(state)
     enforce_commercial_city_wonder_exclusivity(state)
@@ -2891,25 +2983,21 @@ def trigger_culture_expansions_if_due(state: GameState, player: int) -> Tuple[Li
     refresh_eliminated_human_players(state)
     refresh_nation_states(state, trigger_player=player)
 
-    # Une annexion peut apporter de nouveaux centres culturels. Les paliers
-    # ainsi franchis pendant cette meme vague sont eux aussi consommes.
     culture = calculate_player_culture(state, player)
-    final_milestone = max(reached_milestone, max(0, int(culture) // 50 * 50))
-    state.culture_expansion_milestones[player] = final_milestone
 
-    captured_names = ", ".join(state.territories[tid].name for tid in sorted(target_ids)[:6])
-    if len(target_ids) > 6:
+    captured_names = ", ".join(state.territories[tid].name for tid in annexed_ids[:6])
+    if len(annexed_ids) > 6:
         captured_names += ", ..."
     detail = f" ({captured_names})" if captured_names else ""
-    crossed_count = max(1, (final_milestone - previous_milestone) // 50)
+    crossed_count = max(1, (reached_milestone - previous_milestone) // 50)
     milestone_label = (
-        f"Palier culturel {final_milestone}"
+        f"Palier culturel {reached_milestone}"
         if crossed_count == 1
-        else f"Paliers culturels franchis jusqu'a {final_milestone}"
+        else f"Paliers culturels franchis jusqu'a {reached_milestone}"
     )
     message = (
-        f"{milestone_label}: J{player + 1} annexe automatiquement "
-        f"{len(target_ids)} territoire(s) adjacent(s) en une seule vague{detail}."
+        f"{milestone_label}: J{player + 1} annexe au hasard "
+        f"{len(annexed_ids)} territoire(s) adjacent(s){detail}."
     )
     record_major_event(state, f"Tour {state.turn}: {message}")
     record_replay_snapshot(state, f"Tour {state.turn}: {message}", force=True)
@@ -4101,9 +4189,9 @@ def find_regular_ai_mercenary_purchase(state: GameState, player: int, owned: Lis
 
 
 def find_ai_wonder_purchase(state: GameState, player: int, rng=random):
-    if not is_ai_player(state, player) or not can_player_build_wonder(state, player):
+    if not is_ai_player(state, player):
         return None
-    available_wonders = get_available_wonder_types(state)
+    available_wonders = get_buildable_wonder_types(state, player)
     if not available_wonders:
         return None
     candidates = [
@@ -4283,9 +4371,10 @@ def execute_ai_economic_actions(state: GameState, player: int, rng=random) -> in
     actions = 0
 
     # Priorite absolue des IA : construire les merveilles disponibles des que
-    # le seuil de science et le prix sont atteints. Si l'argent manque, l'IA
-    # epargne au lieu de le disperser dans des achats secondaires.
-    while can_player_build_wonder(state, player) and get_available_wonder_types(state):
+    # le seuil (science ou culture selon la merveille) et le prix sont
+    # atteints. Si l'argent manque, l'IA epargne au lieu de le disperser
+    # dans des achats secondaires.
+    while get_buildable_wonder_types(state, player):
         wonder_action = find_ai_wonder_purchase(state, player, rng)
         if wonder_action is None:
             break

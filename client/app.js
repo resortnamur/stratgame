@@ -88,6 +88,26 @@ const MERVEILLES = {
   thousand_voices_theatre: "Théâtre des Mille Voix",
   atlas_observatory: "Observatoire d'Atlas",
   golden_pact_palace: "Palais du Pacte d'Or",
+  ivory_rampart: "Rempart d'Ivoire",
+  croesus_fountain: "Fontaine de Crésus",
+  aurelia_capitol: "Capitole d'Aurelia",
+  daedalus_forge: "Forge de Dédale",
+};
+
+// Merveilles débloquées par la culture (100 points) plutôt que la science.
+const MERVEILLES_CULTURELLES = new Set([
+  "ivory_rampart", "croesus_fountain", "aurelia_capitol", "daedalus_forge",
+]);
+
+const EFFETS_MERVEILLES = {
+  elyrion_sanctuary: "Fonde Elyrion, religion conquérante liée au territoire",
+  thousand_voices_theatre: "Double la culture de son contrôleur",
+  atlas_observatory: "Double la science effective de son contrôleur",
+  golden_pact_palace: "Fait de son contrôleur l'unique allié de la Cité commerçante",
+  ivory_rampart: "Protège ce territoire de toute attaque des joueurs IA",
+  croesus_fountain: "Multiplie par 5 l'argent produit par ce territoire",
+  aurelia_capitol: "Ouvre le statut de nation si la capitale de son propriétaire s'y trouve",
+  daedalus_forge: "Ponts construits ou détruits gratuitement depuis ce territoire",
 };
 
 const CATALOGUE_ACHATS = [
@@ -109,6 +129,10 @@ const CATALOGUE_ACHATS = [
   { id: "universite", libelle: "Université — 200", cibles: ["mien"], cout: 200 },
   { id: "detruire_universite", libelle: "Détruire université — 200", cibles: ["tout"], cout: 200 },
   { id: "merveille", libelle: "Merveille — 300", cibles: ["mien"], merveille: true, cout: 300 },
+  // Les merveilles culturelles passent par le même achat serveur ("merveille"),
+  // mais l'article n'apparaît qu'à partir de 100 points de culture.
+  { id: "merveille_culturelle", achat: "merveille", libelle: "Merveille culturelle — 300",
+    cibles: ["mien"], merveille: true, culturelle: true, cout: 300, culture: 100 },
   { id: "capitale", libelle: "Changer capitale — 300", cibles: ["mien"], cout: 300 },
   { id: "alliance", libelle: "Alliance déf. — 20/terr.", cibles: ["ennemi"] },
   { id: "alliance_offensive", libelle: "Alliance off. — 25/terr.", allie: true, cible: true },
@@ -925,17 +949,26 @@ function afficherBoutique() {
   const etat = client.etat;
   const argent = etat.player_money[String(client.monSiege)] || 0;
   const science = etat.player_science[String(client.monSiege)] || 0;
+  const culture = ((etat.apercus || {})[String(client.monSiege)] || {}).culture || 0;
+  // La Forge de Dédale débloque les ponts (gratuits depuis son territoire)
+  // même sans les 150 points de science.
+  const forgeTid = (etat.wonder_territories || {}).daedalus_forge;
+  const controleForge = forgeTid !== undefined
+    && etat.territories_state[forgeTid]
+    && etat.territories_state[forgeTid].owner === client.monSiege;
 
   const zone = $("boutons-boutique");
   zone.textContent = "";
   for (const article of CATALOGUE_ACHATS) {
-    if (article.science && science < article.science) continue;
+    const pontDeLaForge = controleForge && (article.id === "pont" || article.id === "detruire_pont");
+    if (article.science && science < article.science && !pontDeLaForge) continue;
+    if (article.culture && culture < article.culture) continue;
     const bouton = document.createElement("button");
     bouton.type = "button";
     bouton.textContent = article.libelle;
     if (article.style) bouton.classList.add(article.style);
     if (client.achat && client.achat.id === article.id) bouton.classList.add("choisi");
-    if (article.cout && argent < article.cout) bouton.disabled = true;
+    if (article.cout && argent < article.cout && !pontDeLaForge) bouton.disabled = true;
     bouton.addEventListener("click", () => {
       client.achat = (client.achat && client.achat.id === article.id) ? null : article;
       client.territoiresAchat = [];
@@ -987,14 +1020,16 @@ function afficherParamsBoutique() {
   if (article.cible) ajouterChoixJoueur("achat-cible", "Contre");
   if (article.merveille) {
     const label = document.createElement("label");
-    label.textContent = "Merveille";
+    label.textContent = article.culturelle ? "Merveille culturelle" : "Merveille";
     const champ = document.createElement("select");
     champ.id = "achat-merveille";
     for (const [type, nom] of Object.entries(MERVEILLES)) {
+      if (MERVEILLES_CULTURELLES.has(type) !== Boolean(article.culturelle)) continue;
       if (Object.keys(client.etat.wonder_territories).includes(type)) continue;
       const option = document.createElement("option");
       option.value = type;
       option.textContent = nom;
+      option.title = EFFETS_MERVEILLES[type] || "";
       champ.append(option);
     }
     label.append(champ);
@@ -1031,7 +1066,7 @@ function afficherConsigneBoutique() {
 function envoyerAchat() {
   const article = client.achat;
   if (!article) return;
-  const action = { type: "acheter", achat: article.id };
+  const action = { type: "acheter", achat: article.achat || article.id };
   if (article.cibles) {
     action.territoire = client.territoiresAchat[0];
     if (article.cibles.length > 1) {
@@ -1923,6 +1958,10 @@ function dessinerBadge(ctx, type, x, y, etat, tid) {
       thousand_voices_theatre: ["rgb(92,50,112)", "rgb(235,188,255)", "T"],
       atlas_observatory: ["rgb(32,68,108)", "rgb(150,215,255)", "O"],
       golden_pact_palace: ["rgb(105,77,20)", "rgb(255,220,92)", "P"],
+      ivory_rampart: ["rgb(60,72,88)", "rgb(240,234,214)", "R"],
+      croesus_fountain: ["rgb(24,96,58)", "rgb(150,245,185)", "F"],
+      aurelia_capitol: ["rgb(98,36,84)", "rgb(245,190,235)", "C"],
+      daedalus_forge: ["rgb(122,68,24)", "rgb(255,196,128)", "D"],
     };
     const [fond, symbole, lettre] = couleurs[type.split(":")[1]]
       || ["rgb(70,70,70)", "rgb(235,235,235)", "?"];

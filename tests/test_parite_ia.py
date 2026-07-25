@@ -42,6 +42,13 @@ def iter_save_files():
     return sorted(SAVES_DIR.glob("*.json"))
 
 
+@unittest.skip(
+    "Regles divergentes volontairement depuis juillet 2026 : l'expansion "
+    "culturelle des tours IA n'annexe plus qu'un territoire au hasard par "
+    "palier et les IA achetent des merveilles culturelles. x45-original.py "
+    "reste la reference figee des ANCIENNES regles ; x45 delegue son tour IA "
+    "au moteur, la parite x45 <-> moteur reste couverte ailleurs."
+)
 class TestPariteTourIA(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

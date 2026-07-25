@@ -116,6 +116,7 @@ class GraphicalGame:
     BRIDGE_MAX_LENGTH_PX = 76.0
     SCIENCE_WONDER_THRESHOLD = 100
     AI_SCIENCE_WONDER_THRESHOLD = 50
+    CULTURE_WONDER_THRESHOLD = 100
     MAX_CULTURAL_CENTERS_PER_TERRITORY = 1
     CULTURE_IMMUNITY_THRESHOLD = 25
     CULTURE_ADVANTAGE_THRESHOLD = 15
@@ -188,18 +189,44 @@ class GraphicalGame:
         "elyrion_sanctuary": {
             "name": "Sanctuaire d'Elyrion",
             "effect": "Fonde Elyrion, religion conquerante liee au territoire",
+            "kind": "science",
         },
         "thousand_voices_theatre": {
             "name": "Theatre des Mille Voix",
             "effect": "Double la culture de son controleur",
+            "kind": "science",
         },
         "atlas_observatory": {
             "name": "Observatoire d'Atlas",
             "effect": "Double la science effective de son controleur",
+            "kind": "science",
         },
         "golden_pact_palace": {
             "name": "Palais du Pacte d'Or",
             "effect": "Fait de son controleur l'unique allie de la Cite commercante",
+            "kind": "science",
+        },
+        # Merveilles culturelles : memes regles d'exclusivite, mais
+        # debloquees par la culture (CULTURE_WONDER_THRESHOLD points).
+        "ivory_rampart": {
+            "name": "Rempart d'Ivoire",
+            "effect": "Protege ce territoire de toute attaque des joueurs IA",
+            "kind": "culture",
+        },
+        "croesus_fountain": {
+            "name": "Fontaine de Cresus",
+            "effect": "Multiplie par 5 l'argent produit par ce territoire",
+            "kind": "culture",
+        },
+        "aurelia_capitol": {
+            "name": "Capitole d'Aurelia",
+            "effect": "Ouvre le statut de nation si la capitale de son proprietaire s'y trouve",
+            "kind": "culture",
+        },
+        "daedalus_forge": {
+            "name": "Forge de Dedale",
+            "effect": "Ponts construits ou detruits gratuitement depuis ce territoire",
+            "kind": "culture",
         },
     }
     SAVE_SCHEMA_VERSION = 13
@@ -5121,6 +5148,15 @@ class GraphicalGame:
     def can_player_build_wonder(self, player: int) -> bool:
         return self.has_science_level(player, self.get_wonder_science_threshold(player))
 
+    def is_cultural_wonder_type(self, wonder_type: Optional[str]) -> bool:
+        return moteur_regles.is_cultural_wonder_type(wonder_type)
+
+    def can_player_build_cultural_wonder(self, player: int) -> bool:
+        return moteur_regles.can_player_build_cultural_wonder(self, player)
+
+    def get_buildable_wonder_types(self, player: int) -> list[str]:
+        return moteur_regles.get_buildable_wonder_types(self, player)
+
     def get_wonder_type_at_territory(self, territory_id: int) -> Optional[str]:
         for wonder_type, wonder_territory_id in getattr(self, "wonder_territories", {}).items():
             if wonder_territory_id == territory_id:
@@ -5929,9 +5965,17 @@ class GraphicalGame:
         territory_set = set(territory_ids)
         return bool(self.university_territory_ids & territory_set)
 
+    def player_qualifies_for_nation_via_capitol(self, player: int) -> bool:
+        return moteur_regles.player_qualifies_for_nation_via_capitol(self, player)
+
     def find_player_nation_component(self, player: int, require_capital: bool = True) -> Optional[list[int]]:
         if player < 0 or self.is_onu_player(player):
             return None
+        if self.player_qualifies_for_nation_via_capitol(player):
+            capitol_id = self.wonder_territories["aurelia_capitol"]
+            for component in self.get_owned_components(player):
+                if capitol_id in component:
+                    return component
         for component in self.get_owned_components(player):
             if len(component) < self.NATION_MIN_TERRITORIES:
                 continue
@@ -6599,14 +6643,6 @@ class GraphicalGame:
                     )
                 elif action == "build_wonder":
                     required_science = self.get_wonder_science_threshold(self.current_player)
-                    if not self.can_player_build_wonder(self.current_player):
-                        self.shop_action = None
-                        self.pending_wonder_type = None
-                        self.show_message(
-                            f"Merveilles verrouillees : {required_science} points de science requis.",
-                            2600,
-                        )
-                        return
                     if self.get_player_money(self.current_player) < self.WONDER_COST:
                         self.shop_action = None
                         self.pending_wonder_type = None
@@ -6615,11 +6651,19 @@ class GraphicalGame:
                             2200,
                         )
                         return
-                    available = self.get_available_wonder_types()
+                    available = self.get_buildable_wonder_types(self.current_player)
                     if not available:
                         self.shop_action = None
                         self.pending_wonder_type = None
-                        self.show_message("Les quatre merveilles ont deja ete construites.", 2400)
+                        if not self.get_available_wonder_types():
+                            self.show_message("Les huit merveilles ont deja ete construites.", 2400)
+                        else:
+                            self.show_message(
+                                f"Merveilles verrouillees : {required_science} points de science "
+                                f"(classiques) ou {self.CULTURE_WONDER_THRESHOLD} points de culture "
+                                "(culturelles) requis.",
+                                3200,
+                            )
                         return
                     prompt_lines = ["Choisissez la merveille a construire :"]
                     for index, wonder_type in enumerate(available, start=1):
@@ -6634,7 +6678,8 @@ class GraphicalGame:
                     )
                 elif action in ("build_bridge", "destroy_bridge"):
                     cost = self.BUILD_BRIDGE_COST if action == "build_bridge" else self.DESTROY_BRIDGE_COST
-                    if self.get_player_money(self.current_player) < cost:
+                    controls_forge = self.player_controls_wonder(self.current_player, "daedalus_forge")
+                    if not controls_forge and self.get_player_money(self.current_player) < cost:
                         self.shop_action = None
                         self.pending_bridge_territory_id = None
                         self.show_message(f"Operation trop chere : {cost} ecus requis.", 2200)
@@ -6837,7 +6882,10 @@ class GraphicalGame:
         self.show_message(result.message, 5200 if result.ok else 2400)
 
     def execute_shop_build_bridge(self, terr: Territory) -> None:
-        if self.get_player_science(self.current_player) < self.SCIENCE_BRIDGE_THRESHOLD:
+        if (
+            self.get_player_science(self.current_player) < self.SCIENCE_BRIDGE_THRESHOLD
+            and not self.player_controls_wonder(self.current_player, "daedalus_forge")
+        ):
             self.pending_bridge_territory_id = None
             self.show_message(
                 f"Ponts verrouilles : {self.SCIENCE_BRIDGE_THRESHOLD} points de science requis.", 2400
@@ -6857,7 +6905,10 @@ class GraphicalGame:
         self.show_message(result.message, 4200 if result.ok else 2800)
 
     def execute_shop_destroy_bridge(self, terr: Territory) -> None:
-        if self.get_player_science(self.current_player) < self.SCIENCE_BRIDGE_THRESHOLD:
+        if (
+            self.get_player_science(self.current_player) < self.SCIENCE_BRIDGE_THRESHOLD
+            and not self.player_controls_wonder(self.current_player, "daedalus_forge")
+        ):
             self.pending_bridge_territory_id = None
             self.show_message(
                 f"Ponts verrouilles : {self.SCIENCE_BRIDGE_THRESHOLD} points de science requis.", 2400
@@ -7006,9 +7057,9 @@ class GraphicalGame:
         return moteur_regles.execute_ai_economic_actions(self, player)
 
     def find_ai_wonder_purchase(self, player: int):
-        if not self.is_ai_player(player) or not self.can_player_build_wonder(player):
+        if not self.is_ai_player(player):
             return None
-        available_wonders = self.get_available_wonder_types()
+        available_wonders = self.get_buildable_wonder_types(player)
         if not available_wonders:
             return None
         candidates = [
@@ -8449,6 +8500,8 @@ class GraphicalGame:
         lines.append(
             f"Expansion culturelle: culture {culture}, dernier palier {last_culture_milestone or 'aucun'}, prochain palier {next_culture_milestone}"
         )
+        if self.can_player_build_cultural_wonder(player):
+            lines.append(f"Merveilles culturelles debloquees (culture >= {self.CULTURE_WONDER_THRESHOLD})")
         if self.player_has_complete_industrial_set(player):
             lines.append("Ensemble industriel complet: usine + aeroport + port")
         else:
@@ -8876,7 +8929,10 @@ class GraphicalGame:
             ("destroy_university", f"Detruire universite - {self.UNIVERSITY_COST}"),
             ("build_wonder", f"Merveille - {self.WONDER_COST}"),
         ]
-        if science >= self.SCIENCE_BRIDGE_THRESHOLD:
+        if (
+            science >= self.SCIENCE_BRIDGE_THRESHOLD
+            or self.player_controls_wonder(self.current_player, "daedalus_forge")
+        ):
             button_specs.extend([
                 ("build_bridge", f"Creer pont - {self.BUILD_BRIDGE_COST}"),
                 ("destroy_bridge", f"Detruire pont - {self.DESTROY_BRIDGE_COST}"),
@@ -8894,8 +8950,7 @@ class GraphicalGame:
             if action == "build_wonder":
                 affordable = (
                     affordable
-                    and self.can_player_build_wonder(self.current_player)
-                    and bool(self.get_available_wonder_types())
+                    and bool(self.get_buildable_wonder_types(self.current_player))
                 )
             elif action == "destroy_bridge":
                 affordable = affordable and bool(self.bridge_links)
@@ -10403,6 +10458,10 @@ class GraphicalGame:
             "thousand_voices_theatre": ((92, 50, 112), (235, 188, 255)),
             "atlas_observatory": ((32, 68, 108), (150, 215, 255)),
             "golden_pact_palace": ((105, 77, 20), (255, 220, 92)),
+            "ivory_rampart": ((60, 72, 88), (240, 234, 214)),
+            "croesus_fountain": ((24, 96, 58), (150, 245, 185)),
+            "aurelia_capitol": ((98, 36, 84), (245, 190, 235)),
+            "daedalus_forge": ((122, 68, 24), (255, 196, 128)),
         }
         background, symbol_color = colors.get(wonder_type, ((70, 70, 70), (235, 235, 235)))
         pygame.draw.rect(self.screen, background, badge_rect, border_radius=7)
@@ -10425,6 +10484,32 @@ class GraphicalGame:
         elif wonder_type == "golden_pact_palace":
             pygame.draw.circle(self.screen, symbol_color, (cx - 4, cy), 6, 2)
             pygame.draw.circle(self.screen, symbol_color, (cx + 4, cy), 6, 2)
+        elif wonder_type == "ivory_rampart":
+            # Bouclier
+            pygame.draw.polygon(
+                self.screen, symbol_color,
+                [(cx - 6, cy - 7), (cx + 6, cy - 7), (cx + 6, cy + 1), (cx, cy + 8), (cx - 6, cy + 1)],
+                2,
+            )
+            pygame.draw.line(self.screen, symbol_color, (cx, cy - 7), (cx, cy + 8), 1)
+        elif wonder_type == "croesus_fountain":
+            # Piece d'or au-dessus du bassin
+            pygame.draw.circle(self.screen, symbol_color, (cx, cy - 3), 5, 2)
+            pygame.draw.line(self.screen, symbol_color, (cx - 6, cy + 7), (cx + 6, cy + 7), 2)
+            pygame.draw.line(self.screen, symbol_color, (cx - 3, cy + 3), (cx - 5, cy + 7), 1)
+            pygame.draw.line(self.screen, symbol_color, (cx + 3, cy + 3), (cx + 5, cy + 7), 1)
+        elif wonder_type == "aurelia_capitol":
+            # Dome sur colonnes
+            pygame.draw.arc(self.screen, symbol_color, (cx - 7, cy - 9, 14, 12), 0, math.pi, 2)
+            for dx in (-6, 0, 6):
+                pygame.draw.line(self.screen, symbol_color, (cx + dx, cy - 1), (cx + dx, cy + 6), 2)
+            pygame.draw.line(self.screen, symbol_color, (cx - 8, cy + 7), (cx + 8, cy + 7), 2)
+        elif wonder_type == "daedalus_forge":
+            # Arche de pont entre deux piles
+            pygame.draw.arc(self.screen, symbol_color, (cx - 8, cy - 4, 16, 14), 0, math.pi, 2)
+            pygame.draw.line(self.screen, symbol_color, (cx - 8, cy - 3), (cx + 8, cy - 3), 2)
+            pygame.draw.line(self.screen, symbol_color, (cx - 8, cy - 3), (cx - 8, cy + 7), 2)
+            pygame.draw.line(self.screen, symbol_color, (cx + 8, cy - 3), (cx + 8, cy + 7), 2)
 
     def draw_money_bonus_badge(self, x: int, y: int, commercial_city: bool = False, vassal: bool = False) -> None:
         badge_rect = pygame.Rect(0, 0, 28, 24)

@@ -147,6 +147,8 @@ def find_ai_attack(state: GameState, rng=random) -> Optional[Tuple[Territory, Te
                 continue
             if is_ai_attack_blocked_by_culture(state, state.current_player, dst.owner):
                 continue
+            if regles.is_territory_protected_from_ai_attacks(state, dst.id):
+                continue
             if regles.is_submitted_territory(state, dst.id):
                 continue
             if regles.is_sanctuary_territory(state, dst.id) and src.regiments < 40:

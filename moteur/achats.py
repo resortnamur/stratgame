@@ -410,8 +410,14 @@ def detruire_universite(state: GameState, terr: Territory) -> AchatResult:
 def construire_merveille(state: GameState, terr: Territory, wonder_type: Optional[str]) -> AchatResult:
     if wonder_type not in regles.WONDER_DEFINITIONS:
         return _refus("Choisissez d'abord une merveille dans le menu des achats.")
-    required_science = regles.get_wonder_science_threshold(state, state.current_player)
-    if not regles.can_player_build_wonder(state, state.current_player):
+    if regles.is_cultural_wonder_type(wonder_type):
+        if not regles.can_player_build_cultural_wonder(state, state.current_player):
+            return _refus(
+                f"Culture insuffisante : {regles.CULTURE_WONDER_THRESHOLD} points requis "
+                "pour une merveille culturelle."
+            )
+    elif not regles.can_player_build_wonder(state, state.current_player):
+        required_science = regles.get_wonder_science_threshold(state, state.current_player)
         return _refus(f"Science insuffisante : {required_science} points requis pour une merveille.")
     if terr.owner != state.current_player:
         return _refus("Une merveille doit etre construite sur un territoire controle.")
@@ -540,11 +546,21 @@ def financer_revolte(state: GameState, terr: Territory, rng=random) -> AchatResu
 # Achats : ponts
 # ----------------------------------------------------------------------
 
+def pont_offert_par_la_forge(state: GameState, territory_a: int, territory_b: int) -> bool:
+    """Forge de Dedale : les ponts dont une extremite est le territoire de la
+    merveille sont geres gratuitement par son controleur (science non requise)."""
+    forge_id = state.wonder_territories.get("daedalus_forge")
+    if forge_id is None or forge_id not in (territory_a, territory_b):
+        return False
+    return regles.get_wonder_controller(state, "daedalus_forge") == state.current_player
+
+
 def construire_pont(
     state: GameState, territory_a: int, territory_b: int,
     cell_width: float, cell_height: float,
 ) -> AchatResult:
-    if regles.get_player_science(state, state.current_player) < SCIENCE_BRIDGE_THRESHOLD:
+    gratuit = pont_offert_par_la_forge(state, territory_a, territory_b)
+    if not gratuit and regles.get_player_science(state, state.current_player) < SCIENCE_BRIDGE_THRESHOLD:
         return _refus(f"Ponts verrouilles : {SCIENCE_BRIDGE_THRESHOLD} points de science requis.")
     if territory_a == territory_b:
         return _refus("Choisissez deux territoires differents.")
@@ -554,12 +570,13 @@ def construire_pont(
     points = regles.find_bridge_connection_points(state, key[0], key[1], cell_width, cell_height)
     if points is None:
         return _refus("Pont impossible : distance superieure a 2 cm, absence d'eau ou passage au-dessus d'un territoire.")
-    if not spend_player_money(state, state.current_player, BUILD_BRIDGE_COST):
+    if not gratuit and not spend_player_money(state, state.current_player, BUILD_BRIDGE_COST):
         return _refus(f"Pont trop cher : {BUILD_BRIDGE_COST} ecus requis.")
     regles.add_bridge(state, key, points)
+    cout = "gratuitement (Forge de Dedale)" if gratuit else f"pour {BUILD_BRIDGE_COST} ecus"
     message = (
         f"J{state.current_player + 1} construit un pont entre {state.territories[key[0]].name} "
-        f"et {state.territories[key[1]].name} pour {BUILD_BRIDGE_COST} ecus."
+        f"et {state.territories[key[1]].name} {cout}."
     )
     regles.record_major_event(state, message)
     regles.record_replay_snapshot(state, message, force=True)
@@ -567,17 +584,19 @@ def construire_pont(
 
 
 def detruire_pont(state: GameState, territory_a: int, territory_b: int) -> AchatResult:
-    if regles.get_player_science(state, state.current_player) < SCIENCE_BRIDGE_THRESHOLD:
+    gratuit = pont_offert_par_la_forge(state, territory_a, territory_b)
+    if not gratuit and regles.get_player_science(state, state.current_player) < SCIENCE_BRIDGE_THRESHOLD:
         return _refus(f"Ponts verrouilles : {SCIENCE_BRIDGE_THRESHOLD} points de science requis.")
     key = tuple(sorted((territory_a, territory_b)))
     if key not in state.bridge_links:
         return _refus("Aucun pont ne relie ces deux territoires.")
-    if not spend_player_money(state, state.current_player, DESTROY_BRIDGE_COST):
+    if not gratuit and not spend_player_money(state, state.current_player, DESTROY_BRIDGE_COST):
         return _refus(f"Destruction trop chere : {DESTROY_BRIDGE_COST} ecus requis.")
     remove_bridge(state, key)
+    cout = "gratuitement (Forge de Dedale)" if gratuit else f"pour {DESTROY_BRIDGE_COST} ecus"
     message = (
         f"J{state.current_player + 1} detruit le pont entre {state.territories[key[0]].name} "
-        f"et {state.territories[key[1]].name} pour {DESTROY_BRIDGE_COST} ecus."
+        f"et {state.territories[key[1]].name} {cout}."
     )
     regles.record_major_event(state, message)
     regles.record_replay_snapshot(state, message, force=True)

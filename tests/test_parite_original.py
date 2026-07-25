@@ -54,6 +54,13 @@ def import_original_module():
     return module
 
 
+@unittest.skip(
+    "Regles divergentes volontairement depuis juillet 2026 : l'expansion "
+    "culturelle n'annexe plus qu'un territoire au hasard par palier et les "
+    "merveilles culturelles ont ete ajoutees. x45-original.py reste la "
+    "reference figee des ANCIENNES regles ; la parite moteur <-> x45 est "
+    "desormais couverte par test_parite_x45.py."
+)
 class TestPariteContreOriginal(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

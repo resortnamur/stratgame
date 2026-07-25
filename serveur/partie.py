@@ -358,10 +358,18 @@ class SessionPartie:
             )
         else:
             tours_restants = regles.NATION_QUALIFICATION_DELAY_TURNS
+        conditions_extra = []
+        if "aurelia_capitol" in state.wonder_territories:
+            via_capitole = regles.player_qualifies_for_nation_via_capitol(state, joueur)
+            conditions_extra.append({
+                "libelle": "Voie culturelle : capitale sur le Capitole d'Aurelia",
+                "ok": via_capitole,
+                "detail": "remplace toutes les autres conditions de bloc" if via_capitole else "",
+            })
         return {
             "est_nation": est_nation,
             "taille_bloc": len(cible),
-            "conditions": [
+            "conditions": conditions_extra + [
                 {
                     "libelle": f"Un bloc d'au moins {regles.NATION_MIN_TERRITORIES} territoires d'un seul tenant",
                     "ok": len(cible) >= regles.NATION_MIN_TERRITORIES,
