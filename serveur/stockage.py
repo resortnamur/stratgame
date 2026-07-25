@@ -15,6 +15,9 @@ Contrat (duck typing, les contenus sont du texte — en pratique du JSON) :
   aux appelants de mettre en cache les metadonnees sans relire les contenus.
 - ``lire(nom) -> contenu | None``
 - ``ecrire(nom, contenu)``
+- ``supprimer(nom)`` — silencieux si le document n'existe pas ; sur un
+  stockage mixte, seule la surcouche est touchee (les fichiers du depot
+  restent intacts).
 
 Implementations :
 
@@ -107,6 +110,14 @@ class StockageFichiers:
         self.dossier.mkdir(parents=True, exist_ok=True)
         (self.dossier / nom).write_text(contenu, encoding="utf-8")
 
+    def supprimer(self, nom: str) -> None:
+        if not nom_est_valide(nom):
+            return
+        try:
+            (self.dossier / nom).unlink()
+        except OSError:
+            pass
+
 
 class StockageSql:
     """Une collection de documents dans une table SQL.
@@ -177,6 +188,14 @@ class StockageSql:
             (self.collection, nom, contenu),
         )
 
+    def supprimer(self, nom: str) -> None:
+        if not nom_est_valide(nom):
+            return
+        self._executer(
+            "DELETE FROM documents WHERE collection = ? AND nom = ?",
+            (self.collection, nom),
+        )
+
 
 class StockageMixte:
     """Une base en lecture seule + une surcouche en ecriture.
@@ -218,6 +237,11 @@ class StockageMixte:
 
     def ecrire(self, nom: str, contenu: str) -> None:
         self.surcouche.ecrire(nom, contenu)
+
+    def supprimer(self, nom: str) -> None:
+        # Les documents du depot (la base) ne sont jamais supprimes : seuls
+        # les documents ecrits par les joueurs (la surcouche) le sont.
+        self.surcouche.supprimer(nom)
 
 
 def stockage_postgres(database_url: str, collection: str) -> StockageSql:

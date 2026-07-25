@@ -1226,6 +1226,36 @@ function quitterReplay() {
 }
 
 $("bouton-replay").addEventListener("click", demarrerReplay);
+
+// ---------------------------------------------------------------------------
+// Sauvegarde manuelle : un nom choisi par le joueur, conservée durablement
+// (contrairement aux sauvegardes automatiques auto_*, qui tournent).
+// ---------------------------------------------------------------------------
+
+$("bouton-sauvegarder").addEventListener("click", async () => {
+  if (client.partieId === null) return;
+  const source = client.etat && client.etat.source;
+  const suggestion = source && !source.startsWith("auto_")
+    ? source.replace(/\.json$/, "")
+    : "ma_partie";
+  let nom = prompt("Nom de la sauvegarde :", suggestion);
+  if (nom === null) return;
+  nom = nom.trim().replace(/\.json$/i, "");
+  if (!nom) return;
+  if (nom.toLowerCase().startsWith("auto_")) {
+    flash("Le préfixe « auto_ » est réservé aux sauvegardes automatiques.");
+    return;
+  }
+  try {
+    const reponse = await api(
+      `/api/parties/${client.partieId}/sauvegarder`, { fichier: `${nom}.json` },
+    );
+    flash(`Partie sauvegardée : ${reponse.fichier}`);
+    journal(`Partie sauvegardée durablement sous « ${reponse.fichier} ».`);
+  } catch (erreur) {
+    flash("Sauvegarde impossible : " + erreur.message);
+  }
+});
 $("replay-quitter").addEventListener("click", quitterReplay);
 $("replay-pause").addEventListener("click", () => {
   const replay = client.replay;

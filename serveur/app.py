@@ -90,8 +90,8 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 
 from .partie import (
-    GestionnaireParties, MAX_CONSECUTIVE_AI_TURNS, ResultatAction,
-    SessionPartie, to_jsonable,
+    GestionnaireParties, MAX_CONSECUTIVE_AI_TURNS, PREFIXE_SAUVEGARDE_AUTO,
+    ResultatAction, SessionPartie, to_jsonable,
 )
 from .stockage import nom_est_valide
 
@@ -139,6 +139,15 @@ class SallePartie:
         self.delai_pas_ia = delai_pas_ia
         self._tache_ia: Optional[asyncio.Task] = None
 
+    async def sauvegarder_auto(self) -> None:
+        """Sauvegarde de securite apres chaque coup joue (jamais bloquante)."""
+        try:
+            await asyncio.to_thread(self.session.sauvegarder_auto)
+        except Exception:
+            logging.exception(
+                "Sauvegarde automatique impossible (partie %s)", self.session.id,
+            )
+
     def lancer_tours_ia(self) -> None:
         """Demarre (au besoin) la boucle qui joue et diffuse les tours IA.
 
@@ -171,6 +180,7 @@ class SallePartie:
                     if self.delai_pas_ia > 0:
                         await asyncio.sleep(self.delai_pas_ia)
             await self.diffuser_resultat(joueur_ia, None, resultat)
+            await self.sauvegarder_auto()
             if resultat.winner is not None:
                 break
             if self.delai_tour_ia > 0:
@@ -222,7 +232,8 @@ def creer_app(dossier_parties: Optional[Path] = None,
               fichier_joueurs: Optional[Path] = None,
               delai_tour_ia: float = DELAI_TOUR_IA_S,
               delai_pas_ia: float = DELAI_PAS_IA_S,
-              database_url: Optional[str] = None) -> FastAPI:
+              database_url: Optional[str] = None,
+              sauvegarde_auto: bool = True) -> FastAPI:
     """Construit l'application (dossiers, registre, cadence et base injectables).
 
     ``database_url`` (en production : la variable d'environnement
@@ -236,6 +247,7 @@ def creer_app(dossier_parties: Optional[Path] = None,
         dossier_cartes if dossier_cartes is not None else DOSSIER_CARTES,
         fichier_joueurs=fichier_joueurs,
         database_url=database_url,
+        sauvegarde_auto=sauvegarde_auto,
     )
     salles: Dict[str, SallePartie] = {}
     app.state.gestionnaire = gestionnaire
@@ -341,6 +353,14 @@ def creer_app(dossier_parties: Optional[Path] = None,
         fichier = (corps or {}).get("fichier")
         if fichier is not None and not nom_est_valide(fichier):
             raise HTTPException(status_code=422, detail="Nom de fichier invalide.")
+        if fichier is not None and fichier.startswith(PREFIXE_SAUVEGARDE_AUTO):
+            # Le prefixe des sauvegardes de securite est reserve : une
+            # sauvegarde manuelle qui le porterait serait supprimee par la
+            # rotation automatique.
+            raise HTTPException(
+                status_code=422,
+                detail="Le prefixe 'auto_' est reserve aux sauvegardes automatiques.",
+            )
         try:
             cible = salle.session.sauvegarder(fichier)
         except ValueError:
@@ -427,6 +447,7 @@ def creer_app(dossier_parties: Optional[Path] = None,
                 })
                 return
             await salle.diffuser_resultat(joueur, action, resultat)
+            await salle.sauvegarder_auto()
             # Si l'action a passe la main a une IA, on deroule ses tours
             # en tache de fond, diffuses un par un.
             salle.lancer_tours_ia()

@@ -324,6 +324,7 @@ class TestApplicationWeb(unittest.TestCase):
             fichier_joueurs=Path(self._dossier_temp.name) / "joueurs.json",
             delai_tour_ia=0.0,  # pas de cadence dans les tests
             delai_pas_ia=0.0,
+            sauvegarde_auto=False,  # ne pas ecrire dans parties_en_cours/
         )
         self.client = TestClient(self.app)
 

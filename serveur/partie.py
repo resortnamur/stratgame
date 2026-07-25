@@ -17,6 +17,7 @@ import dataclasses
 import json
 import random
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -38,6 +39,12 @@ LOGICAL_MAP_HEIGHT = 620.0
 # Garde-fou pour l'enchainement des tours IA (une partie 100 % IA joue
 # jusqu'a la victoire : on plafonne large, bien au-dela d'une partie reelle).
 MAX_CONSECUTIVE_AI_TURNS = 2000
+
+# Sauvegardes automatiques de securite : prefixe reserve et nombre maximal
+# conserve (les plus anciennes sont supprimees au fur et a mesure — les
+# sauvegardes nommees par les joueurs ne sont jamais touchees).
+PREFIXE_SAUVEGARDE_AUTO = "auto_"
+MAX_SAUVEGARDES_AUTO = 10
 
 
 def to_jsonable(value: Any) -> Any:
@@ -78,6 +85,9 @@ class SessionPartie:
         # (module ``stockage``) : la sauvegarde par defaut y retourne.
         self.source = source
         self.stockage = stockage
+        # Nom de la sauvegarde automatique de securite de cette session
+        # (attribue par le gestionnaire ; None = pas de sauvegarde auto).
+        self.nom_auto: Optional[str] = None
         self.rng = random.Random(seed)
         self.lock = threading.Lock()
         self.cell_width = LOGICAL_MAP_WIDTH / state.cols
@@ -163,6 +173,39 @@ class SessionPartie:
         self.stockage.ecrire(nom, json.dumps(payload, ensure_ascii=False))
         self.source = nom
         return nom
+
+    def preparer_sauvegarde_auto(self) -> None:
+        """Attribue le nom de la sauvegarde automatique de cette session.
+
+        Un nom neuf a chaque ouverture (horodate, donc trie du plus ancien
+        au plus recent) : la rotation elimine naturellement les copies des
+        sessions passees.
+        """
+        horodatage = time.strftime("%Y%m%d-%H%M%S")
+        self.nom_auto = f"{PREFIXE_SAUVEGARDE_AUTO}{horodatage}_{self.id}.json"
+
+    def sauvegarder_auto(self) -> Optional[str]:
+        """Ecrit la sauvegarde de securite et fait tourner les anciennes.
+
+        Contrairement a ``sauvegarder``, ne touche pas ``source`` : la
+        sauvegarde manuelle garde sa cible. Retourne le nom ecrit, ou None
+        si la session n'a pas de sauvegarde automatique.
+        """
+        if self.stockage is None or self.nom_auto is None:
+            return None
+        with self.lock:
+            payload = self.state.to_payload()
+        self.stockage.ecrire(self.nom_auto, json.dumps(payload, ensure_ascii=False))
+        # Rotation : seuls les documents ``auto_*`` sont candidats — jamais
+        # les sauvegardes nommees par les joueurs ni celles du depot.
+        automatiques = sorted(
+            nom for nom in self.stockage.lister()
+            if nom.startswith(PREFIXE_SAUVEGARDE_AUTO) and nom != self.nom_auto
+        )
+        excedent = len(automatiques) - (MAX_SAUVEGARDES_AUTO - 1)
+        for nom in automatiques[:max(0, excedent)]:
+            self.stockage.supprimer(nom)
+        return self.nom_auto
 
     # ------------------------------------------------------------------
     # Sieges et etat diffuse
@@ -268,6 +311,9 @@ class SessionPartie:
         with self.lock:
             payload = self.state.to_payload()
             payload["phase"] = self.state.phase
+            # Le nom du document d'origine, pour preremplir la sauvegarde
+            # manuelle cote client.
+            payload["source"] = self.source
             payload["apercus"] = {
                 str(joueur): {
                     "revenu": regles.calculate_player_income(self.state, joueur),
@@ -583,7 +629,11 @@ class GestionnaireParties:
 
     def __init__(self, dossier_sauvegardes: Path, dossier_cartes: Optional[Path] = None,
                  fichier_joueurs: Optional[Path] = None,
-                 database_url: Optional[str] = None) -> None:
+                 database_url: Optional[str] = None,
+                 sauvegarde_auto: bool = True) -> None:
+        # ``sauvegarde_auto=False`` (tests) : les parties ouvertes n'ecrivent
+        # aucune sauvegarde de securite.
+        self.sauvegarde_auto = bool(sauvegarde_auto)
         base_sauvegardes = StockageFichiers(Path(dossier_sauvegardes))
         base_cartes = (
             StockageFichiers(Path(dossier_cartes)) if dossier_cartes is not None else None
@@ -687,6 +737,8 @@ class GestionnaireParties:
         session = SessionPartie.depuis_stockage(
             self._nouvel_id(), self.stockage_sauvegardes, fichier, seed=seed,
         )
+        if self.sauvegarde_auto:
+            session.preparer_sauvegarde_auto()
         self.parties[session.id] = session
         return session
 
@@ -712,6 +764,8 @@ class GestionnaireParties:
         )
         # Les sauvegardes futures de cette partie neuve iront au catalogue.
         session.stockage = self.stockage_sauvegardes
+        if self.sauvegarde_auto:
+            session.preparer_sauvegarde_auto()
         self.parties[session.id] = session
         return session
 
