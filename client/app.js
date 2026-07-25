@@ -409,10 +409,16 @@ function connecterAuServeur() {
   });
 
   ws.addEventListener("message", (evenement) => {
+    if (client.ws !== ws) return;  // socket remplacé : messages ignorés
     traiterMessage(JSON.parse(evenement.data));
   });
 
   ws.addEventListener("close", (evenement) => {
+    // Un socket remplacé par une nouvelle connexion n'a plus voix au
+    // chapitre : sans ce garde-fou, son "close" (asynchrone) était pris
+    // pour une coupure involontaire et relançait une reconnexion en
+    // boucle par-dessus la connexion vivante.
+    if (client.ws !== ws) return;
     if (client.fermetureVoulue) return;
     if (evenement.code === 4000) {
       // La partie a été ouverte ailleurs (autre onglet, autre appareil).
@@ -436,6 +442,7 @@ function connecterAuServeur() {
     majConnexion("déconnecté");
     journal("Connexion perdue, nouvelle tentative dans 2 s…");
     setTimeout(async () => {
+      if (client.ws !== ws) return;  // une autre connexion a déjà repris
       if (client.partieId === null || client.fermetureVoulue) return;
       if (await clientPerime()) {
         // Le jeu a été mis à jour pendant qu'on jouait : on recharge la
@@ -543,6 +550,12 @@ function traiterMessage(message) {
       break;
     }
     case "resultat":
+      // Mon tour vient de passer à quelqu'un d'autre : la surbrillance du
+      // dernier territoire sélectionné n'a plus de raison d'être.
+      if (client.etat && client.etat.current_player === client.monSiege
+          && message.etat.current_player !== client.monSiege) {
+        client.selection = null;
+      }
       client.etat = message.etat;
       if (message.joueur === client.monSiege) client.actionDepuis = null;
       journalResultat(message);
@@ -615,6 +628,11 @@ function traiterMessage(message) {
             && etat.phase === "shopping") {
           etat.phase = "playing";
         }
+      }
+      // Mon siège passe à l'IA : ma sélection ne doit plus rester en
+      // surbrillance pendant qu'elle joue.
+      if (message.actif && message.joueur === client.monSiege) {
+        client.selection = null;
       }
       const nom = message.nom || nomDuJoueur(message.joueur);
       journal(message.actif
