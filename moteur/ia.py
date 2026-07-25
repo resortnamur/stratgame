@@ -110,21 +110,20 @@ def find_ai_attack(state: GameState, rng=random) -> Optional[Tuple[Territory, Te
     if regles.is_colonized_player(state, state.current_player):
         return None
     current_is_commercial = regles.is_commercial_city_player(state, state.current_player)
-    exclusive_wonder_ally = (
-        regles.get_commercial_city_wonder_ally(state)
-        if current_is_commercial
-        else None
-    )
+    palace_built = current_is_commercial and "golden_pact_palace" in state.wonder_territories
     if (
         current_is_commercial
-        and exclusive_wonder_ally is None
+        and not palace_built
         and regles.count_player_territories(state, state.current_player) >= COMMERCIAL_CITY_TERRITORY_LIMIT
     ):
         return None
     behavior = get_ai_behavior(state, state.current_player, rng)
-    if exclusive_wonder_ally is not None:
+    if palace_built:
         # Avec le Palais du Pacte d'Or, la CC agit comme une puissance
-        # offensive contre tous sauf son unique allie.
+        # offensive contre tous sauf son unique allie — le controleur du
+        # Palais. Sans controleur valide (territoire a l'ONU, fige ou aux
+        # mains de la CC), elle attaque tout le monde ; la limite de
+        # territoires est levee tant que le Palais existe.
         behavior = "very_aggressive"
     offensive_target = get_offensive_alliance_target_for_ai(state, state.current_player)
     if offensive_target is not None:

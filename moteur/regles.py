@@ -1716,11 +1716,13 @@ def is_attack_blocked_by_alliance(state: GameState, attacker: int, defender: int
         attacker_is_commercial = is_commercial_city_player(state, attacker)
         defender_is_commercial = is_commercial_city_player(state, defender)
         if attacker_is_commercial or defender_is_commercial:
+            # Le Palais remplace entierement la diplomatie initiale de la CC,
+            # meme quand il n'a plus de controleur valide (territoire passe a
+            # l'ONU, fige ou aux mains de la CC) : la CC n'a alors simplement
+            # plus d'allie protege et attaque tout le monde.
             ally = get_commercial_city_wonder_ally(state)
-            if ally is not None:
-                # Le Palais remplace entierement la diplomatie initiale de la CC.
-                other_player = defender if attacker_is_commercial else attacker
-                return other_player == ally
+            other_player = defender if attacker_is_commercial else attacker
+            return ally is not None and other_player == ally
     if attacker != defender and state.final_duel_active:
         champions = set(state.final_duel_champions or ())
         attacker_bloc = state.final_duel_alliances.get(
