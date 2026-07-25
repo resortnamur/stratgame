@@ -130,9 +130,10 @@ const CATALOGUE_ACHATS = [
   { id: "detruire_universite", libelle: "Détruire université — 200", cibles: ["tout"], cout: 200 },
   { id: "merveille", libelle: "Merveille — 300", cibles: ["mien"], merveille: true, cout: 300 },
   // Les merveilles culturelles passent par le même achat serveur ("merveille"),
-  // mais l'article n'apparaît qu'à partir de 100 points de culture.
+  // mais l'article n'apparaît qu'à partir de 50 points de culture (le seuil
+  // humain — les IA construisent dès 25, côté serveur).
   { id: "merveille_culturelle", achat: "merveille", libelle: "Merveille culturelle — 300",
-    cibles: ["mien"], merveille: true, culturelle: true, cout: 300, culture: 100 },
+    cibles: ["mien"], merveille: true, culturelle: true, cout: 300, culture: 50 },
   { id: "capitale", libelle: "Changer capitale — 300", cibles: ["mien"], cout: 300 },
   { id: "alliance", libelle: "Alliance déf. — 20/terr.", cibles: ["ennemi"] },
   { id: "alliance_offensive", libelle: "Alliance off. — 25/terr.", allie: true, cible: true },

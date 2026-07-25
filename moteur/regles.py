@@ -141,7 +141,8 @@ RELIGION_SPREAD_INTERVAL_BY_TEMPLE_COUNT = {
 }
 SCIENCE_WONDER_THRESHOLD = 100
 AI_SCIENCE_WONDER_THRESHOLD = 50
-CULTURE_WONDER_THRESHOLD = 100
+CULTURE_WONDER_THRESHOLD = 50
+AI_CULTURE_WONDER_THRESHOLD = 25
 MERCENARY_COST = 50
 FORTRESS_COST = 100
 FACTORY_COST = 100
@@ -2820,8 +2821,23 @@ def is_cultural_wonder_type(wonder_type: Optional[str]) -> bool:
     return bool(definition) and definition.get("kind") == "culture"
 
 
+def get_wonder_culture_threshold(state: GameState, player: int) -> int:
+    if is_ai_player(state, player):
+        return AI_CULTURE_WONDER_THRESHOLD
+    return CULTURE_WONDER_THRESHOLD
+
+
 def can_player_build_cultural_wonder(state: GameState, player: int) -> bool:
-    return calculate_player_culture(state, player) >= CULTURE_WONDER_THRESHOLD
+    return calculate_player_culture(state, player) >= get_wonder_culture_threshold(state, player)
+
+
+def has_built_wonder_this_turn(state: GameState, player: int) -> bool:
+    """Une seule merveille par joueur et par tour.
+
+    Le registre vit en memoire de session (pas dans les sauvegardes) : il
+    est reinitialise au chargement, comme la selection de la boutique.
+    """
+    return getattr(state, "wonder_construction_turns", {}).get(player) == state.turn
 
 
 def can_player_build_wonder_type(state: GameState, player: int, wonder_type: str) -> bool:
@@ -2857,6 +2873,10 @@ def build_wonder(state: GameState, territory_id: int, wonder_type: str, record_e
     if territory.owner < 0 or is_onu_player(state, territory.owner):
         return False
     state.wonder_territories[wonder_type] = territory_id
+    # Registre en memoire du "une merveille par tour" (non sauvegarde).
+    if not hasattr(state, "wonder_construction_turns"):
+        state.wonder_construction_turns = {}
+    state.wonder_construction_turns[territory.owner] = state.turn
     if wonder_type == "elyrion_sanctuary":
         religion_id = WONDER_RELIGION_ID
         state.religion_foundation_turns[religion_id] = state.turn
@@ -4189,7 +4209,7 @@ def find_regular_ai_mercenary_purchase(state: GameState, player: int, owned: Lis
 
 
 def find_ai_wonder_purchase(state: GameState, player: int, rng=random):
-    if not is_ai_player(state, player):
+    if not is_ai_player(state, player) or has_built_wonder_this_turn(state, player):
         return None
     available_wonders = get_buildable_wonder_types(state, player)
     if not available_wonders:

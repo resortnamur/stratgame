@@ -185,6 +185,10 @@ class GameState:
     player_science: Dict[int, int] = field(default_factory=dict)
     culture_expansion_milestones: Dict[int, int] = field(default_factory=dict)
     wonder_territories: Dict[str, int] = field(default_factory=dict)
+    # Registre "une merveille par joueur et par tour" : memoire de session
+    # uniquement, volontairement absent des sauvegardes (parite du format
+    # avec x45-original).
+    wonder_construction_turns: Dict[int, int] = field(default_factory=dict)
 
     # --- Paradis fiscaux ---
     last_stand_bonus_players: Set[int] = field(default_factory=set)
@@ -600,6 +604,7 @@ class GameState:
             str(wonder_type): int(tid)
             for wonder_type, tid in payload.get("wonder_territories", {}).items()
         }
+        self.wonder_construction_turns = {}
 
         # Paradis fiscaux
         self.last_stand_bonus_players = {int(x) for x in payload.get("last_stand_bonus_players", [])}

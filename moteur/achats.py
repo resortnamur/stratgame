@@ -410,10 +410,13 @@ def detruire_universite(state: GameState, terr: Territory) -> AchatResult:
 def construire_merveille(state: GameState, terr: Territory, wonder_type: Optional[str]) -> AchatResult:
     if wonder_type not in regles.WONDER_DEFINITIONS:
         return _refus("Choisissez d'abord une merveille dans le menu des achats.")
+    if regles.has_built_wonder_this_turn(state, state.current_player):
+        return _refus("Une seule merveille par tour : la prochaine attendra le tour suivant.")
     if regles.is_cultural_wonder_type(wonder_type):
         if not regles.can_player_build_cultural_wonder(state, state.current_player):
+            required_culture = regles.get_wonder_culture_threshold(state, state.current_player)
             return _refus(
-                f"Culture insuffisante : {regles.CULTURE_WONDER_THRESHOLD} points requis "
+                f"Culture insuffisante : {required_culture} points requis "
                 "pour une merveille culturelle."
             )
     elif not regles.can_player_build_wonder(state, state.current_player):

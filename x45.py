@@ -116,7 +116,8 @@ class GraphicalGame:
     BRIDGE_MAX_LENGTH_PX = 76.0
     SCIENCE_WONDER_THRESHOLD = 100
     AI_SCIENCE_WONDER_THRESHOLD = 50
-    CULTURE_WONDER_THRESHOLD = 100
+    CULTURE_WONDER_THRESHOLD = 50
+    AI_CULTURE_WONDER_THRESHOLD = 25
     MAX_CULTURAL_CENTERS_PER_TERRITORY = 1
     CULTURE_IMMUNITY_THRESHOLD = 25
     CULTURE_ADVANTAGE_THRESHOLD = 15
@@ -310,6 +311,8 @@ class GraphicalGame:
         self.last_religion_foundation_message: Optional[str] = None
         self.wonder_territories: dict[str, int] = {}
         self.pending_wonder_type: Optional[str] = None
+        # "Une merveille par tour" : memoire de session, jamais sauvegardee.
+        self.wonder_construction_turns: dict[int, int] = {}
 
         self.end_turn_rect = pygame.Rect(self.WIDTH - 190, 14, 170, 36)
         self.geopolitical_button_rect = pygame.Rect(self.WIDTH - 190, 54, 112, 28)
@@ -1440,6 +1443,7 @@ class GraphicalGame:
             str(wonder_type): int(tid)
             for wonder_type, tid in payload.get("wonder_territories", {}).items()
         }
+        self.wonder_construction_turns = {}
         self.pending_wonder_type = None
         # Le statut paradis fiscal depend du proprietaire des capitales.
         # On le garde donc en attente jusqu'a la restauration des owners, sinon
@@ -4626,11 +4630,16 @@ class GraphicalGame:
         except tk.TclError:
             pass
         try:
-            return bool(messagebox.askyesno(
+            # Harmonise avec le client web : OK (choix par defaut) = annexer,
+            # Annuler = soumettre le territoire (tribut).
+            annexer = bool(messagebox.askokcancel(
                 "Territoire conquis",
-                f"{territory.name} est vaincu.\n\nOui : soumettre le territoire.\nNon : annexer normalement.",
+                f"{territory.name} est conquis ({defeated_regiments} regiment(s) vaincu(s)).\n\n"
+                "OK : annexer normalement (choix par defaut).\n"
+                "Annuler : soumettre le territoire (tribut).",
                 parent=root,
             ))
+            return not annexer
         finally:
             root.destroy()
 
@@ -4834,6 +4843,7 @@ class GraphicalGame:
         self.player_science = {}
         self.culture_expansion_milestones = {}
         self.wonder_territories = {}
+        self.wonder_construction_turns = {}
         self.pending_wonder_type = None
         self.last_stand_bonus_players = set()
         self.last_stand_bonus_territory = {}
@@ -5151,8 +5161,14 @@ class GraphicalGame:
     def is_cultural_wonder_type(self, wonder_type: Optional[str]) -> bool:
         return moteur_regles.is_cultural_wonder_type(wonder_type)
 
+    def get_wonder_culture_threshold(self, player: int) -> int:
+        return moteur_regles.get_wonder_culture_threshold(self, player)
+
     def can_player_build_cultural_wonder(self, player: int) -> bool:
         return moteur_regles.can_player_build_cultural_wonder(self, player)
+
+    def has_built_wonder_this_turn(self, player: int) -> bool:
+        return moteur_regles.has_built_wonder_this_turn(self, player)
 
     def get_buildable_wonder_types(self, player: int) -> list[str]:
         return moteur_regles.get_buildable_wonder_types(self, player)
@@ -6643,6 +6659,15 @@ class GraphicalGame:
                     )
                 elif action == "build_wonder":
                     required_science = self.get_wonder_science_threshold(self.current_player)
+                    required_culture = self.get_wonder_culture_threshold(self.current_player)
+                    if self.has_built_wonder_this_turn(self.current_player):
+                        self.shop_action = None
+                        self.pending_wonder_type = None
+                        self.show_message(
+                            "Une seule merveille par tour : la prochaine attendra le tour suivant.",
+                            2600,
+                        )
+                        return
                     if self.get_player_money(self.current_player) < self.WONDER_COST:
                         self.shop_action = None
                         self.pending_wonder_type = None
@@ -6660,7 +6685,7 @@ class GraphicalGame:
                         else:
                             self.show_message(
                                 f"Merveilles verrouillees : {required_science} points de science "
-                                f"(classiques) ou {self.CULTURE_WONDER_THRESHOLD} points de culture "
+                                f"(classiques) ou {required_culture} points de culture "
                                 "(culturelles) requis.",
                                 3200,
                             )
@@ -7057,7 +7082,7 @@ class GraphicalGame:
         return moteur_regles.execute_ai_economic_actions(self, player)
 
     def find_ai_wonder_purchase(self, player: int):
-        if not self.is_ai_player(player):
+        if not self.is_ai_player(player) or self.has_built_wonder_this_turn(player):
             return None
         available_wonders = self.get_buildable_wonder_types(player)
         if not available_wonders:
@@ -8501,7 +8526,9 @@ class GraphicalGame:
             f"Expansion culturelle: culture {culture}, dernier palier {last_culture_milestone or 'aucun'}, prochain palier {next_culture_milestone}"
         )
         if self.can_player_build_cultural_wonder(player):
-            lines.append(f"Merveilles culturelles debloquees (culture >= {self.CULTURE_WONDER_THRESHOLD})")
+            lines.append(
+                f"Merveilles culturelles debloquees (culture >= {self.get_wonder_culture_threshold(player)})"
+            )
         if self.player_has_complete_industrial_set(player):
             lines.append("Ensemble industriel complet: usine + aeroport + port")
         else:
@@ -8950,6 +8977,7 @@ class GraphicalGame:
             if action == "build_wonder":
                 affordable = (
                     affordable
+                    and not self.has_built_wonder_this_turn(self.current_player)
                     and bool(self.get_buildable_wonder_types(self.current_player))
                 )
             elif action == "destroy_bridge":

@@ -544,6 +544,7 @@ def reset_economy_state(state: GameState) -> None:
     state.player_science = {}
     state.culture_expansion_milestones = {}
     state.wonder_territories = {}
+    state.wonder_construction_turns = {}
     state.last_stand_bonus_players = set()
     state.last_stand_bonus_territory = {}
     state.tax_haven_turn_start_territory_counts = {}

@@ -293,16 +293,14 @@ class TestSeuilsMerveilles(unittest.TestCase):
         }
         state.cultural_center_ages[terr.id] = []
 
-        if regles.calculate_player_culture(state, joueur) < regles.CULTURE_WONDER_THRESHOLD:
+        seuil = regles.get_wonder_culture_threshold(state, joueur)
+        if regles.calculate_player_culture(state, joueur) < seuil:
             refus = achats.construire_merveille(state, terr, "ivory_rampart")
             self.assertFalse(refus.ok)
             self.assertIn("Culture insuffisante", refus.message)
 
         for _ in range(1000):
-            if (
-                regles.calculate_player_culture(state, joueur)
-                >= regles.CULTURE_WONDER_THRESHOLD
-            ):
+            if regles.calculate_player_culture(state, joueur) >= seuil:
                 break
             state.cultural_center_ages.setdefault(terr.id, []).append(1)
 
@@ -310,10 +308,48 @@ class TestSeuilsMerveilles(unittest.TestCase):
         self.assertTrue(resultat.ok, resultat.message)
         self.assertEqual(state.wonder_territories.get("ivory_rampart"), terr.id)
 
-        # Exclusivite : pas de deuxieme merveille (culturelle ou non) ici.
+        # Une seule merveille par tour : le deuxieme achat du meme tour est
+        # refuse avant meme l'examen du territoire.
+        refus = achats.construire_merveille(state, terr, "croesus_fountain")
+        self.assertFalse(refus.ok)
+        self.assertIn("Une seule merveille par tour", refus.message)
+
+        # Au tour suivant : exclusivite territoriale, pas de deuxieme
+        # merveille (culturelle ou non) sur le meme territoire.
+        state.turn += 1
         refus = achats.construire_merveille(state, terr, "croesus_fountain")
         self.assertFalse(refus.ok)
         self.assertIn("accueille deja une merveille", refus.message)
+
+    def test_seuils_culturels_ia_25_humain_50(self):
+        state = charger_premier_etat()
+        ia = next((j for j in joueurs_actifs(state) if regles.is_ai_player(state, j)), None)
+        humain = next((j for j in joueurs_actifs(state) if not regles.is_ai_player(state, j)), None)
+        if ia is None or humain is None:
+            self.skipTest("Il faut au moins une IA et un humain actifs.")
+        self.assertEqual(regles.get_wonder_culture_threshold(state, ia), 25)
+        self.assertEqual(regles.get_wonder_culture_threshold(state, humain), 50)
+
+    def test_une_seule_merveille_par_tour_et_par_joueur(self):
+        state = charger_premier_etat()
+        joueur = joueurs_actifs(state)[0]
+        state.current_player = joueur
+        # Le registre est vierge : rien construit ce tour.
+        self.assertFalse(regles.has_built_wonder_this_turn(state, joueur))
+        terr = territoire_du_joueur(state, joueur)
+        state.wonder_territories = {}
+        construit = regles.build_wonder(state, terr.id, "atlas_observatory", record_event=False)
+        self.assertTrue(construit)
+        self.assertTrue(regles.has_built_wonder_this_turn(state, joueur))
+        # Les autres joueurs ne sont pas concernes par ce verrou.
+        autre = next(j for j in joueurs_actifs(state) if j != joueur)
+        self.assertFalse(regles.has_built_wonder_this_turn(state, autre))
+        # L'IA au trait ne propose plus d'achat de merveille ce tour.
+        if regles.is_ai_player(state, joueur):
+            self.assertIsNone(regles.find_ai_wonder_purchase(state, joueur))
+        # Le tour suivant, le verrou saute.
+        state.turn += 1
+        self.assertFalse(regles.has_built_wonder_this_turn(state, joueur))
 
     def test_seuil_science_inchange_pour_les_classiques(self):
         state = charger_premier_etat()
