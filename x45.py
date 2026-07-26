@@ -591,8 +591,15 @@ class GraphicalGame:
 
 
     @staticmethod
-    def ask_int(prompt: str, min_val: int, max_val: int) -> int:
-        """Demande un nombre via une petite fenetre, avec repli console."""
+    def ask_int(prompt: str, min_val: int, max_val: int, allow_cancel: bool = False) -> Optional[int]:
+        """Demande un nombre via une petite fenetre, avec repli console.
+
+        Fenetre fermee ou annulee (clic trop rapide, double clic...) :
+        AUCUNE valeur par defaut n'est imposee — la question est simplement
+        reposee jusqu'a obtenir un choix valide. Avec ``allow_cancel=True``
+        (menus optionnels : merveille, choix de carte...), annuler retourne
+        None et l'appelant abandonne son action.
+        """
         if tk is not None and simpledialog is not None:
             root = tk.Tk()
             root.withdraw()
@@ -601,28 +608,32 @@ class GraphicalGame:
             except tk.TclError:
                 pass
             try:
-                value = simpledialog.askinteger(
-                    "Configuration du jeu",
-                    f"{prompt}\n\nValeur attendue : entre {min_val} et {max_val}.",
-                    minvalue=min_val,
-                    maxvalue=max_val,
-                    parent=root,
-                )
-                if value is None:
-                    if messagebox is not None:
-                        messagebox.showinfo(
-                            "Configuration du jeu",
-                            f"Aucune valeur choisie. La valeur {min_val} sera utilisee.",
-                            parent=root,
-                        )
-                    return min_val
-                return int(value)
+                while True:
+                    value = simpledialog.askinteger(
+                        "Configuration du jeu",
+                        f"{prompt}\n\nValeur attendue : entre {min_val} et {max_val}.",
+                        minvalue=min_val,
+                        maxvalue=max_val,
+                        parent=root,
+                    )
+                    if value is not None:
+                        return int(value)
+                    if allow_cancel:
+                        return None
             finally:
                 root.destroy()
 
         while True:
             try:
-                value = int(input(prompt))
+                brut = input(prompt)
+            except EOFError:
+                if allow_cancel:
+                    return None
+                raise
+            if allow_cancel and not brut.strip():
+                return None
+            try:
+                value = int(brut)
             except ValueError:
                 print("Veuillez entrer un nombre entier.")
                 continue
@@ -867,7 +878,10 @@ class GraphicalGame:
             f"Cartes sauvegardees disponibles :\n{choices}\n\nChoisissez une carte (1-{len(saved_maps)}) : ",
             1,
             len(saved_maps),
+            allow_cancel=True,
         )
+        if choice is None:
+            return None, None
         selected = saved_maps[choice - 1]
         try:
             return selected, json.loads(selected.read_text(encoding="utf-8"))
@@ -1275,7 +1289,13 @@ class GraphicalGame:
         print("Parties sauvegardees disponibles :")
         for idx, path in enumerate(saved_games, start=1):
             print(f"{idx} - {path.stem}")
-        choice = self.ask_int(f"Choisissez une partie (1-{len(saved_games)}) : ", 1, len(saved_games))
+        choice = self.ask_int(
+            f"Choisissez une partie (1-{len(saved_games)}) : ", 1, len(saved_games),
+            allow_cancel=True,
+        )
+        if choice is None:
+            self.show_message("Chargement annule.", 2000)
+            return
         selected = saved_games[choice - 1]
         try:
             payload = json.loads(selected.read_text(encoding="utf-8"))
@@ -6694,7 +6714,12 @@ class GraphicalGame:
                     for index, wonder_type in enumerate(available, start=1):
                         definition = self.WONDER_DEFINITIONS[wonder_type]
                         prompt_lines.append(f"{index} - {definition['name']} : {definition['effect']}")
-                    selection = self.ask_int("\n".join(prompt_lines), 1, len(available))
+                    selection = self.ask_int("\n".join(prompt_lines), 1, len(available), allow_cancel=True)
+                    if selection is None:
+                        self.shop_action = None
+                        self.pending_wonder_type = None
+                        self.show_message("Achat de merveille annule.", 2000)
+                        return
                     self.pending_wonder_type = available[selection - 1]
                     self.shop_panel_collapsed = True
                     self.show_message(
