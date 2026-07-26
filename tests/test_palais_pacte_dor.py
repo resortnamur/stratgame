@@ -11,6 +11,7 @@ Lancement : ``python -m unittest tests.test_palais_pacte_dor -v`` depuis
 """
 
 import json
+import random
 import sys
 import unittest
 from pathlib import Path
@@ -123,6 +124,70 @@ class TestPalaisPacteDor(unittest.TestCase):
         )
         # Sans Palais, une grande CC reste une puissance paisible.
         self.assertIsNone(ia.find_ai_attack(state))
+
+
+class TestAttaquesCapitalesParLesCC(unittest.TestCase):
+    """Une CC peut conquerir militairement une capitale ou un territoire a
+    merveille — seules son apparition et ses acquisitions non militaires
+    (expansion culturelle) les evitent."""
+
+    def scenario(self):
+        """Une CC avec un territoire voisin d'un ennemi IA classique,
+        et un hote de Palais distinct de cet ennemi."""
+        state, cc, hote = etat_avec_grande_cite_commercante()
+        if state is None:
+            return None
+        for src in state.territories:
+            if src.owner != cc:
+                continue
+            for nid in src.neighbors:
+                dst = state.territories[nid]
+                if (
+                    dst.owner >= 0
+                    and dst.owner not in (cc, hote.owner)
+                    and regles.is_ai_player(state, dst.owner)
+                    and dst.owner not in state.commercial_city_players
+                    and not regles.is_onu_player(state, dst.owner)
+                    and not regles.is_sanctuary_territory(state, dst.id)
+                    and not regles.is_submitted_territory(state, dst.id)
+                ):
+                    return state, cc, hote, src, dst
+        return None
+
+    def test_cc_attaque_une_capitale(self):
+        scenario = self.scenario()
+        if scenario is None:
+            self.skipTest("Aucun scenario CC/capitale dans les sauvegardes.")
+        state, cc, hote, src, dst = scenario
+        state.current_player = cc
+        state.wonder_territories["golden_pact_palace"] = hote.id
+        # La cible devient la capitale de son proprietaire.
+        state.player_capital_ids[dst.owner] = dst.id
+        src.regiments = max(src.regiments, 10)
+
+        self.assertTrue(regles.is_any_capital_territory(state, dst.id))
+        self.assertTrue(regles.can_attack_specific_target(state, src, dst))
+        resultat = regles.resolve_attack_once(state, src, dst, rng=random.Random(1))
+        self.assertNotEqual(resultat.att_text, "attaque interdite")
+
+        # En revanche, l'expansion non militaire evite toujours les capitales.
+        self.assertFalse(regles.can_commercial_city_gain_territory(state, cc, dst.id))
+
+    def test_cc_attaque_un_territoire_a_merveille(self):
+        scenario = self.scenario()
+        if scenario is None:
+            self.skipTest("Aucun scenario CC/merveille dans les sauvegardes.")
+        state, cc, hote, src, dst = scenario
+        state.current_player = cc
+        state.wonder_territories["golden_pact_palace"] = hote.id
+        # La cible porte une merveille (autre que le Rempart d'Ivoire).
+        state.wonder_territories["croesus_fountain"] = dst.id
+        src.regiments = max(src.regiments, 10)
+        self.assertTrue(regles.can_attack_specific_target(state, src, dst))
+
+        # Le Rempart d'Ivoire, lui, protege toujours des attaques IA.
+        state.wonder_territories["ivory_rampart"] = dst.id
+        self.assertFalse(regles.can_attack_specific_target(state, src, dst))
 
 
 if __name__ == "__main__":

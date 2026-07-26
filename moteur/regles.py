@@ -2347,8 +2347,6 @@ def can_attack_specific_target(state: GameState, src: Territory, dst: Territory)
         return False
     if src.owner != state.current_player or dst.owner == state.current_player or dst.id not in src.neighbors or src.regiments < 2:
         return False
-    if src.owner in state.commercial_city_players and is_any_capital_territory(state, dst.id):
-        return False
     if is_ai_player(state, src.owner) and is_territory_protected_from_ai_attacks(state, dst.id):
         return False
     if is_attack_blocked_by_alliance(state, src.owner, dst.owner):
@@ -2368,8 +2366,6 @@ def resolve_attack_once(
     ``submit_decider`` est transmis a ``should_submit_conquered_territory``
     pour les nations humaines.
     """
-    if src.owner in state.commercial_city_players and is_any_capital_territory(state, dst.id):
-        return AttackResult("attaque interdite", "capitale protegee des Cites commercantes", False)
     if is_ai_player(state, src.owner) and is_territory_protected_from_ai_attacks(state, dst.id):
         return AttackResult("attaque interdite", "territoire protege par le Rempart d'Ivoire", False)
     alliance_break_message = break_alliance_due_to_human_attack(state, src.owner, dst.owner) or ""

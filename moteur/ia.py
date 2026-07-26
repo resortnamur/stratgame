@@ -138,8 +138,6 @@ def find_ai_attack(state: GameState, rng=random) -> Optional[Tuple[Territory, Te
             dst = state.territories[neighbor_id]
             if dst.owner == state.current_player:
                 continue
-            if current_is_commercial and regles.is_any_capital_territory(state, dst.id):
-                continue
             if offensive_target is not None and dst.owner != offensive_target:
                 continue
             if regles.is_attack_blocked_by_alliance(state, state.current_player, dst.owner):
@@ -192,11 +190,9 @@ def shortest_owned_path(state: GameState, start_id: int, target_id: int, owner: 
 
 def compute_ai_move_target(state: GameState, rng=random) -> Optional[Tuple[Territory, Territory]]:
     behavior = get_ai_behavior(state, state.current_player, rng)
-    current_is_commercial = state.current_player in state.commercial_city_players
     frontline_enemies = [
         enemy for enemy in state.territories
         if enemy.owner != state.current_player
-        and not (current_is_commercial and regles.is_any_capital_territory(state, enemy.id))
         and not regles.is_attack_blocked_by_alliance(state, state.current_player, enemy.owner)
         and any(state.territories[n].owner == state.current_player for n in enemy.neighbors)
     ]
@@ -226,7 +222,6 @@ def compute_ai_move_target(state: GameState, rng=random) -> Optional[Tuple[Terri
             state.territories[n]
             for n in weakest_border.neighbors
             if state.territories[n].owner != state.current_player
-            and not (current_is_commercial and regles.is_any_capital_territory(state, n))
             and not regles.is_attack_blocked_by_alliance(state, state.current_player, state.territories[n].owner)
         ]
         if not enemy_neighbors:
