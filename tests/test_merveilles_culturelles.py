@@ -351,6 +351,43 @@ class TestSeuilsMerveilles(unittest.TestCase):
         state.turn += 1
         self.assertFalse(regles.has_built_wonder_this_turn(state, joueur))
 
+    def test_les_cc_n_apparaissent_pas_sur_une_merveille(self):
+        state = charger_premier_etat()
+        rng = random.Random(20260726)
+        # Ne laisse que deux territoires candidats : l'un porte une
+        # merveille, l'autre non — la nouvelle CC doit naitre sur l'autre.
+        libres = [
+            t for t in state.territories
+            if t.owner >= 0 and not regles.is_onu_player(state, t.owner)
+            and not regles.is_any_capital_territory(state, t.id)
+            and not regles.is_sanctuary_territory(state, t.id)
+        ]
+        if len(libres) < 2:
+            self.skipTest("Pas assez de territoires candidats.")
+        avec_merveille, sans_merveille = libres[0], libres[1]
+        state.sanctuary_territory_ids = {
+            t.id for t in state.territories
+            if t.id not in (avec_merveille.id, sans_merveille.id)
+        }
+        state.wonder_territories = {"ivory_rampart": avec_merveille.id}
+        state.pending_commercial_city_spawns = 1
+
+        for graine in range(10):
+            etat_test = charger_premier_etat()
+            etat_test.sanctuary_territory_ids = set(state.sanctuary_territory_ids)
+            etat_test.wonder_territories = dict(state.wonder_territories)
+            etat_test.pending_commercial_city_spawns = 1
+            messages = regles.spawn_pending_commercial_cities(
+                etat_test, random.Random(graine),
+            )
+            self.assertTrue(messages)
+            nouvelle_cc = max(etat_test.commercial_city_players)
+            capitale = etat_test.commercial_city_capital_ids[nouvelle_cc]
+            self.assertNotEqual(
+                capitale, avec_merveille.id,
+                "Une CC ne doit jamais naitre sur un territoire a merveille.",
+            )
+
     def test_seuil_science_inchange_pour_les_classiques(self):
         state = charger_premier_etat()
         joueur = joueurs_actifs(state)[0]

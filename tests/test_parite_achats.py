@@ -41,7 +41,28 @@ SCIENCE_BOOST = 250
 
 
 def iter_save_files():
-    return sorted(SAVES_DIR.glob("*.json"))
+    """Les sauvegardes comparables a l'original.
+
+    Les sauvegardes creees depuis les nouvelles regles de juillet 2026
+    peuvent contenir des merveilles culturelles, inconnues de
+    ``x45-original.py`` (qui les supprime au chargement) : la parite des
+    achats n'a de sens que pour les sauvegardes anterieures.
+    """
+    fichiers = []
+    for chemin in sorted(SAVES_DIR.glob("*.json")):
+        try:
+            payload = json.loads(chemin.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if any(
+            regles.is_cultural_wonder_type(wonder_type)
+            for wonder_type in payload.get("wonder_territories", {})
+        ):
+            continue
+        fichiers.append(chemin)
+    return fichiers
 
 
 class TestPariteAchats(unittest.TestCase):

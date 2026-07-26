@@ -3045,10 +3045,14 @@ def spawn_pending_commercial_cities(state: GameState, rng=random) -> List[str]:
         return []
     messages: List[str] = []
     for _ in range(spawn_count):
+        # Jamais de CC sur un territoire a merveille : une CC nee sur le
+        # Rempart d'Ivoire serait intouchable pour les IA (et pour l'allie
+        # du Palais), ce qui peut geler la partie.
         forbidden = (
             set(state.sanctuary_territory_ids)
             | set(state.commercial_city_capital_ids.values())
             | set(state.player_capital_ids.values())
+            | set(state.wonder_territories.values())
         )
         candidates = [
             terr for terr in state.territories
@@ -3058,7 +3062,9 @@ def spawn_pending_commercial_cities(state: GameState, rng=random) -> List[str]:
         if not candidates:
             candidates = [
                 terr for terr in state.territories
-                if terr.owner != state.onu_player_id and not is_any_capital_territory(state, terr.id)
+                if terr.owner != state.onu_player_id
+                and not is_any_capital_territory(state, terr.id)
+                and terr.id not in set(state.wonder_territories.values())
             ]
         if not candidates:
             break
