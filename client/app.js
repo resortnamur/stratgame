@@ -2401,11 +2401,15 @@ function fermerEncartExpedition() {
 }
 
 function annulerAnimationExpedition() {
-  if (client.expedition) {
-    client.expedition.annulee = true;
-    client.expedition = null;
-    fermerEncartExpedition();
-  }
+  const animation = client.expedition;
+  if (!animation) return;
+  animation.annulee = true;
+  client.expedition = null;
+  // Libère l'attente de l'encart de traversée s'il est ouvert : sans cela,
+  // sa minuterie survivrait à l'animation et fermerait l'encart de
+  // l'expédition suivante (deux expéditions à moins de 6 s d'intervalle).
+  if (animation.libererEncart) animation.libererEncart();
+  fermerEncartExpedition();
 }
 
 // La cible n'est pas voisine : on demande l'aperçu au serveur (distance de
@@ -2473,11 +2477,18 @@ async function animerExpedition(message) {
     }
     dessinerCarte();
   }
-  // Encart du résultat de la traversée : « Compris » ou 6 s, au premier des deux.
+  // Encart du résultat de la traversée : « Compris » ou 6 s, au premier des
+  // deux — ou l'abandon de l'animation (libererEncart).
   await new Promise((resoudre) => {
-    const minuterie = setTimeout(() => {
-      fermerEncartExpedition();
+    animation.libererEncart = () => {
+      clearTimeout(animation.minuterie);
+      animation.libererEncart = null;
       resoudre();
+    };
+    animation.minuterie = setTimeout(() => {
+      if (!animation.libererEncart) return;
+      fermerEncartExpedition();
+      animation.libererEncart();
     }, 6000);
     ouvrirEncartExpedition(
       "Expédition maritime — résultat de la traversée",
@@ -2485,7 +2496,12 @@ async function animerExpedition(message) {
         `Dé de la traversée : ${traversee.roll} sur 64.`,
         traversee.message,
       ],
-      { confirmer: { texte: "Compris", action: () => { clearTimeout(minuterie); resoudre(); } } },
+      {
+        confirmer: {
+          texte: "Compris",
+          action: () => { if (animation.libererEncart) animation.libererEncart(); },
+        },
+      },
     );
   });
   // Débarquement passe par passe, pour le suspense.
