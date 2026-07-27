@@ -25,7 +25,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from .etat import GameState, MAX_REPLAY_SNAPSHOTS, Territory, sanitize_major_event_modal
 
@@ -130,6 +130,21 @@ PRECIOUS_MINERAL_MINE_SPAWN_TURNS = (37, 45, 53, 61)
 BRIDGE_SPAWN_DENOMINATOR = 20
 BRIDGE_COLLAPSE_DENOMINATOR = 30
 BRIDGE_MAX_LENGTH_PX = 76.0
+# Expeditions maritimes : de a 64 faces tire a la traversee. Chaque palier
+# de distance (en pixels de la carte logique 1200x620) donne le nombre de
+# faces qui coutent 25/50/75/100 % de la flotte ; le reste des 64 faces
+# laisse la traversee indemne. None = au-dela du dernier seuil.
+EXPEDITION_DIE_FACES = 64
+EXPEDITION_LOSS_PERCENTS = (25, 50, 75, 100)
+EXPEDITION_RISK_TIERS = (
+    (100.0, (16, 8, 4, 2)),
+    (300.0, (20, 12, 8, 4)),
+    (800.0, (32, 16, 8, 4)),
+    (None, (32, 16, 8, 8)),
+)
+EXPEDITION_MAX_ATTACK_DICE = 2
+EXPEDITION_AI_MIN_REGIMENTS = 20
+EXPEDITION_AI_LAUNCH_DENOMINATOR = 10
 RELIGION_SPREAD_INTERVAL_BY_TEMPLE_COUNT = {
     1: 30,
     2: 25,
@@ -2342,10 +2357,16 @@ class AttackResult:
     elimination_message: Optional[str] = None
 
 
-def can_attack_specific_target(state: GameState, src: Territory, dst: Territory) -> bool:
+def can_attack_specific_target(
+    state: GameState, src: Territory, dst: Territory, ignore_adjacency: bool = False,
+) -> bool:
+    """``ignore_adjacency=True`` : continuation d'un debarquement maritime
+    (la cible n'est pas voisine, la flotte combat depuis la mer)."""
     if is_colonized_player(state, state.current_player):
         return False
-    if src.owner != state.current_player or dst.owner == state.current_player or dst.id not in src.neighbors or src.regiments < 2:
+    if src.owner != state.current_player or dst.owner == state.current_player or src.regiments < 2:
+        return False
+    if not ignore_adjacency and dst.id not in src.neighbors:
         return False
     if is_ai_player(state, src.owner) and is_territory_protected_from_ai_attacks(state, dst.id):
         return False
@@ -2360,11 +2381,13 @@ def resolve_attack_once(
     dst: Territory,
     rng=random,
     submit_decider=None,
+    max_attack_dice: Optional[int] = None,
 ) -> AttackResult:
     """Resout une passe d'attaque de ``src`` sur ``dst`` (miroir x45).
 
     ``submit_decider`` est transmis a ``should_submit_conquered_territory``
-    pour les nations humaines.
+    pour les nations humaines. ``max_attack_dice`` plafonne les des de
+    l'attaquant (handicap de debarquement des expeditions maritimes).
     """
     if is_ai_player(state, src.owner) and is_territory_protected_from_ai_attacks(state, dst.id):
         return AttackResult("attaque interdite", "territoire protege par le Rempart d'Ivoire", False)
@@ -2373,6 +2396,8 @@ def resolve_attack_once(
         att_dice = 4
     else:
         att_dice = 1 if src.regiments == 2 else 2 if src.regiments == 3 else 3
+    if max_attack_dice is not None:
+        att_dice = min(att_dice, max_attack_dice)
     if dst.id in state.fortress_territory_ids and dst.regiments >= 3:
         def_dice = 3
     else:
@@ -3339,6 +3364,265 @@ def maybe_collapse_fragile_bridges(state: GameState, rng=random) -> Optional[str
     record_major_event(state, message)
     record_replay_snapshot(state, message, force=True)
     return message
+
+
+# ----------------------------------------------------------------------
+# Expeditions maritimes (attaque a travers une etendue d'eau continue)
+# ----------------------------------------------------------------------
+
+def _get_expedition_cache(state: GameState) -> dict:
+    cache = getattr(state, "expedition_geometry_cache", None)
+    if cache is None:
+        cache = {}
+        state.expedition_geometry_cache = cache
+    return cache
+
+
+def get_water_body_grid(state: GameState) -> List[List[int]]:
+    """Identifie les plans d'eau connexes de la carte.
+
+    Retourne une grille de la taille de la carte : -1 pour la terre, sinon
+    l'identifiant du plan d'eau de la cellule. La connexite suit la meme
+    adjacence que les territoires (toroidale sur les cartes personnalisees).
+    La grille ne change jamais en cours de partie : le resultat est mis en
+    cache sur l'etat.
+    """
+    cache = _get_expedition_cache(state)
+    if "bodies" in cache:
+        return cache["bodies"]
+    body_grid = [[-1] * state.cols for _ in range(state.rows)]
+    next_body = 0
+    for row in range(state.rows):
+        for col in range(state.cols):
+            if state.grid_territory[row][col] >= 0 or body_grid[row][col] != -1:
+                continue
+            body_grid[row][col] = next_body
+            stack = [(row, col)]
+            while stack:
+                current_row, current_col = stack.pop()
+                for nr, nc in state.iter_adjacency_neighbors(current_row, current_col):
+                    if state.grid_territory[nr][nc] < 0 and body_grid[nr][nc] == -1:
+                        body_grid[nr][nc] = next_body
+                        stack.append((nr, nc))
+            next_body += 1
+    cache["bodies"] = body_grid
+    return body_grid
+
+
+def get_territory_coasts_by_water_body(state: GameState, territory_id: int) -> Dict[int, List[Tuple[int, int]]]:
+    """Les cellules cotieres d'un territoire, groupees par plan d'eau borde."""
+    cache = _get_expedition_cache(state)
+    coasts = cache.setdefault("coasts", {})
+    if territory_id in coasts:
+        return coasts[territory_id]
+    result: Dict[int, Set[Tuple[int, int]]] = {}
+    if 0 <= territory_id < len(state.territories):
+        body_grid = get_water_body_grid(state)
+        for row, col in state.territories[territory_id].cells:
+            for nr, nc in state.iter_adjacency_neighbors(row, col):
+                if state.grid_territory[nr][nc] < 0:
+                    result.setdefault(body_grid[nr][nc], set()).add((row, col))
+    normalized = {body: sorted(cells) for body, cells in result.items()}
+    coasts[territory_id] = normalized
+    return normalized
+
+
+def get_expedition_route_distance(
+    state: GameState,
+    territory_a: int,
+    territory_b: int,
+    cell_width: float,
+    cell_height: float,
+) -> Optional[float]:
+    """Distance en pixels de la route maritime entre deux territoires.
+
+    Les deux territoires doivent border un meme plan d'eau connexe ; la
+    distance est celle des deux points cotiers les plus proches (centres de
+    cellules) donnant sur ce plan d'eau. Sur les cartes personnalisees
+    (toroidales), la distance passe par le bord le plus court, comme
+    l'adjacence. Retourne None si aucune etendue d'eau continue ne relie
+    les deux territoires.
+    """
+    key = (min(territory_a, territory_b), max(territory_a, territory_b))
+    cache = _get_expedition_cache(state)
+    routes = cache.setdefault("routes", {})
+    if key in routes:
+        return routes[key]
+    a, b = key
+    distance: Optional[float] = None
+    if a != b and 0 <= a < len(state.territories) and 0 <= b < len(state.territories):
+        coasts_a = get_territory_coasts_by_water_body(state, a)
+        coasts_b = get_territory_coasts_by_water_body(state, b)
+        toroidal = state.map_mode == "custom"
+        best_sq: Optional[float] = None
+        for body in sorted(set(coasts_a) & set(coasts_b)):
+            for row_a, col_a in coasts_a[body]:
+                for row_b, col_b in coasts_b[body]:
+                    row_gap = abs(row_a - row_b)
+                    col_gap = abs(col_a - col_b)
+                    if toroidal:
+                        row_gap = min(row_gap, state.rows - row_gap)
+                        col_gap = min(col_gap, state.cols - col_gap)
+                    dx = col_gap * cell_width
+                    dy = row_gap * cell_height
+                    distance_sq = dx * dx + dy * dy
+                    if best_sq is None or distance_sq < best_sq:
+                        best_sq = distance_sq
+        if best_sq is not None:
+            distance = math.sqrt(best_sq)
+    routes[key] = distance
+    return distance
+
+
+def get_expedition_risk_faces(distance_px: float) -> Tuple[int, ...]:
+    """Les faces perdantes (25/50/75/100 %) du de a 64 faces pour une distance."""
+    for max_distance, faces in EXPEDITION_RISK_TIERS:
+        if max_distance is None or distance_px <= max_distance:
+            return faces
+    return EXPEDITION_RISK_TIERS[-1][1]
+
+
+def can_launch_expedition(
+    state: GameState,
+    src: Territory,
+    dst: Territory,
+    cell_width: float,
+    cell_height: float,
+) -> bool:
+    """Une expedition maritime de ``src`` vers ``dst`` est-elle possible ?
+
+    Memes conditions qu'une attaque classique, sauf l'adjacence : la cible
+    ne doit PAS etre voisine (les voisins s'attaquent normalement) et les
+    deux territoires doivent border la meme etendue d'eau continue.
+    """
+    if is_colonized_player(state, state.current_player):
+        return False
+    if (
+        src.owner != state.current_player
+        or dst.owner == state.current_player
+        or src.id == dst.id
+        or dst.id in src.neighbors
+        or src.regiments < 2
+    ):
+        return False
+    if is_ai_player(state, src.owner) and is_territory_protected_from_ai_attacks(state, dst.id):
+        return False
+    if is_attack_blocked_by_alliance(state, src.owner, dst.owner):
+        return False
+    return get_expedition_route_distance(state, src.id, dst.id, cell_width, cell_height) is not None
+
+
+def get_expedition_preview(
+    state: GameState,
+    src: Territory,
+    dst: Territory,
+    cell_width: float,
+    cell_height: float,
+) -> Optional[dict]:
+    """L'apercu de l'encart de confirmation : distance, flotte et chances.
+
+    Retourne None si l'expedition est impossible.
+    """
+    if not can_launch_expedition(state, src, dst, cell_width, cell_height):
+        return None
+    distance = get_expedition_route_distance(state, src.id, dst.id, cell_width, cell_height)
+    faces = get_expedition_risk_faces(distance)
+    return {
+        "source": src.id,
+        "cible": dst.id,
+        "distance": round(distance, 1),
+        "flotte": src.regiments - 1,
+        "faces": EXPEDITION_DIE_FACES,
+        "faces_indemne": EXPEDITION_DIE_FACES - sum(faces),
+        "faces_pertes": {
+            str(percent): count
+            for percent, count in zip(EXPEDITION_LOSS_PERCENTS, faces)
+        },
+    }
+
+
+@dataclass
+class ExpeditionCrossing:
+    """Resultat de la traversee (jet du de a 64 faces), avant le debarquement."""
+
+    src_id: int
+    dst_id: int
+    distance_px: float
+    fleet_size: int        # regiments embarques (tout sauf 1)
+    roll: int              # le jet du de a 64 faces
+    loss_percent: int      # 0, 25, 50, 75 ou 100
+    regiments_lost: int
+    survivors: int
+    destroyed: bool        # plus personne pour debarquer
+    message: str = ""
+
+
+def resolve_expedition_crossing(
+    state: GameState,
+    src: Territory,
+    dst: Territory,
+    cell_width: float,
+    cell_height: float,
+    rng=random,
+) -> ExpeditionCrossing:
+    """Embarque tous les regiments de ``src`` sauf un et resout la traversee.
+
+    Mute l'etat : apres l'appel, ``src.regiments`` vaut 1 + survivants (la
+    flotte au large reste comptee sur son port d'attache le temps du
+    debarquement). Le combat se resout ensuite passe par passe par
+    l'appelant via ``resolve_attack_once(..., max_attack_dice=
+    EXPEDITION_MAX_ATTACK_DICE)`` tant que ``can_attack_specific_target(...,
+    ignore_adjacency=True)`` : la flotte ne peut pas battre en retraite,
+    elle conquiert ou disparait.
+    """
+    distance = get_expedition_route_distance(state, src.id, dst.id, cell_width, cell_height)
+    faces = get_expedition_risk_faces(distance)
+    fleet_size = src.regiments - 1
+    roll = rng.randint(1, EXPEDITION_DIE_FACES)
+    loss_percent = 0
+    threshold = 0
+    for percent, count in zip(EXPEDITION_LOSS_PERCENTS, faces):
+        threshold += count
+        if roll <= threshold:
+            loss_percent = percent
+            break
+    if loss_percent == 0:
+        regiments_lost = 0
+    else:
+        # Arrondi au plus proche, avec au moins 1 regiment perdu par sinistre.
+        regiments_lost = min(
+            fleet_size, max(1, int(fleet_size * loss_percent / 100 + 0.5)),
+        )
+    survivors = fleet_size - regiments_lost
+    src.regiments = 1 + survivors
+    destroyed = survivors <= 0
+    if destroyed:
+        message = (
+            f"Expedition maritime de {src.name} vers {dst.name} : naufrage en mer, "
+            f"les {fleet_size} regiment(s) embarques disparaissent sans combattre."
+        )
+        record_major_event(state, f"Tour {state.turn}: {message}")
+    elif regiments_lost:
+        message = (
+            f"Expedition maritime de {src.name} vers {dst.name} : sinistre en mer, "
+            f"{regiments_lost} regiment(s) perdus ({loss_percent} % de la flotte). "
+            f"{survivors} regiment(s) debarquent."
+        )
+    else:
+        message = (
+            f"Expedition maritime de {src.name} vers {dst.name} : traversee indemne, "
+            f"{survivors} regiment(s) debarquent."
+        )
+    record_replay_snapshot(
+        state,
+        f"Tour {state.turn} - expedition maritime de J{src.owner + 1} : "
+        f"{src.name} vers {dst.name}",
+        force=True,
+    )
+    return ExpeditionCrossing(
+        src.id, dst.id, distance, fleet_size, roll, loss_percent,
+        regiments_lost, survivors, destroyed, message,
+    )
 
 
 # ----------------------------------------------------------------------

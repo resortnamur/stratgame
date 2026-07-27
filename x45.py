@@ -46,6 +46,9 @@ class GraphicalGame:
     FPS = 60
     AI_ACTION_DELAY_MS = 1100
     AI_FAST_ACTION_DELAY_MS = 260
+    # Cadence du debarquement d'une expedition maritime humaine : chaque
+    # passe est rejouee separement, pour le suspense.
+    EXPEDITION_PASS_DELAY_MS = 320
     MAX_END_TURN_MOVES = 5
     EXPANDED_END_TURN_MOVES = 10
     EXPANDED_END_TURN_MOVE_TERRITORY_THRESHOLD = 10
@@ -272,6 +275,10 @@ class GraphicalGame:
         self.tribes_mode = False
         self.ai_state = "idle"
         self.ai_next_action_time = 0
+        # Expeditions maritimes : iterateur des departs IA du tour courant
+        # et debarquement en cours (humain ou IA), rejoue passe par passe.
+        self.ai_expedition_iter = None
+        self.pending_expedition_battle: Optional[dict] = None
         self.fast_ai_movements = False
         self.ai_speed_mode = "normal"
         self.ai_personalities: dict[int, str] = {}
@@ -361,6 +368,7 @@ class GraphicalGame:
         self.bridge_link_points: dict[Tuple[int, int], Tuple[Tuple[int, int], Tuple[int, int]]] = {}
         self.bridge_geometry_cache: dict[Tuple[int, int], Optional[Tuple[Tuple[int, int], Tuple[int, int]]]] = {}
         self.bridge_coastal_cells_cache: dict[int, List[Tuple[int, int]]] = {}
+        self.expedition_geometry_cache: dict = {}
         self.custom_map_size = "medium"
         self.custom_shape = "block"
         self.custom_size_buttons = {
@@ -502,6 +510,7 @@ class GraphicalGame:
         self.cell_width = self.WIDTH / self.cols
         self.cell_height = (self.HEIGHT - self.map_top - 8) / self.rows
         self.bridge_geometry_cache = {}
+        self.expedition_geometry_cache = {}
         self.custom_size_buttons = {
             "medium": pygame.Rect(18, 46, 100, 28),
             "large": pygame.Rect(128, 46, 90, 28),
@@ -973,6 +982,7 @@ class GraphicalGame:
         self.bridge_link_points = {}
         self.bridge_geometry_cache = {}
         self.bridge_coastal_cells_cache = {}
+        self.expedition_geometry_cache = {}
 
         for terr_id in territory_ids_in_grid:
             terr_data = raw_territories.get(terr_id, {})
@@ -1850,6 +1860,8 @@ class GraphicalGame:
         self.set_auto_mode_for_player(player, not self.is_ai_player(player))
 
     def reset_ai_turn_state(self) -> None:
+        self.ai_expedition_iter = None
+        self.pending_expedition_battle = None
         if self.phase != "playing":
             self.ai_state = "idle"
             return
@@ -4882,6 +4894,7 @@ class GraphicalGame:
         self.bridge_link_points = {}
         self.bridge_geometry_cache = {}
         self.bridge_coastal_cells_cache = {}
+        self.expedition_geometry_cache = {}
         self.recompute_neighbors_from_grid()
         self.last_alliance_break_message = ""
         self.nation_players = set()
@@ -9306,6 +9319,8 @@ class GraphicalGame:
             self.reset_ai_turn_state()
 
     def handle_end_turn_action(self) -> None:
+        if self.pending_expedition_battle is not None:
+            return  # pas de fin de tour pendant un debarquement
         if self.turn_phase == "attack":
             if self.is_ai_player(self.current_player) or self.is_colonized_player(self.current_player):
                 self.start_move_phase()
@@ -9926,6 +9941,8 @@ class GraphicalGame:
         return True
 
     def handle_left_click(self, pos: Tuple[int, int]) -> None:
+        if self.pending_expedition_battle is not None:
+            return  # le debarquement se rejoue : la carte attend
         terr = self.get_territory_at_pos(pos)
         if terr is None:
             self.selected_target = None
@@ -9944,12 +9961,22 @@ class GraphicalGame:
             return
         src = self.territories[self.selected_source]
         if terr.id not in src.neighbors or terr.owner == self.current_player:
-            self.show_message("Choisissez une cible ennemie adjacente.")
+            # Cible ennemie NON voisine : peut-etre une expedition maritime
+            # (territoires separes par une etendue d'eau continue).
+            if terr.owner != self.current_player and moteur_regles.can_launch_expedition(
+                self, src, terr, self.cell_width, self.cell_height,
+            ):
+                self.selected_target = terr.id
+                self.try_launch_expedition(src, terr)
+                return
+            self.show_message("Choisissez une cible ennemie adjacente (ou au-dela des mers : expedition maritime).")
             return
         self.selected_target = terr.id
         self.resolve_attack_once_and_refresh(src, terr)
 
     def handle_right_click(self, pos: Tuple[int, int]) -> None:
+        if self.pending_expedition_battle is not None:
+            return  # le debarquement se rejoue : la carte attend
         terr = self.get_territory_at_pos(pos)
         if terr is None:
             return
@@ -9967,7 +9994,13 @@ class GraphicalGame:
             self.show_message("Joueur colonise : aucune attaque possible jusqu'a la decolonisation.", 2400)
             return
         if terr.id not in src.neighbors:
-            self.show_message("La cible doit etre voisine du territoire source.")
+            if terr.owner != self.current_player and moteur_regles.can_launch_expedition(
+                self, src, terr, self.cell_width, self.cell_height,
+            ):
+                self.selected_target = terr.id
+                self.try_launch_expedition(src, terr)
+                return
+            self.show_message("La cible doit etre voisine du territoire source (ou au-dela des mers : expedition maritime).")
             return
         if terr.owner == self.current_player:
             self.show_message("La cible doit appartenir a un ennemi.")
@@ -10119,6 +10152,166 @@ class GraphicalGame:
             self.show_message(result.elimination_message, 3500)
         return result.att_text, result.def_text, result.conquered
 
+    # ------------------------------------------------------------------
+    # Expeditions maritimes
+    # ------------------------------------------------------------------
+
+    def try_launch_expedition(self, src: Territory, dst: Territory) -> None:
+        """Encart de confirmation puis lancement d'une expedition maritime."""
+        preview = moteur_regles.get_expedition_preview(
+            self, src, dst, self.cell_width, self.cell_height,
+        )
+        if preview is None:
+            self.show_message(
+                "Expedition impossible : pas d'etendue d'eau continue entre les deux territoires.",
+                2600,
+            )
+            return
+        if not self.confirm_expedition_launch(src, dst, preview):
+            self.show_message("Expedition maritime annulee.", 1400)
+            return
+        self.start_expedition(src, dst)
+
+    def confirm_expedition_launch(self, src: Territory, dst: Territory, preview: dict) -> bool:
+        """Dialogue Tkinter « Lancez une expedition maritime ? » (avec les chances)."""
+        if tk is None or messagebox is None:
+            self.show_message("Dialogue indisponible (Tkinter absent) : expedition annulee.", 2600)
+            return False
+        safe_percent = round(100 * preview["faces_indemne"] / preview["faces"])
+        root = tk.Tk()
+        root.withdraw()
+        try:
+            root.attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        try:
+            return bool(messagebox.askokcancel(
+                "Expedition maritime",
+                "Lancez une expedition maritime ?\n\n"
+                f"{src.name} -> {dst.name} : {preview['distance']:.0f} pixels de traversee.\n"
+                f"{preview['flotte']} regiment(s) embarquent (tous sauf 1, aucun retour possible).\n\n"
+                f"{safe_percent} % de chances d'arriver indemne ({preview['faces_indemne']}/64).\n"
+                f"Sinon : 25 % de pertes ({preview['faces_pertes']['25']}/64), "
+                f"50 % ({preview['faces_pertes']['50']}/64), "
+                f"75 % ({preview['faces_pertes']['75']}/64), "
+                f"naufrage total ({preview['faces_pertes']['100']}/64).\n\n"
+                "Debarquement : attaque avec 2 des au maximum, jusqu'au dernier homme.\n\n"
+                "OK : confirmer. Annuler : annuler.",
+                parent=root,
+            ))
+        finally:
+            root.destroy()
+
+    def start_expedition(self, src: Territory, dst: Territory, ai_prefix: str = "") -> None:
+        """Resout la traversee (de a 64 faces) et met le debarquement en file.
+
+        Le debarquement est ensuite rejoue passe par passe par ``update()``
+        (via ``process_pending_expedition_battle``), pour le suspense —
+        jamais d'un seul coup, meme si l'attaque est totale.
+        """
+        crossing = moteur_regles.resolve_expedition_crossing(
+            self, src, dst, self.cell_width, self.cell_height,
+        )
+        self.selected_source = src.id
+        self.selected_target = dst.id
+        if ai_prefix:
+            self.show_message(ai_prefix + crossing.message, self.get_ai_message_duration_ms(1600))
+        else:
+            # L'encart du resultat de la traversee : le joueur prend
+            # connaissance du sort de sa flotte avant le debarquement
+            # (Echap pour fermer, le debarquement demarre ensuite).
+            self.queue_major_event_modal(
+                "Expedition maritime - resultat de la traversee",
+                [f"De de la traversee : {crossing.roll} sur 64.", crossing.message],
+            )
+        if crossing.destroyed:
+            # 100 % de pertes : l'attaque s'arrete la, l'armee a disparu.
+            self.selected_source = None
+            self.selected_target = None
+            return
+        delay = self.get_ai_action_delay_ms() if ai_prefix else self.EXPEDITION_PASS_DELAY_MS
+        self.pending_expedition_battle = {
+            "src_id": src.id,
+            "dst_id": dst.id,
+            "prefix": ai_prefix,
+            "next_time": pygame.time.get_ticks() + delay,
+        }
+
+    def process_pending_expedition_battle(self) -> None:
+        """Une passe de debarquement par tic (humain comme IA)."""
+        pending = self.pending_expedition_battle
+        if pending is None:
+            return
+        if self.phase != "playing":
+            self.pending_expedition_battle = None
+            return
+        now = pygame.time.get_ticks()
+        if now < pending["next_time"]:
+            return
+        src = self.territories[pending["src_id"]]
+        dst = self.territories[pending["dst_id"]]
+        prefix = pending["prefix"]
+        delay = self.get_ai_action_delay_ms() if prefix else self.EXPEDITION_PASS_DELAY_MS
+        if not moteur_regles.can_attack_specific_target(self, src, dst, ignore_adjacency=True):
+            self.pending_expedition_battle = None
+            self.selected_source = None
+            self.selected_target = None
+            return
+        result = moteur_regles.resolve_attack_once(
+            self, src, dst,
+            submit_decider=self.ask_human_submission_choice,
+            max_attack_dice=moteur_regles.EXPEDITION_MAX_ATTACK_DICE,
+        )
+        self.last_special_conquest_message = result.special_conquest_message
+        self.last_alliance_break_message = result.alliance_break_message
+        if result.elimination_message:
+            self.show_message(result.elimination_message, 3500)
+        if result.conquered:
+            self.pending_expedition_battle = None
+            if dst.owner == self.onu_player_id:
+                # Territoire soumis a l'ONU : meme nettoyage de selection
+                # que resolve_attack_once.
+                if self.selected_source == dst.id:
+                    self.selected_source = None
+                if self.selected_target == dst.id:
+                    self.selected_target = None
+            if self.last_special_conquest_message:
+                self.show_message(self.last_special_conquest_message, 5200)
+            else:
+                extra = (self.last_alliance_break_message + " ") if self.last_alliance_break_message else ""
+                self.show_message(
+                    prefix + extra + f"Debarquement reussi : {src.name} conquiert {dst.name} "
+                    f"({result.att_text} contre {result.def_text}).",
+                    3000,
+                )
+            self.selected_source = None
+            self.selected_target = None
+            winner = self.check_winner()
+            if winner is not None:
+                self.declare_victory(winner)
+                return
+            if prefix:
+                self.ai_next_action_time = now + self.get_ai_action_delay_ms()
+            return
+        if not moteur_regles.can_attack_specific_target(self, src, dst, ignore_adjacency=True):
+            # La flotte est aneantie sur la plage : personne ne revient.
+            self.pending_expedition_battle = None
+            self.show_message(
+                prefix + f"Le debarquement echoue : l'expedition est aneantie devant {dst.name} "
+                f"({result.att_text} contre {result.def_text}).",
+                3000,
+            )
+            self.selected_source = None
+            self.selected_target = None
+            if prefix:
+                self.ai_next_action_time = now + self.get_ai_action_delay_ms()
+            return
+        self.show_message(
+            prefix + f"Debarquement sur {dst.name} : {result.att_text} contre {result.def_text}.",
+            max(400, delay),
+        )
+        pending["next_time"] = now + delay
+
     def ai_attack_score(self, src: Territory, dst: Territory, behavior: str) -> Optional[Tuple[Tuple[int, int, int, int, int], bool]]:
         return moteur_ia.ai_attack_score(self, src, dst, behavior)
 
@@ -10200,7 +10393,32 @@ class GraphicalGame:
             offensive_target = self.get_offensive_alliance_target_for_ai(self.current_player)
             offensive_note = f" -> cible J{offensive_target + 1}" if offensive_target is not None else ""
             self.show_message(f"Tour du joueur ordinateur {self.current_player + 1} ({self.get_ai_profile_label(self.current_player)}{offensive_note})...", max(1, self.get_ai_action_delay_ms() - 100))
-            self.ai_state = "acting"
+            # Les expeditions maritimes se decident avant les attaques
+            # terrestres (miroir de play_ai_turn_steps : meme ordre de
+            # visite, memes tirages aleatoires).
+            self.ai_state = "expeditions"
+            self.ai_expedition_iter = moteur_ia.iter_ai_expedition_launches(
+                self, self.cell_width, self.cell_height,
+            )
+            self.ai_next_action_time = now + self.get_ai_action_delay_ms()
+            return
+
+        if self.ai_state == "expeditions":
+            # Un debarquement en cours est rejoue par update() : on ne
+            # demande le depart suivant qu'une fois la plage rendue.
+            if self.pending_expedition_battle is not None:
+                return
+            try:
+                src, dst = next(self.ai_expedition_iter)
+            except StopIteration:
+                self.ai_expedition_iter = None
+                self.ai_state = "acting"
+                self.ai_next_action_time = now + self.get_ai_action_delay_ms()
+                return
+            self.start_expedition(
+                src, dst,
+                ai_prefix=f"Ordinateur J{self.current_player + 1} ({self.get_ai_profile_label(self.current_player)}): ",
+            )
             self.ai_next_action_time = now + self.get_ai_action_delay_ms()
             return
 
@@ -10266,6 +10484,12 @@ class GraphicalGame:
         elif self.phase == "replay":
             self.update_replay()
         self.normalize_ai_speed_mode()
+        # Un debarquement d'expedition maritime en cours (humain ou IA) est
+        # rejoue passe par passe : tout le reste attend la fin de la plage.
+        if self.pending_expedition_battle is not None:
+            self.process_pending_expedition_battle()
+            if self.pending_expedition_battle is not None:
+                return
         if self.ai_speed_mode == "instant":
             for _ in range(250):
                 if self.phase != "playing" or not self.is_ai_player(self.current_player):

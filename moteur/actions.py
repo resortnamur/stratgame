@@ -197,6 +197,20 @@ class AiAttackStep:
     territoires: List[dict] = field(default_factory=list)
 
 
+@dataclass
+class AiExpeditionStep:
+    """La traversee d'une expedition maritime IA, pour la retransmission.
+
+    Diffusee avant les passes de debarquement (des ``AiAttackStep``
+    classiques) ; ``expedition`` porte le resultat du de a 64 faces.
+    """
+
+    src_id: int
+    dst_id: int
+    expedition: regles.ExpeditionCrossing = None
+    territoires: List[dict] = field(default_factory=list)
+
+
 def _territoire_snapshot(terr) -> dict:
     return {
         "id": terr.id,
@@ -225,6 +239,35 @@ def play_ai_turn_steps(
     if state.phase != "playing" or not regles.is_ai_player(state, state.current_player):
         report.skipped = True
         return report
+
+    # Expeditions maritimes : chaque territoire assez garni tente sa chance
+    # avant les attaques terrestres classiques (miroir exact de x45 — meme
+    # ordre de visite, memes tirages).
+    for src, dst in ia.iter_ai_expedition_launches(state, cell_width, cell_height, rng):
+        crossing = regles.resolve_expedition_crossing(
+            state, src, dst, cell_width, cell_height, rng,
+        )
+        yield AiExpeditionStep(src.id, dst.id, crossing,
+                               [_territoire_snapshot(src), _territoire_snapshot(dst)])
+        while (
+            not crossing.destroyed
+            and state.phase == "playing"
+            and regles.can_attack_specific_target(state, src, dst, ignore_adjacency=True)
+        ):
+            result = regles.resolve_attack_once(
+                state, src, dst, rng, submit_decider,
+                max_attack_dice=regles.EXPEDITION_MAX_ATTACK_DICE,
+            )
+            report.attack_passes += 1
+            yield AiAttackStep(src.id, dst.id, result,
+                               [_territoire_snapshot(src), _territoire_snapshot(dst)])
+            if result.conquered:
+                break
+        winner, reason = regles.evaluate_winner(state)
+        if winner is not None:
+            report.winner = winner
+            report.winner_reason = reason
+            return report
 
     for _ in range(max_actions):
         move = ia.find_ai_attack(state, rng)
@@ -292,7 +335,7 @@ def play_ai_turn(
 # ----------------------------------------------------------------------
 
 ACTION_TYPES = (
-    "attaquer", "assaut_total", "deplacer",
+    "attaquer", "assaut_total", "expedition", "deplacer",
     "terminer_attaque", "terminer_achats", "fin_de_tour",
     "acheter",
 )
@@ -345,6 +388,10 @@ class ActionOutcome:
     turn_report: Optional[TurnAdvanceReport] = None
     winner: Optional[int] = None
     winner_reason: str = ""
+    # Expedition maritime : la traversee (de a 64 faces) et les passes de
+    # debarquement enrichies des territoires touches, pour que les clients
+    # puissent rejouer l'attaque progressivement.
+    expedition: Optional[dict] = None
 
 
 def _refuse(code: str) -> ActionOutcome:
@@ -400,6 +447,46 @@ def apply_action(
                 outcome.attack_passes.append(result)
                 if result.conquered:
                     break
+        winner, reason = regles.evaluate_winner(state)
+        outcome.winner = winner
+        outcome.winner_reason = reason
+        return outcome
+
+    if action_type == "expedition":
+        if state.phase != "playing" or state.turn_phase != "attack":
+            return _refuse("phase_invalide")
+        src = _get_territory(state, action, "source")
+        dst = _get_territory(state, action, "cible")
+        if src is None or dst is None:
+            return _refuse("territoire_invalide")
+        if not regles.can_launch_expedition(state, src, dst, cell_width, cell_height):
+            return _refuse("expedition_invalide")
+        outcome = ActionOutcome(ok=True)
+        crossing = regles.resolve_expedition_crossing(
+            state, src, dst, cell_width, cell_height, rng,
+        )
+        passes: List[dict] = []
+        outcome.expedition = {
+            "crossing": crossing,
+            "territoires": [_territoire_snapshot(src), _territoire_snapshot(dst)],
+            "passes": passes,
+        }
+        while (
+            not crossing.destroyed
+            and state.phase == "playing"
+            and regles.can_attack_specific_target(state, src, dst, ignore_adjacency=True)
+        ):
+            result = regles.resolve_attack_once(
+                state, src, dst, rng, submit_decider,
+                max_attack_dice=regles.EXPEDITION_MAX_ATTACK_DICE,
+            )
+            outcome.attack_passes.append(result)
+            passes.append({
+                "result": result,
+                "territoires": [_territoire_snapshot(src), _territoire_snapshot(dst)],
+            })
+            if result.conquered:
+                break
         winner, reason = regles.evaluate_winner(state)
         outcome.winner = winner
         outcome.winner_reason = reason

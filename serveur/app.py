@@ -19,6 +19,9 @@ REST :
 - ``GET  /api/parties/{id}/replay``    — l'historique replay (a la demande).
 - ``GET  /api/parties/{id}/bilans``    — etat des lieux par joueur actif
   (amenagements, bonus, conditions de nation, progression de victoire).
+- ``GET  /api/parties/{id}/expedition?source=3&cible=7`` — apercu d'une
+  expedition maritime (distance, chances du de a 64 faces) pour l'encart
+  de confirmation.
 - ``POST /api/parties/{id}/sauvegarder`` — ``{"fichier": "..."}`` optionnel
   (par defaut : le fichier d'origine).
 
@@ -346,6 +349,13 @@ def creer_app(dossier_parties: Optional[Path] = None,
     def bilans_partie(partie_id: str):
         salle = get_salle(partie_id)
         return salle.session.bilans()
+
+    @app.get("/api/parties/{partie_id}/expedition")
+    def apercu_expedition(partie_id: str, source: int, cible: int):
+        """Apercu d'une expedition maritime : distance et chances du de a
+        64 faces, pour l'encart de confirmation du client."""
+        salle = get_salle(partie_id)
+        return salle.session.apercu_expedition(source, cible)
 
     @app.post("/api/parties/{partie_id}/sauvegarder")
     def sauvegarder_partie(partie_id: str, corps: Optional[Dict[str, Any]] = None):

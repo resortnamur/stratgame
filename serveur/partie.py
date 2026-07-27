@@ -522,6 +522,31 @@ class SessionPartie:
                 self.state.phase = "victory"
             return resultat
 
+    def apercu_expedition(self, source: Any, cible: Any) -> Dict[str, Any]:
+        """L'apercu d'une expedition maritime (encart de confirmation).
+
+        Lecture seule : distance de la route maritime et chances du de a
+        64 faces. ``possible=False`` avec un code si l'expedition est
+        impossible (territoires invalides, pas d'etendue d'eau commune,
+        cible voisine ou alliee...).
+        """
+        with self.lock:
+            state = self.state
+            try:
+                source = int(source)
+                cible = int(cible)
+            except (TypeError, ValueError):
+                return {"possible": False, "code": "territoire_invalide"}
+            if not (0 <= source < len(state.territories) and 0 <= cible < len(state.territories)):
+                return {"possible": False, "code": "territoire_invalide"}
+            apercu = regles.get_expedition_preview(
+                state, state.territories[source], state.territories[cible],
+                self.cell_width, self.cell_height,
+            )
+            if apercu is None:
+                return {"possible": False, "code": "expedition_invalide"}
+            return {"possible": True, **apercu}
+
     def consommer_modale_evenements(self, joueur: Optional[int]) -> Tuple[bool, str]:
         """Retire l'encart d'evenements courant (bouton « Compris » du client).
 

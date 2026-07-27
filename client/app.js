@@ -67,6 +67,10 @@ const client = {
   bilans: null,  // dernier état des lieux par joueur (GET /bilans)
   victoire: null,  // {vainqueur, raison} une fois la partie gagnée
   fermetureVoulue: false,
+  // Expédition maritime : {annulee} pendant l'animation de la traversée et
+  // du débarquement — bloque les actions et s'annule si un état plus
+  // récent arrive entre-temps.
+  expedition: null,
 };
 
 // Cadence du replay : la vitesse « REPLAY RAPIDE » de x45 (150 ms/étape).
@@ -162,6 +166,8 @@ const LIBELLES_REFUS = {
   phase_invalide: "Pas pendant cette phase.",
   territoire_invalide: "Territoire invalide.",
   attaque_invalide: "Attaque impossible (voisinage, alliance ou garnison).",
+  expedition_invalide: "Expédition impossible : pas d'étendue d'eau continue " +
+    "entre les deux territoires (ou alliance, ou garnison insuffisante).",
   action_inconnue: "Action inconnue.",
   limite: "Limite de déplacements atteinte.",
   proprietaire: "Les deux territoires doivent être à toi.",
@@ -522,6 +528,7 @@ function actionEnAttente() {
 }
 
 function envoyerAction(action) {
+  if (client.expedition) return;  // animation d'expédition en cours
   if (!aMonTour() || actionEnAttente()) return;
   if (!client.ws || client.ws.readyState !== WebSocket.OPEN) {
     journal("Déconnecté du serveur : action impossible.");
@@ -534,6 +541,7 @@ function envoyerAction(action) {
 function traiterMessage(message) {
   switch (message.type) {
     case "bienvenue":
+      annulerAnimationExpedition();
       client.monSiege = message.joueur;
       client.etat = message.etat;
       client.actionDepuis = null;
@@ -561,6 +569,16 @@ function traiterMessage(message) {
       for (const territoire of message.pas.territoires) {
         etat.territories_state[territoire.id] = territoire;
       }
+      if (message.pas.expedition) {
+        // La traversée d'une expédition maritime IA : le dé à 64 faces a
+        // parlé, les passes de débarquement suivent une par une.
+        const traversee = message.pas.expedition;
+        journal(`${nomDuJoueur(message.joueur)} lance une expédition maritime !`);
+        journal(traversee.message);
+        flash(traversee.message);
+        dessinerCarte();
+        break;
+      }
       const resultat = message.pas.result;
       const nomCible = etat.territories[message.pas.dst_id].name;
       journal(`${nomDuJoueur(message.joueur)} attaque ${nomCible} : ` +
@@ -575,6 +593,17 @@ function traiterMessage(message) {
       break;
     }
     case "resultat":
+      // Un état plus récent arrive : une animation d'expédition encore en
+      // cours n'a plus de raison d'être (elle rejouerait du passé).
+      annulerAnimationExpedition();
+      // Expédition maritime : la traversée et le débarquement se rejouent
+      // progressivement (pour le suspense) avant d'appliquer l'état final.
+      if (message.action && message.action.type === "expedition"
+          && message.resultat && message.resultat.outcome
+          && message.resultat.outcome.expedition) {
+        animerExpedition(message);
+        break;
+      }
       // Mon tour vient de passer à quelqu'un d'autre : la surbrillance du
       // dernier territoire sélectionné n'a plus de raison d'être.
       if (client.etat && client.etat.current_player === client.monSiege
@@ -939,7 +968,8 @@ function afficherBarreActions() {
     if (enAttaque) {
       $("indication-phase").textContent =
         "À toi ! Clique un de tes territoires puis une cible : " +
-        "clic gauche = une passe, clic droit = assaut total.";
+        "clic gauche = une passe, clic droit = assaut total, " +
+        "cible au-delà des mers = expédition maritime.";
     } else if (enAchats) {
       $("indication-phase").textContent =
         "Phase d'achats — choisis un article dans la boutique (à droite), " +
@@ -2334,6 +2364,162 @@ function dessinerVueReligion(contexte, etat, largeurCellule, hauteurCellule) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Expédition maritime — confirmation, traversée (dé à 64 faces) et
+// débarquement rejoué passe par passe (pour le suspense).
+// ---------------------------------------------------------------------------
+
+const delai = (ms) => new Promise((resoudre) => setTimeout(resoudre, ms));
+
+function ouvrirEncartExpedition(titre, lignes, boutons) {
+  $("titre-expedition").textContent = titre;
+  const liste = $("liste-expedition");
+  liste.textContent = "";
+  for (const ligne of lignes) {
+    const item = document.createElement("li");
+    item.textContent = ligne;
+    liste.append(item);
+  }
+  const confirmer = $("bouton-expedition-confirmer");
+  const annuler = $("bouton-expedition-annuler");
+  confirmer.textContent = boutons.confirmer ? boutons.confirmer.texte : "";
+  annuler.hidden = !boutons.annuler;
+  if (boutons.annuler) annuler.textContent = boutons.annuler.texte;
+  confirmer.onclick = () => {
+    fermerEncartExpedition();
+    if (boutons.confirmer && boutons.confirmer.action) boutons.confirmer.action();
+  };
+  annuler.onclick = () => {
+    fermerEncartExpedition();
+    if (boutons.annuler && boutons.annuler.action) boutons.annuler.action();
+  };
+  $("encart-expedition").hidden = false;
+}
+
+function fermerEncartExpedition() {
+  $("encart-expedition").hidden = true;
+}
+
+function annulerAnimationExpedition() {
+  if (client.expedition) {
+    client.expedition.annulee = true;
+    client.expedition = null;
+    fermerEncartExpedition();
+  }
+}
+
+// La cible n'est pas voisine : on demande l'aperçu au serveur (distance de
+// la route maritime, chances du dé à 64 faces) puis on confirme.
+async function proposerExpedition(source, cible) {
+  if (client.expedition || actionEnAttente()) return;
+  const etat = client.etat;
+  let apercu;
+  try {
+    apercu = await api(
+      `/api/parties/${client.partieId}/expedition?source=${source}&cible=${cible}`,
+    );
+  } catch (erreur) {
+    flash(`Aperçu d'expédition impossible : ${erreur.message}`);
+    return;
+  }
+  if (!apercu.possible) {
+    const texte = LIBELLES_REFUS[apercu.code] || "Expédition impossible.";
+    flash(texte);
+    journal(texte);
+    return;
+  }
+  const pourcent = Math.round((100 * apercu.faces_indemne) / apercu.faces);
+  const nomSource = etat.territories[source].name;
+  const nomCible = etat.territories[cible].name;
+  ouvrirEncartExpedition(
+    "Lancez une expédition maritime ?",
+    [
+      `${nomSource} → ${nomCible} : ${Math.round(apercu.distance)} pixels de traversée.`,
+      `${apercu.flotte} régiment(s) embarquent (tous sauf 1, aucun retour possible).`,
+      `${pourcent} % de chances d'arriver indemne (${apercu.faces_indemne} sur 64). ` +
+        `Sinon : 25 % de pertes (${apercu.faces_pertes["25"]}/64), ` +
+        `50 % (${apercu.faces_pertes["50"]}/64), ` +
+        `75 % (${apercu.faces_pertes["75"]}/64), ` +
+        `naufrage total (${apercu.faces_pertes["100"]}/64).`,
+      "Débarquement : attaque avec 2 dés au maximum, jusqu'au dernier homme.",
+    ],
+    {
+      confirmer: {
+        texte: "Confirmer",
+        action: () => envoyerAction({ type: "expedition", source, cible }),
+      },
+      annuler: { texte: "Annuler" },
+    },
+  );
+}
+
+// Rejoue le résultat d'une expédition (la nôtre ou celle d'un autre humain) :
+// carte après la traversée, encart du dé à 64 faces, puis les passes de
+// débarquement une par une — l'état final complet n'est appliqué qu'à la fin.
+async function animerExpedition(message) {
+  const expedition = message.resultat.outcome.expedition;
+  const traversee = expedition.crossing;
+  const animation = { annulee: false };
+  client.expedition = animation;
+  const etat = client.etat;
+  const nomSource = etat ? etat.territories[traversee.src_id].name : "?";
+  const nomCible = etat ? etat.territories[traversee.dst_id].name : "?";
+  journal(`${nomDuJoueur(message.joueur)} lance une expédition maritime de ` +
+          `${nomSource} vers ${nomCible}.`);
+  journal(traversee.message);
+  if (etat) {
+    for (const territoire of expedition.territoires) {
+      etat.territories_state[territoire.id] = territoire;
+    }
+    dessinerCarte();
+  }
+  // Encart du résultat de la traversée : « Compris » ou 6 s, au premier des deux.
+  await new Promise((resoudre) => {
+    const minuterie = setTimeout(() => {
+      fermerEncartExpedition();
+      resoudre();
+    }, 6000);
+    ouvrirEncartExpedition(
+      "Expédition maritime — résultat de la traversée",
+      [
+        `Dé de la traversée : ${traversee.roll} sur 64.`,
+        traversee.message,
+      ],
+      { confirmer: { texte: "Compris", action: () => { clearTimeout(minuterie); resoudre(); } } },
+    );
+  });
+  // Débarquement passe par passe, pour le suspense.
+  for (const passe of expedition.passes) {
+    if (animation.annulee) break;
+    if (client.etat) {
+      for (const territoire of passe.territoires) {
+        client.etat.territories_state[territoire.id] = territoire;
+      }
+    }
+    const resultat = passe.result;
+    journal(`Débarquement sur ${nomCible} : ${resultat.att_text} / ${resultat.def_text}` +
+            (resultat.conquered ? " — conquis !" : ""));
+    for (const texte of [resultat.special_conquest_message,
+                         resultat.alliance_break_message,
+                         resultat.elimination_message]) {
+      if (texte) journal(texte);
+    }
+    dessinerCarte();
+    await delai(320);
+  }
+  if (animation.annulee) return;  // un état plus récent a déjà pris la main
+  client.expedition = null;
+  client.etat = message.etat;
+  if (message.joueur === client.monSiege) client.actionDepuis = null;
+  if (traversee.destroyed) {
+    flash("L'expédition a péri en mer : l'armée disparaît sans avoir combattu.");
+  } else if (!expedition.passes.some((passe) => passe.result.conquered)) {
+    flash(`Le débarquement échoue : l'expédition est anéantie devant ${nomCible}.`);
+  }
+  toutRafraichir();
+  planifierBilans();
+}
+
 function territoireSousLaSouris(evenement) {
   const etat = client.etat;
   const cadre = $("carte").getBoundingClientRect();
@@ -2360,6 +2546,7 @@ $("carte").addEventListener("contextmenu", (evenement) => {
 });
 
 function traiterClicTerritoire(tid, boutonDroit) {
+  if (client.expedition || !$("encart-expedition").hidden) return;
   const etat = client.etat;
   const source = client.selection;
   const situation = tid !== null ? etat.territories_state[tid] : null;
@@ -2389,6 +2576,15 @@ function traiterClicTerritoire(tid, boutonDroit) {
           source, cible: tid,
         });
         return;  // la sélection reste : on peut enchaîner les passes
+      }
+      // Cible ennemie NON voisine : peut-être une expédition maritime
+      // (territoires séparés par une étendue d'eau continue).
+      if (source !== null && !aMoi && tid !== source
+          && !etat.territories[source].neighbors.includes(tid)
+          && etat.territories_state[source].owner === client.monSiege
+          && etat.territories_state[source].regiments >= 2) {
+        proposerExpedition(source, tid);
+        return;
       }
       if (aMoi) {
         client.selection = tid;  // nouvelle source

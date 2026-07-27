@@ -164,6 +164,68 @@ def find_ai_attack(state: GameState, rng=random) -> Optional[Tuple[Territory, Te
     return best_move[1], best_move[2], best_move[3]
 
 
+def find_ai_expedition_target(
+    state: GameState, src: Territory, cell_width: float, cell_height: float,
+) -> Optional[Territory]:
+    """La cible d'expedition maritime d'une IA : l'eligible le plus faible.
+
+    La distance ne compte pas : seul le nombre de regiments departage
+    (le plus vulnerable d'abord, puis l'identifiant le plus bas). Les
+    exclusions specifiques aux IA (territoires soumis, sanctuaires ONU
+    sauf tres grosse armee) refletent celles de ``find_ai_attack``.
+    """
+    best: Optional[Territory] = None
+    for dst in state.territories:
+        if dst.owner == state.current_player:
+            continue
+        if regles.is_submitted_territory(state, dst.id):
+            continue
+        if regles.is_sanctuary_territory(state, dst.id) and src.regiments < 40:
+            continue
+        if not regles.can_launch_expedition(state, src, dst, cell_width, cell_height):
+            continue
+        if best is None or (dst.regiments, dst.id) < (best.regiments, best.id):
+            best = dst
+    return best
+
+
+def iter_ai_expedition_launches(
+    state: GameState, cell_width: float, cell_height: float, rng=random,
+):
+    """Genere les departs d'expedition maritime du tour IA courant.
+
+    Chaque territoire du joueur courant comptant au moins
+    ``EXPEDITION_AI_MIN_REGIMENTS`` regiments, visite dans l'ordre des
+    identifiants, tire une chance sur ``EXPEDITION_AI_LAUNCH_DENOMINATOR``
+    de lancer une expedition vers la cible eligible la plus faible.
+    L'appelant resout la traversee et le debarquement avant de demander le
+    depart suivant : l'etat mute entre deux visites, l'eligibilite est donc
+    evaluee au moment de chaque visite (miroir exact x45 <-> serveur).
+    """
+    if regles.is_colonized_player(state, state.current_player):
+        return
+    current_is_commercial = regles.is_commercial_city_player(state, state.current_player)
+    palace_built = current_is_commercial and "golden_pact_palace" in state.wonder_territories
+    if (
+        current_is_commercial
+        and not palace_built
+        and regles.count_player_territories(state, state.current_player) >= COMMERCIAL_CITY_TERRITORY_LIMIT
+    ):
+        return
+    for territory_id in range(len(state.territories)):
+        if state.phase != "playing":
+            return
+        src = state.territories[territory_id]
+        if src.owner != state.current_player or src.regiments < regles.EXPEDITION_AI_MIN_REGIMENTS:
+            continue
+        if rng.randint(1, regles.EXPEDITION_AI_LAUNCH_DENOMINATOR) != 1:
+            continue
+        dst = find_ai_expedition_target(state, src, cell_width, cell_height)
+        if dst is None:
+            continue
+        yield src, dst
+
+
 def shortest_owned_path(state: GameState, start_id: int, target_id: int, owner: int) -> Optional[List[int]]:
     if start_id == target_id:
         return [start_id]
