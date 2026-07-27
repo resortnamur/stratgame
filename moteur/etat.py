@@ -106,6 +106,10 @@ class GameState:
     bridge_links: Set[LinkKey] = field(default_factory=set)
     fragile_bridge_links: Set[LinkKey] = field(default_factory=set)
     bridge_link_points: Dict[LinkKey, Tuple[Cell, Cell]] = field(default_factory=dict)
+    # Geometrie des expeditions maritimes (plans d'eau connexes, cotes par
+    # mer, distances entre territoires) : recalculee a la demande et videe
+    # des que la grille change. Transient, jamais serialise.
+    expedition_geometry_cache: dict = field(default_factory=dict)
 
     # --- Joueurs et configuration ---
     num_players: int = 0
@@ -239,6 +243,14 @@ class GameState:
         else:
             yield from self.neighbors4(r, c)
 
+    def invalidate_expedition_geometry_cache(self) -> None:
+        """Oublie les plans d'eau et routes maritimes memorises.
+
+        A appeler des que la grille change (editeur de cartes, chargement) :
+        la geometrie des expeditions maritimes en depend entierement.
+        """
+        self.expedition_geometry_cache = {}
+
     def rebuild_cells_from_grid(self) -> None:
         cells_by_tid: Dict[int, List[Cell]] = {terr.id: [] for terr in self.territories}
         for r in range(self.rows):
@@ -248,8 +260,10 @@ class GameState:
                     cells_by_tid[tid].append((r, c))
         for terr in self.territories:
             terr.cells = cells_by_tid.get(terr.id, [])
+        self.invalidate_expedition_geometry_cache()
 
     def recompute_neighbors_from_grid(self) -> None:
+        self.invalidate_expedition_geometry_cache()
         if not self.territories:
             return
         valid_ids = {terr.id for terr in self.territories}

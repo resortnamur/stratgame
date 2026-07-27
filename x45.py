@@ -1926,6 +1926,10 @@ class GraphicalGame:
         return delta
 
 
+    def invalidate_expedition_geometry_cache(self) -> None:
+        """Oublie les plans d'eau et routes maritimes memorises (miroir moteur)."""
+        self.expedition_geometry_cache = {}
+
     def rebuild_cells_from_grid(self) -> None:
         cells_by_tid: dict[int, List[Tuple[int, int]]] = {terr.id: [] for terr in self.territories}
         for r in range(self.rows):
@@ -1935,8 +1939,10 @@ class GraphicalGame:
                     cells_by_tid[tid].append((r, c))
         for terr in self.territories:
             terr.cells = cells_by_tid.get(terr.id, [])
+        self.invalidate_expedition_geometry_cache()
 
     def recompute_neighbors_from_grid(self) -> None:
+        self.invalidate_expedition_geometry_cache()
         if not self.territories:
             return
         valid_ids = {terr.id for terr in self.territories}
