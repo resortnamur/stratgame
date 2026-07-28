@@ -523,6 +523,8 @@ def reset_economy_state(state: GameState) -> None:
     n'existent plus dans GameState)."""
     state.player_money = {player: 0 for player in range(state.num_players)}
     state.precious_mineral_mine_ids = set()
+    state.bonus_5_spawn_turns = {}
+    state.precious_mineral_mine_spawn_turns = {}
     state.fortress_territory_ids = set()
     state.fortress_capture_counts = {}
     state.factory_territory_ids = set()

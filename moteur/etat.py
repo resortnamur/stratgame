@@ -166,6 +166,11 @@ class GameState:
     # --- Economie et structures ---
     player_money: Dict[int, int] = field(default_factory=dict)
     precious_mineral_mine_ids: Set[int] = field(default_factory=set)
+    # Tour d'apparition des ressources tardives (+5 et mines), par
+    # territoire : elles s'epuisent au bout de vingt tours et reapparaissent
+    # ailleurs (cf. regles.rotate_expired_late_resources).
+    bonus_5_spawn_turns: Dict[int, int] = field(default_factory=dict)
+    precious_mineral_mine_spawn_turns: Dict[int, int] = field(default_factory=dict)
     fortress_territory_ids: Set[int] = field(default_factory=set)
     fortress_capture_counts: Dict[int, int] = field(default_factory=dict)
     factory_territory_ids: Set[int] = field(default_factory=set)
@@ -564,6 +569,13 @@ class GameState:
         # Economie et structures
         self.player_money = {int(k): int(v) for k, v in payload.get("player_money", {}).items()}
         self.precious_mineral_mine_ids = {int(x) for x in payload.get("precious_mineral_mine_ids", [])}
+        self.bonus_5_spawn_turns = {
+            int(k): int(v) for k, v in payload.get("bonus_5_spawn_turns", {}).items()
+        }
+        self.precious_mineral_mine_spawn_turns = {
+            int(k): int(v)
+            for k, v in payload.get("precious_mineral_mine_spawn_turns", {}).items()
+        }
         self.fortress_territory_ids = {int(x) for x in payload.get("fortress_territory_ids", [])}
         self.fortress_capture_counts = {int(k): int(v) for k, v in payload.get("fortress_capture_counts", {}).items()}
         legacy_industries = {int(x) for x in payload.get("industry_territory_ids", [])}
@@ -789,6 +801,13 @@ class GameState:
             "onu_player_id": self.onu_player_id,
             "player_money": {str(k): int(v) for k, v in self.player_money.items()},
             "precious_mineral_mine_ids": sorted(int(tid) for tid in self.precious_mineral_mine_ids),
+            "bonus_5_spawn_turns": {
+                str(k): int(v) for k, v in sorted(self.bonus_5_spawn_turns.items())
+            },
+            "precious_mineral_mine_spawn_turns": {
+                str(k): int(v)
+                for k, v in sorted(self.precious_mineral_mine_spawn_turns.items())
+            },
             "fortress_territory_ids": sorted(self.fortress_territory_ids),
             "fortress_capture_counts": {str(k): int(v) for k, v in self.fortress_capture_counts.items()},
             "industry_territory_ids": sorted(self.factory_territory_ids),

@@ -37,6 +37,18 @@ const RELIGIONS = [
 // Elyrion (fondée par la merveille) n'a pas de badge de lieu saint dédié.
 const RELIGION_MERVEILLE = 5;
 
+// Ressources tardives (+5 et mines) : miroir de regles.LATE_RESOURCE_LIFETIME_TURNS.
+// Elles s'épuisent après ce nombre de tours et reparaissent ailleurs.
+const DUREE_RESSOURCE_TARDIVE = 20;
+
+function toursRestantsRessource(etat, tid, sorte) {
+  const compteurs = sorte === "bonus_5"
+    ? etat.bonus_5_spawn_turns : etat.precious_mineral_mine_spawn_turns;
+  const depart = (compteurs || {})[String(tid)];
+  if (depart === undefined) return null;   // compteur pas encore calé
+  return Math.max(0, DUREE_RESSOURCE_TARDIVE - (etat.turn - Number(depart)));
+}
+
 // Les trois vues de carte de x45, dans l'ordre du bouton.
 const VUES_CARTE = ["fortress", "all", "religion"];
 const LIBELLES_VUES = {
@@ -1716,6 +1728,15 @@ function afficherDetailTerritoire() {
     lignes.push(`Bonus de renforts : +${situation.reinforcement_bonus}`);
   }
   const id = client.selection;
+  // Les ressources tardives s'épuisent : on annonce l'échéance.
+  if (situation.reinforcement_bonus === 5) {
+    const restants = toursRestantsRessource(etat, id, "bonus_5");
+    if (restants !== null) lignes.push(`Ressource +5 épuisée dans ${restants} tour(s)`);
+  }
+  if (etat.precious_mineral_mine_ids.includes(id)) {
+    const restants = toursRestantsRessource(etat, id, "mine");
+    if (restants !== null) lignes.push(`Mine épuisée dans ${restants} tour(s)`);
+  }
   const etiquettes = [];
   const capitales = Object.entries(etat.player_capital_ids)
     .filter(([, tid]) => tid === id).map(([j]) => Number(j));

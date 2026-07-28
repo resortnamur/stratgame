@@ -408,6 +408,10 @@ class GraphicalGame:
 
         self.player_money: dict[int, int] = {}
         self.precious_mineral_mine_ids: set[int] = set()
+        # Tour d'apparition des ressources tardives : elles s'epuisent au bout
+        # de vingt tours et reapparaissent ailleurs.
+        self.bonus_5_spawn_turns: dict[int, int] = {}
+        self.precious_mineral_mine_spawn_turns: dict[int, int] = {}
         self.fortress_territory_ids: set[int] = set()
         self.fortress_capture_counts: dict[int, int] = {}
         self.industry_territory_ids: set[int] = set()
@@ -1199,6 +1203,14 @@ class GraphicalGame:
             "onu_player_id": self.onu_player_id,
             "player_money": {str(k): int(v) for k, v in self.player_money.items()},
             "precious_mineral_mine_ids": sorted(int(tid) for tid in self.precious_mineral_mine_ids),
+            "bonus_5_spawn_turns": {
+                str(k): int(v)
+                for k, v in sorted(getattr(self, "bonus_5_spawn_turns", {}).items())
+            },
+            "precious_mineral_mine_spawn_turns": {
+                str(k): int(v)
+                for k, v in sorted(getattr(self, "precious_mineral_mine_spawn_turns", {}).items())
+            },
             "fortress_territory_ids": list(self.fortress_territory_ids),
             "fortress_capture_counts": {str(k): int(v) for k, v in self.fortress_capture_counts.items()},
             "industry_territory_ids": list(self.factory_territory_ids),
@@ -1421,6 +1433,13 @@ class GraphicalGame:
         self.sanctuary_territory_ids = set(int(x) for x in payload.get("sanctuary_territory_ids", []))
         self.player_money = {int(k): int(v) for k, v in payload.get("player_money", {}).items()}
         self.precious_mineral_mine_ids = set(int(x) for x in payload.get("precious_mineral_mine_ids", []))
+        self.bonus_5_spawn_turns = {
+            int(k): int(v) for k, v in payload.get("bonus_5_spawn_turns", {}).items()
+        }
+        self.precious_mineral_mine_spawn_turns = {
+            int(k): int(v)
+            for k, v in payload.get("precious_mineral_mine_spawn_turns", {}).items()
+        }
         has_economic_structures = "fortress_territory_ids" in payload or "industry_territory_ids" in payload
         self.fortress_territory_ids = set(int(x) for x in payload.get("fortress_territory_ids", []))
         self.fortress_capture_counts = {int(k): int(v) for k, v in payload.get("fortress_capture_counts", {}).items()}
@@ -4861,6 +4880,8 @@ class GraphicalGame:
     def reset_economy_state(self) -> None:
         self.player_money = {player: 0 for player in range(self.num_players)}
         self.precious_mineral_mine_ids = set()
+        self.bonus_5_spawn_turns = {}
+        self.precious_mineral_mine_spawn_turns = {}
         self.fortress_territory_ids = set()
         self.fortress_capture_counts = {}
         self.industry_territory_ids = set()
@@ -9674,8 +9695,20 @@ class GraphicalGame:
             lines.append((f"Renfort : +{territory.reinforcement_bonus} par tour", good))
         else:
             lines.append(("Renfort : +1 par tour", muted))
+        # Les ressources tardives s'epuisent : on annonce l'echeance.
+        if territory.reinforcement_bonus == 5:
+            remaining = moteur_regles.get_late_resource_remaining_turns(
+                self, territory.id, "bonus_5",
+            )
+            if remaining is not None:
+                lines.append((f"Ressource +5 epuisee dans {remaining} tour(s)", muted))
         if territory.id in self.precious_mineral_mine_ids:
             lines.append((f"Mine de minerais precieux : +{self.PRECIOUS_MINERAL_MINE_INCOME} ecus par tour", good))
+            remaining = moteur_regles.get_late_resource_remaining_turns(
+                self, territory.id, "mine",
+            )
+            if remaining is not None:
+                lines.append((f"Mine epuisee dans {remaining} tour(s)", muted))
 
         statuses: List[str] = []
         if territory.id in self.golden_territory_ids:

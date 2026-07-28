@@ -130,8 +130,17 @@ AI_MOBILIZATION_DENOMINATOR = 100
 SEDITION_DENOMINATOR = 50000
 SUBMITTED_TERRITORY_INSTABILITY_DENOMINATOR = 40
 SUBMITTED_TERRITORY_INTEGRATION_DELAY_TURNS = 20
-BONUS_5_SPAWN_TURNS = (35, 43, 51, 59)
-PRECIOUS_MINERAL_MINE_SPAWN_TURNS = (37, 45, 53, 61)
+# Ressources tardives : trois de chaque sorte, et pas une de plus. Chacune
+# s'epuise au bout de LATE_RESOURCE_LIFETIME_TURNS tours et reapparait
+# aussitot sur un autre territoire tire au hasard : le compte reste constant,
+# mais aucune position n'est acquise pour toujours.
+BONUS_5_SPAWN_TURNS = (35, 43, 51)
+PRECIOUS_MINERAL_MINE_SPAWN_TURNS = (37, 45, 53)
+LATE_RESOURCE_LIFETIME_TURNS = 20
+# Plafond par sorte. Il vaut aussi pour les parties commencees sous
+# l'ancienne regle (quatre gisements) : le surnombre n'est pas remplace
+# quand il s'epuise, la partie retombe d'elle-meme a trois.
+LATE_RESOURCE_TARGET_COUNT = 3
 BRIDGE_SPAWN_DENOMINATOR = 20
 BRIDGE_COLLAPSE_DENOMINATOR = 30
 BRIDGE_MAX_LENGTH_PX = 76.0
@@ -750,6 +759,38 @@ def enforce_golden_territory_onu_immunity(state: GameState, rng=random) -> None:
         if terr.owner == state.onu_player_id or terr.owner < 0:
             terr.owner = rng.choice(active_players) if active_players else 0
             terr.regiments = max(1, terr.regiments)
+
+
+def sync_late_resource_lifetimes(state: GameState) -> None:
+    """Recale les compteurs de duree de vie des ressources tardives.
+
+    Une ressource presente sans tour d'apparition connu — sauvegarde
+    anterieure a la regle des vingt tours, ou gisement pose par une autre
+    mecanique — repart pour un cycle complet depuis le tour courant. Les
+    compteurs orphelins (ressource disparue entre-temps, par exemple un
+    territoire passe a l'ONU) sont oublies.
+
+    Appele au changement de tour global, pas au chargement : la sauvegarde
+    relue reste ainsi identique a l'octet pres.
+    """
+    bonus_5_ids = {
+        terr.id for terr in state.territories if terr.reinforcement_bonus == 5
+    }
+    state.bonus_5_spawn_turns = {
+        tid: int(turn) for tid, turn in state.bonus_5_spawn_turns.items()
+        if tid in bonus_5_ids
+    }
+    for territory_id in sorted(bonus_5_ids - set(state.bonus_5_spawn_turns)):
+        state.bonus_5_spawn_turns[territory_id] = state.turn
+
+    state.precious_mineral_mine_spawn_turns = {
+        tid: int(turn) for tid, turn in state.precious_mineral_mine_spawn_turns.items()
+        if tid in state.precious_mineral_mine_ids
+    }
+    for territory_id in sorted(
+        set(state.precious_mineral_mine_ids) - set(state.precious_mineral_mine_spawn_turns)
+    ):
+        state.precious_mineral_mine_spawn_turns[territory_id] = state.turn
 
 
 def sanitize_economy_state(state: GameState) -> None:
@@ -3684,41 +3725,180 @@ def resolve_expedition_crossing(
 # Ressources programmees et marche
 # ----------------------------------------------------------------------
 
-def maybe_spawn_scheduled_resources(state: GameState, rng=random) -> List[str]:
-    """Fait apparaitre les ressources prevues au debut d'un nouveau tour global."""
+def count_bonus_5_resources(state: GameState) -> int:
+    return sum(1 for terr in state.territories if terr.reinforcement_bonus == 5)
+
+
+def count_precious_mineral_mines(state: GameState) -> int:
+    return len(state.precious_mineral_mine_ids)
+
+
+def spawn_bonus_5_resource(
+    state: GameState, rng=random, exclude: Optional[int] = None,
+) -> Optional[str]:
+    """Pose une ressource +5 sur un territoire tire au hasard.
+
+    ``exclude`` ecarte un territoire du tirage : le gisement qui vient de
+    s'epuiser ne peut pas se rallumer sur place.
+    """
+    candidates = [
+        terr for terr in state.territories
+        if terr.owner >= 0
+        and not is_onu_player(state, terr.owner)
+        and not is_sanctuary_territory(state, terr.id)
+        and terr.reinforcement_bonus == 1
+        and terr.id != exclude
+    ]
+    if not candidates:
+        return None
+    territory = rng.choice(candidates)
+    territory.reinforcement_bonus = 5
+    state.bonus_5_spawn_turns[territory.id] = state.turn
+    return (
+        f"une ressource +5 apparait sur {territory.name} "
+        f"(5 renforts par tour, plafond militaire porte a 200, "
+        f"epuisee dans {LATE_RESOURCE_LIFETIME_TURNS} tours)"
+    )
+
+
+def spawn_precious_mineral_mine(
+    state: GameState, rng=random, exclude: Optional[int] = None,
+) -> Optional[str]:
+    """Pose une mine de minerais precieux sur un territoire tire au hasard.
+
+    ``exclude`` ecarte un territoire du tirage : la mine qui vient de
+    s'epuiser ne peut pas se reouvrir sur place.
+    """
+    candidates = [
+        terr for terr in state.territories
+        if terr.owner >= 0
+        and not is_onu_player(state, terr.owner)
+        and not is_sanctuary_territory(state, terr.id)
+        and terr.id not in state.precious_mineral_mine_ids
+        and terr.id != exclude
+    ]
+    if not candidates:
+        return None
+    territory = rng.choice(candidates)
+    state.precious_mineral_mine_ids.add(territory.id)
+    state.precious_mineral_mine_spawn_turns[territory.id] = state.turn
+    return (
+        f"une mine de minerais precieux apparait sur {territory.name} "
+        f"({PRECIOUS_MINERAL_MINE_INCOME} ecus par tour, "
+        f"epuisee dans {LATE_RESOURCE_LIFETIME_TURNS} tours)"
+    )
+
+
+def get_territory_name_or_default(state: GameState, territory_id: int) -> str:
+    if 0 <= territory_id < len(state.territories):
+        return state.territories[territory_id].name
+    return "un territoire disparu"
+
+
+def get_late_resource_remaining_turns(
+    state: GameState, territory_id: int, kind: str,
+) -> Optional[int]:
+    """Tours restants avant l'epuisement d'une ressource tardive.
+
+    ``kind`` vaut "bonus_5" ou "mine". Retourne None si le territoire ne
+    porte pas cette ressource, ou si son compteur n'a pas encore ete cale
+    (sauvegarde ancienne : il le sera au prochain changement de tour).
+    """
+    spawn_turns = (
+        state.bonus_5_spawn_turns if kind == "bonus_5"
+        else state.precious_mineral_mine_spawn_turns
+    )
+    spawn_turn = spawn_turns.get(territory_id)
+    if spawn_turn is None:
+        return None
+    return max(0, LATE_RESOURCE_LIFETIME_TURNS - (state.turn - int(spawn_turn)))
+
+
+def _replacement_note(spawn, state: GameState, rng, expired_id: int, remaining: int) -> str:
+    """Fait apparaitre le remplacant d'un gisement epuise, et le raconte.
+
+    Rien n'est remplace si la sorte est deja au plafond : c'est ainsi qu'une
+    partie commencee avec quatre gisements revient a trois.
+    """
+    if remaining >= LATE_RESOURCE_TARGET_COUNT:
+        return (
+            f" et n'est pas remplacee : il en reste {remaining}, "
+            f"le maximum desormais en jeu."
+        )
+    arrival = spawn(state, rng, exclude=expired_id)
+    if arrival:
+        return f" ; {arrival}."
+    return " (aucun territoire libre pour la remplacer)."
+
+
+def rotate_expired_late_resources(state: GameState, rng=random) -> List[str]:
+    """Epuise les ressources tardives arrivees au bout de leurs vingt tours.
+
+    Chaque gisement epuise est aussitot remplace par un equivalent sur un
+    autre territoire tire au hasard : le nombre de ressources en jeu ne
+    change pas, seule leur position tourne.
+    """
+    sync_late_resource_lifetimes(state)
     messages: List[str] = []
 
-    if state.turn in BONUS_5_SPAWN_TURNS:
-        candidates = [
-            terr for terr in state.territories
-            if terr.owner >= 0
-            and not is_onu_player(state, terr.owner)
-            and not is_sanctuary_territory(state, terr.id)
-            and terr.reinforcement_bonus == 1
-        ]
-        if candidates:
-            territory = rng.choice(candidates)
-            territory.reinforcement_bonus = 5
-            messages.append(
-                f"Tour {state.turn}: une ressource +5 apparait sur {territory.name}. "
-                "Elle rapporte 5 renforts par tour et porte le plafond militaire de son controleur a 200."
+    for territory_id, spawn_turn in sorted(state.bonus_5_spawn_turns.items()):
+        if state.turn - spawn_turn < LATE_RESOURCE_LIFETIME_TURNS:
+            continue
+        state.bonus_5_spawn_turns.pop(territory_id, None)
+        name = get_territory_name_or_default(state, territory_id)
+        if 0 <= territory_id < len(state.territories):
+            terr = state.territories[territory_id]
+            if terr.reinforcement_bonus == 5:
+                terr.reinforcement_bonus = 1
+        messages.append(
+            f"Tour {state.turn}: la ressource +5 de {name} est epuisee apres "
+            f"{LATE_RESOURCE_LIFETIME_TURNS} tours"
+            + _replacement_note(
+                spawn_bonus_5_resource, state, rng, territory_id,
+                count_bonus_5_resources(state),
             )
+        )
 
-    if state.turn in PRECIOUS_MINERAL_MINE_SPAWN_TURNS:
-        candidates = [
-            terr for terr in state.territories
-            if terr.owner >= 0
-            and not is_onu_player(state, terr.owner)
-            and not is_sanctuary_territory(state, terr.id)
-            and terr.id not in state.precious_mineral_mine_ids
-        ]
-        if candidates:
-            territory = rng.choice(candidates)
-            state.precious_mineral_mine_ids.add(territory.id)
-            messages.append(
-                f"Tour {state.turn}: une mine de minerais precieux apparait sur {territory.name}. "
-                f"Elle rapporte {PRECIOUS_MINERAL_MINE_INCOME} ecus par tour a son controleur."
+    for territory_id, spawn_turn in sorted(state.precious_mineral_mine_spawn_turns.items()):
+        if state.turn - spawn_turn < LATE_RESOURCE_LIFETIME_TURNS:
+            continue
+        state.precious_mineral_mine_spawn_turns.pop(territory_id, None)
+        name = get_territory_name_or_default(state, territory_id)
+        state.precious_mineral_mine_ids.discard(territory_id)
+        messages.append(
+            f"Tour {state.turn}: la mine de {name} est epuisee apres "
+            f"{LATE_RESOURCE_LIFETIME_TURNS} tours"
+            + _replacement_note(
+                spawn_precious_mineral_mine, state, rng, territory_id,
+                count_precious_mineral_mines(state),
             )
+        )
+
+    return messages
+
+
+def maybe_spawn_scheduled_resources(state: GameState, rng=random) -> List[str]:
+    """Fait apparaitre les ressources prevues au debut d'un nouveau tour global,
+    et fait tourner celles qui arrivent au bout de leur duree de vie."""
+    messages: List[str] = []
+
+    if (
+        state.turn in BONUS_5_SPAWN_TURNS
+        and count_bonus_5_resources(state) < LATE_RESOURCE_TARGET_COUNT
+    ):
+        arrival = spawn_bonus_5_resource(state, rng)
+        if arrival:
+            messages.append(f"Tour {state.turn}: {arrival}.")
+
+    if (
+        state.turn in PRECIOUS_MINERAL_MINE_SPAWN_TURNS
+        and count_precious_mineral_mines(state) < LATE_RESOURCE_TARGET_COUNT
+    ):
+        arrival = spawn_precious_mineral_mine(state, rng)
+        if arrival:
+            messages.append(f"Tour {state.turn}: {arrival}.")
+
+    messages.extend(rotate_expired_late_resources(state, rng))
 
     for message in messages:
         record_major_event(state, message)
