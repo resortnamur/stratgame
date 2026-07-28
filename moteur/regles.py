@@ -3550,6 +3550,23 @@ def can_launch_expedition(
     return get_expedition_route_distance(state, src.id, dst.id, cell_width, cell_height) is not None
 
 
+def has_any_expedition_target(
+    state: GameState,
+    src: Territory,
+    cell_width: float,
+    cell_height: float,
+) -> bool:
+    """Une expedition maritime peut-elle partir de ``src`` vers une cible ?
+
+    Sert aux interfaces : un territoire sans ennemi voisin reste un
+    attaquant valable s'il peut embarquer par-dela les mers.
+    """
+    return any(
+        can_launch_expedition(state, src, dst, cell_width, cell_height)
+        for dst in state.territories
+    )
+
+
 def get_expedition_preview(
     state: GameState,
     src: Territory,

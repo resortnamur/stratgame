@@ -329,8 +329,10 @@ class GraphicalGame:
         self.save_game_rect = pygame.Rect(self.WIDTH - 790, 14, 180, 36)
         self.auto_mode_rect = pygame.Rect(self.WIDTH - 400, 18, 170, 28)
         self.fast_ai_rect = pygame.Rect(self.WIDTH - 400, 54, 170, 28)
-        self.replay_rect = pygame.Rect(self.WIDTH // 2 - 290, self.HEIGHT - 92, 270, 48)
-        self.restart_rect = pygame.Rect(self.WIDTH // 2 + 20, self.HEIGHT - 92, 270, 48)
+        # Fin de partie : trois boutons alignes (replay, recommencer, menu).
+        self.replay_rect = pygame.Rect(self.WIDTH // 2 - 400, self.HEIGHT - 92, 250, 48)
+        self.restart_rect = pygame.Rect(self.WIDTH // 2 - 125, self.HEIGHT - 92, 250, 48)
+        self.game_over_menu_rect = pygame.Rect(self.WIDTH // 2 + 150, self.HEIGHT - 92, 250, 48)
         self.replay_pause_rect = pygame.Rect(self.WIDTH - 410, 18, 170, 54)
         self.replay_return_rect = pygame.Rect(self.WIDTH - 230, 18, 210, 54)
         self.start_create_map_rect = pygame.Rect(self.WIDTH // 2 - 190, self.HEIGHT // 2 - 60, 380, 48)
@@ -497,8 +499,10 @@ class GraphicalGame:
         self.save_game_rect = pygame.Rect(self.WIDTH - 790, 14, 180, 36)
         self.auto_mode_rect = pygame.Rect(self.WIDTH - 400, 18, 170, 28)
         self.fast_ai_rect = pygame.Rect(self.WIDTH - 400, 54, 170, 28)
-        self.replay_rect = pygame.Rect(self.WIDTH // 2 - 290, self.HEIGHT - 92, 270, 48)
-        self.restart_rect = pygame.Rect(self.WIDTH // 2 + 20, self.HEIGHT - 92, 270, 48)
+        # Fin de partie : trois boutons alignes (replay, recommencer, menu).
+        self.replay_rect = pygame.Rect(self.WIDTH // 2 - 400, self.HEIGHT - 92, 250, 48)
+        self.restart_rect = pygame.Rect(self.WIDTH // 2 - 125, self.HEIGHT - 92, 250, 48)
+        self.game_over_menu_rect = pygame.Rect(self.WIDTH // 2 + 150, self.HEIGHT - 92, 250, 48)
         self.replay_pause_rect = pygame.Rect(self.WIDTH - 410, 18, 170, 54)
         self.replay_return_rect = pygame.Rect(self.WIDTH - 230, 18, 210, 54)
         self.start_create_map_rect = pygame.Rect(self.WIDTH // 2 - 190, self.HEIGHT // 2 - 60, 380, 48)
@@ -7872,7 +7876,11 @@ class GraphicalGame:
             if index < len(events) - 1:
                 y += 8
 
-        footer_text = "Appuyez sur Echap pour afficher l'evenement suivant" if self.major_event_modal_queue else "Appuyez sur Echap pour fermer"
+        footer_text = (
+            "Entree ou Echap pour afficher l'evenement suivant"
+            if self.major_event_modal_queue
+            else "Entree ou Echap pour fermer"
+        )
         footer = self.font_small.render(footer_text, True, (180, 190, 200))
         self.screen.blit(footer, footer.get_rect(centerx=panel.centerx, bottom=panel.bottom - 22))
 
@@ -9023,11 +9031,18 @@ class GraphicalGame:
             rect = self.shop_buttons[action]
             base_cost = self.get_shop_action_base_cost(action)
             tax_haven_only = action in ("freeze_territory", "release_sanctuary")
+            # La Forge de Dedale construit et detruit les ponts gratuitement
+            # depuis son territoire : le bouton reste actif sans le prix en caisse.
+            forge_free_bridge = (
+                action in ("build_bridge", "destroy_bridge")
+                and self.player_controls_wonder(self.current_player, "daedalus_forge")
+            )
             affordable = (
                 action in ("corrupt", "alliance", "offensive_alliance", "tax_haven_association", "sell_territory", "give_territory")
                 or (action == "gift_money" and self.get_player_money() > 0)
                 or (tax_haven_only and self.can_player_manipulate_onu(self.current_player) and self.get_player_money() >= self.ONU_MANIPULATION_COST_PER_REGIMENT)
                 or (not tax_haven_only and self.get_player_money() >= base_cost)
+                or forge_free_bridge
             )
             if action == "build_wonder":
                 affordable = (
@@ -9475,7 +9490,9 @@ class GraphicalGame:
                 self.running = False
                 continue
             if self.major_event_modal is not None:
-                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                if event.type == pygame.KEYDOWN and event.key in (
+                    pygame.K_ESCAPE, pygame.K_RETURN, pygame.K_KP_ENTER,
+                ):
                     self.close_major_event_modal()
                 continue
             if event.type == pygame.MOUSEBUTTONDOWN:
@@ -9549,6 +9566,9 @@ class GraphicalGame:
                         return
                     if self.restart_rect.collidepoint(event.pos):
                         self.restart_game()
+                        return
+                    if self.game_over_menu_rect.collidepoint(event.pos):
+                        self.return_to_start_menu()
                         return
                 elif self.phase == "replay" and event.button == 1:
                     if self.replay_pause_rect.collidepoint(event.pos):
@@ -9827,12 +9847,28 @@ class GraphicalGame:
         if terr.regiments < 2:
             self.show_message("Il faut au moins 2 regiments pour attaquer.")
             return
-        if not any(self.territories[n].owner != self.current_player for n in terr.neighbors):
-            self.show_message("Pas d'ennemis adjacents sur ce territoire.")
+        voisin_ennemi = any(
+            self.territories[n].owner != self.current_player for n in terr.neighbors
+        )
+        # Un territoire sans ennemi voisin reste un attaquant valable s'il peut
+        # embarquer : l'expedition maritime vise au-dela des mers.
+        expedition_possible = moteur_regles.has_any_expedition_target(
+            self, terr, self.cell_width, self.cell_height,
+        )
+        if not voisin_ennemi and not expedition_possible:
+            self.show_message(
+                "Aucune cible depuis ce territoire : ni ennemi adjacent, ni expedition maritime possible."
+            )
             return
         self.selected_source = terr.id
         self.selected_target = None
-        self.show_message(f"Source {terr.name} selectionnee. Clic gauche = une attaque, clic droit = attaque jusqu'au bout.")
+        if voisin_ennemi:
+            self.show_message(f"Source {terr.name} selectionnee. Clic gauche = une attaque, clic droit = attaque jusqu'au bout.")
+        else:
+            self.show_message(
+                f"Source {terr.name} selectionnee : aucun ennemi adjacent, mais une expedition maritime est possible. "
+                "Cliquez une cible au-dela des mers."
+            )
 
     def can_move_between(self, src: Territory, dst: Territory) -> bool:
         return moteur_regles.can_move_between(self, src, dst)
@@ -10024,6 +10060,27 @@ class GraphicalGame:
             return
         self.selected_target = terr.id
         self.resolve_attack_until_end(src, terr)
+
+    def return_to_start_menu(self) -> None:
+        """Quitte l'ecran de fin de partie pour revenir au menu principal.
+
+        La partie n'est pas relancee : le menu propose ensuite de creer une
+        carte, d'en editer une, de commencer ou de charger une partie.
+        """
+        self.phase = "start_menu"
+        self.turn_phase = "attack"
+        self.turn_move_count = 0
+        self.victory_winner = None
+        self.victory_summary = {}
+        self.confetti_particles = []
+        self.major_event_modal = None
+        self.major_event_modal_queue = []
+        self.selected_source = None
+        self.selected_target = None
+        self.shop_action = None
+        self.empire_panel_visible = False
+        self.geopolitical_panel_visible = False
+        self.show_message("Retour au menu principal.", 1600)
 
     def restart_game(self) -> None:
         # Recommence sur la carte actuelle. Regenerer ici cassait les cartes personnalisees
@@ -10840,6 +10897,37 @@ class GraphicalGame:
         label = self.font_small.render(self.get_religion_symbol(religion_id), True, (18, 24, 30))
         self.screen.blit(label, label.get_rect(center=(x, y)))
 
+    def draw_religion_view_resources(self, territory: Territory, cx: int, cy: int) -> None:
+        """Les ressources d'un territoire, visibles aussi en vue religion.
+
+        Bonus de renforts (+2 a +5), mine de minerais precieux et territoire
+        dore : ils pesent trop dans les decisions pour disparaitre quand on
+        bascule sur la carte des religions.
+        """
+        badges = []
+        if territory.reinforcement_bonus > 1:
+            badges.append("bonus")
+        if territory.id in self.precious_mineral_mine_ids:
+            badges.append("precious_mine")
+        if territory.id in self.golden_territory_ids:
+            badges.append("golden")
+        if not badges:
+            return
+        spacing = 32
+        start_x = cx - (len(badges) - 1) * (spacing // 2)
+        badge_y = max(self.map_top + 16, cy - 24)
+        for index, kind in enumerate(badges):
+            badge_x = max(16, min(self.WIDTH - 16, start_x + index * spacing))
+            if kind == "bonus":
+                self.draw_bonus_badge(badge_x, badge_y, territory.reinforcement_bonus)
+            elif kind == "precious_mine":
+                self.draw_precious_mineral_mine_badge(badge_x, badge_y)
+            else:
+                pygame.draw.circle(self.screen, (255, 215, 0), (badge_x, badge_y), 12)
+                pygame.draw.circle(self.screen, (120, 90, 0), (badge_x, badge_y), 12, 2)
+                pygame.draw.circle(self.screen, (255, 235, 120), (badge_x, badge_y), 8)
+                pygame.draw.circle(self.screen, (255, 250, 210), (badge_x, badge_y), 4)
+
     def draw_religion_view_symbols(self) -> None:
         for territory in self.territories:
             if not territory.cells:
@@ -10847,6 +10935,7 @@ class GraphicalGame:
             center_row, center_col = self.get_territory_center(territory.id)
             cx = int((center_col + 0.5) * self.cell_width)
             cy = int(self.map_top + (center_row + 0.5) * self.cell_height)
+            self.draw_religion_view_resources(territory, cx, cy)
             label = self.font_small.render(territory.name, True, (245, 247, 250))
             label_rect = label.get_rect(center=(cx, cy + 22))
             label_rect.x = max(3, min(self.WIDTH - label_rect.width - 3, label_rect.x))
@@ -11468,6 +11557,12 @@ class GraphicalGame:
         pygame.draw.rect(self.screen, (236, 240, 241), self.restart_rect, width=2, border_radius=10)
         btn_text = self.font_medium.render("RECOMMENCER", True, (236, 240, 241))
         self.screen.blit(btn_text, btn_text.get_rect(center=self.restart_rect.center))
+
+        menu_color = (58, 78, 68) if self.game_over_menu_rect.collidepoint(pygame.mouse.get_pos()) else (44, 62, 54)
+        pygame.draw.rect(self.screen, menu_color, self.game_over_menu_rect, border_radius=10)
+        pygame.draw.rect(self.screen, (236, 240, 241), self.game_over_menu_rect, width=2, border_radius=10)
+        menu_text = self.font_medium.render("RETOUR AU MENU", True, (236, 240, 241))
+        self.screen.blit(menu_text, menu_text.get_rect(center=self.game_over_menu_rect.center))
 
     def draw_replay_overlay(self) -> None:
         # Les commandes du replay occupent exclusivement le bandeau de menu.

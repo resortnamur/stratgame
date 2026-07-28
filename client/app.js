@@ -1404,6 +1404,12 @@ document.addEventListener("keydown", (evenement) => {
     focus.blur();
   }
   evenement.preventDefault();
+  // L'encart des événements du tour passé se ferme d'abord : Entrée ou Échap
+  // le consomme sans enchaîner sur la fin de phase (comme x45).
+  if (!$("encart-evenements").hidden) {
+    $("bouton-encart").click();
+    return;
+  }
   passerPhaseSuivante();
 });
 
@@ -2318,16 +2324,65 @@ function dessinerEtiquettes(contexte, etat, largeurCellule, hauteurCellule) {
   }
 }
 
+function dessinerRessourcesVueReligion(contexte, etat, tid, cx, cy) {
+  // Miroir de draw_religion_view_resources : bonus de renforts, mine de
+  // minerais précieux et territoire doré restent visibles en vue religion,
+  // ils pèsent trop dans les décisions pour disparaître.
+  const situation = etat.territories_state[tid];
+  const badges = [];
+  if (situation && situation.reinforcement_bonus > 1) badges.push("bonus");
+  if (etat.precious_mineral_mine_ids.includes(tid)) badges.push("precious_mine");
+  if (etat.golden_territory_ids.includes(tid)) badges.push("golden");
+  if (!badges.length) return;
+  const espacement = 32;
+  const debut = cx - (badges.length - 1) * (espacement / 2);
+  const y = Math.max(16, cy - 24);
+  badges.forEach((type, index) => {
+    const x = Math.max(16, Math.min(LARGEUR_CARTE - 16, debut + index * espacement));
+    if (type === "bonus") {
+      const rayon = situation.reinforcement_bonus === 2 ? 9 : 11;
+      contexte.beginPath();
+      contexte.arc(x, y, rayon, 0, 2 * Math.PI);
+      contexte.fillStyle = situation.reinforcement_bonus === 2
+        ? "rgb(241,196,15)" : "rgb(230,126,34)";
+      contexte.fill();
+      contexte.lineWidth = 2;
+      contexte.strokeStyle = "rgb(44,62,80)";
+      contexte.stroke();
+      glypheBadge(contexte, x, y, `+${situation.reinforcement_bonus}`, "rgb(20,20,20)");
+    } else if (type === "precious_mine") {
+      dessinerBadge(contexte, "precious_mine", x, y, etat, tid);
+    } else {
+      for (const [rayon, couleur] of [
+        [12, "rgb(255,215,0)"], [8, "rgb(255,235,120)"], [4, "rgb(255,250,210)"],
+      ]) {
+        contexte.beginPath();
+        contexte.arc(x, y, rayon, 0, 2 * Math.PI);
+        contexte.fillStyle = couleur;
+        contexte.fill();
+        if (rayon === 12) {
+          contexte.lineWidth = 2;
+          contexte.strokeStyle = "rgb(120,90,0)";
+          contexte.stroke();
+        }
+      }
+    }
+  });
+}
+
 function dessinerVueReligion(contexte, etat, largeurCellule, hauteurCellule) {
-  // Miroir de draw_religion_view_symbols : noms des territoires, lieux
-  // saints en grand, et légende des religions fondées.
+  // Miroir de draw_religion_view_symbols : noms des territoires, ressources,
+  // lieux saints en grand, et légende des religions fondées.
   contexte.textBaseline = "middle";
   contexte.font = "12px 'Segoe UI', sans-serif";
   for (const territoire of etat.territories) {
     if (!territoire.cells.length) continue;
     const [ligneCentre, colonneCentre] = centreTerritoire(etat, territoire);
     const cx = (colonneCentre + 0.5) * largeurCellule;
-    const cy = (ligneCentre + 0.5) * hauteurCellule + 22;
+    const centreY = (ligneCentre + 0.5) * hauteurCellule;
+    dessinerRessourcesVueReligion(contexte, etat, territoire.id, cx, centreY);
+    contexte.font = "12px 'Segoe UI', sans-serif";
+    const cy = centreY + 22;
     const largeurTexte = contexte.measureText(territoire.name).width;
     const x = Math.max(3, Math.min(LARGEUR_CARTE - largeurTexte - 3, cx - largeurTexte / 2));
     const y = Math.max(10, Math.min(HAUTEUR_CARTE - 10, cy));

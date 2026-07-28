@@ -133,6 +133,20 @@ class TestGeometrie(unittest.TestCase):
         a.neighbors = sorted(set(a.neighbors) | {1})
         self.assertFalse(regles.can_launch_expedition(state, a, b, CELL_W, CELL_H))
 
+    def test_a_une_cible_dembarquement(self):
+        """La requete des interfaces : « ce territoire peut-il embarquer ? »"""
+        state = build_state()
+        a, b, c = state.territories
+        self.assertTrue(regles.has_any_expedition_target(state, a, CELL_W, CELL_H))
+        # C ne partage sa mer qu'avec B, qui appartient au meme joueur : rien
+        # a viser depuis C.
+        state.current_player = 1
+        self.assertFalse(regles.has_any_expedition_target(state, c, CELL_W, CELL_H))
+        # Une garnison de 1 ne peut pas embarquer, donc aucune cible.
+        state.current_player = 0
+        a.regiments = 1
+        self.assertFalse(regles.has_any_expedition_target(state, a, CELL_W, CELL_H))
+
 
 class TestTableDeRisques(unittest.TestCase):
     def test_paliers(self):
