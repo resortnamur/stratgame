@@ -9,7 +9,9 @@ verifier chaque regle sans dependre des sauvegardes :
 - l'arrondi des pertes est au plus proche, avec 1 regiment perdu minimum ;
 - le debarquement plafonne l'attaquant a 2 des et se bat jusqu'au dernier ;
 - l'IA lance une expedition (>= 20 regiments, 1 chance sur 10) vers la
-  cible eligible la plus faible.
+  cible eligible la plus faible ;
+- aucune IA ne vise au-dela de 300 px (les humains, eux, restent libres) ;
+- les Cites commercantes n'embarquent qu'a partir du tour 50.
 
 Lancement, depuis le dossier "Jeux Strat" :
     python -m unittest discover -s tests -v
@@ -320,7 +322,10 @@ class TestExpeditionIA(unittest.TestCase):
         state.territories[2].regiments = 2
         src = state.territories[0]
         cible = ia.find_ai_expedition_target(state, src, CELL_W, CELL_H)
-        self.assertEqual(cible.id, 2, "la cible la plus faible est preferee, quelle que soit la distance")
+        self.assertEqual(
+            cible.id, 2,
+            "la cible la plus faible est preferee, quelle que soit la distance (sous le plafond)",
+        )
 
     def test_tour_ia_complet_avec_expedition(self):
         state = self.build_ai_state()
@@ -344,6 +349,101 @@ class TestExpeditionIA(unittest.TestCase):
         self.assertIsNone(rapport.winner if state.phase == "playing" else None)
         # La flotte a debarque : le port d'attache garde 1 regiment.
         self.assertEqual(state.territories[0].regiments >= 1, True)
+
+
+class TestPlafondDistanceIA(unittest.TestCase):
+    """Aucune IA ne tente une traversee de plus de 300 px."""
+
+    def build_ai_state(self, regiments=(25, 3, 5)):
+        state = build_state(regiments=regiments)
+        state.base_ai_players = {0}
+        state.ai_player_count = 1
+        return state
+
+    def relier_les_deux_mers(self, state):
+        """Perce le mur de B (ligne 6) : A borde alors aussi la mer Est."""
+        for col in range(10, 15):
+            state.grid_territory[6][col] = -1
+        state.territories[1].cells = [
+            cell for cell in state.territories[1].cells if cell[0] != 6
+        ]
+        state.expedition_geometry_cache = {}
+
+    def test_cible_trop_lointaine_ecartee(self):
+        state = self.build_ai_state()
+        self.relier_les_deux_mers(state)
+        src = state.territories[0]
+        # A -> C : cotes col 4 et col 25, soit 210 px avec des cellules de
+        # 10 px. En elargissant les cellules a 20 px, la meme route depasse
+        # les 300 px : la cible sort du champ des IA.
+        self.assertAlmostEqual(
+            regles.get_expedition_route_distance(state, 0, 2, 20.0, CELL_H), 420.0, places=6,
+        )
+        state.territories[1].regiments = 4
+        state.territories[2].regiments = 2   # la plus faible, mais trop loin
+        cible = ia.find_ai_expedition_target(state, src, 20.0, CELL_H)
+        self.assertEqual(cible.id, 1, "l'IA se rabat sur la cible a portee")
+
+        # Le joueur humain, lui, garde le droit d'embarquer aussi loin.
+        self.assertTrue(regles.can_launch_expedition(
+            state, src, state.territories[2], 20.0, CELL_H,
+        ))
+
+    def test_aucune_cible_a_portee(self):
+        state = self.build_ai_state()
+        state.expedition_geometry_cache = {}
+        src = state.territories[0]
+        # Cellules de 60 px : A -> B fait 360 px, hors de portee des IA.
+        self.assertAlmostEqual(
+            regles.get_expedition_route_distance(state, 0, 1, 60.0, CELL_H), 360.0, places=6,
+        )
+        self.assertIsNone(ia.find_ai_expedition_target(state, src, 60.0, CELL_H))
+        departs = list(ia.iter_ai_expedition_launches(state, 60.0, CELL_H, RngFixe([1])))
+        self.assertEqual(departs, [], "le tirage reussi ne suffit pas sans cible a portee")
+
+
+class TestCiteCommercanteAvantTour50(unittest.TestCase):
+    """Les Cites commercantes n'embarquent pas avant le tour 50."""
+
+    def build_cc_state(self, turn):
+        state = build_state(regiments=(25, 3, 5))
+        state.base_ai_players = {0}
+        state.ai_player_count = 1
+        state.commercial_city_players = {0}
+        state.commercial_city_capital_ids = {0: 0}
+        state.turn = turn
+        return state
+
+    def test_avant_le_tour_50_aucune_expedition(self):
+        state = self.build_cc_state(turn=49)
+        src, cible = state.territories[0], state.territories[1]
+        self.assertFalse(regles.can_player_launch_expeditions(state, 0))
+        self.assertFalse(regles.can_launch_expedition(state, src, cible, CELL_W, CELL_H))
+        rng = RngFixe([])   # aucun tirage ne doit avoir lieu
+        self.assertEqual(list(ia.iter_ai_expedition_launches(state, CELL_W, CELL_H, rng)), [])
+        outcome = actions.apply_action(
+            state, {"type": "expedition", "source": 0, "cible": 1},
+            CELL_W, CELL_H, random.Random(1),
+        )
+        self.assertFalse(outcome.ok)
+        self.assertEqual(outcome.code, "expedition_invalide")
+
+    def test_a_partir_du_tour_50_les_expeditions_reprennent(self):
+        state = self.build_cc_state(turn=50)
+        src, cible = state.territories[0], state.territories[1]
+        self.assertTrue(regles.can_player_launch_expeditions(state, 0))
+        self.assertTrue(regles.can_launch_expedition(state, src, cible, CELL_W, CELL_H))
+        departs = list(ia.iter_ai_expedition_launches(state, CELL_W, CELL_H, RngFixe([1])))
+        self.assertEqual([(s.id, d.id) for s, d in departs], [(0, 1)])
+
+    def test_les_autres_ia_embarquent_des_le_debut(self):
+        """Le verrou ne vise que les CC : une IA ordinaire n'attend pas."""
+        state = self.build_cc_state(turn=1)
+        state.commercial_city_players = set()
+        state.commercial_city_capital_ids = {}
+        self.assertTrue(regles.can_player_launch_expeditions(state, 0))
+        departs = list(ia.iter_ai_expedition_launches(state, CELL_W, CELL_H, RngFixe([1])))
+        self.assertEqual([(s.id, d.id) for s, d in departs], [(0, 1)])
 
 
 if __name__ == "__main__":

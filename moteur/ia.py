@@ -169,10 +169,12 @@ def find_ai_expedition_target(
 ) -> Optional[Territory]:
     """La cible d'expedition maritime d'une IA : l'eligible le plus faible.
 
-    La distance ne compte pas : seul le nombre de regiments departage
-    (le plus vulnerable d'abord, puis l'identifiant le plus bas). Les
-    exclusions specifiques aux IA (territoires soumis, sanctuaires ONU
-    sauf tres grosse armee) refletent celles de ``find_ai_attack``.
+    Les traversees de plus de ``EXPEDITION_AI_MAX_DISTANCE_PX`` pixels sont
+    ecartees : au-dela, les debarquements des IA echouaient trop souvent.
+    Parmi les cibles restantes la distance ne departage pas, seul le nombre
+    de regiments compte (le plus vulnerable d'abord, puis l'identifiant le
+    plus bas). Les exclusions specifiques aux IA (territoires soumis,
+    sanctuaires ONU sauf tres grosse armee) refletent ``find_ai_attack``.
     """
     best: Optional[Territory] = None
     for dst in state.territories:
@@ -183,6 +185,11 @@ def find_ai_expedition_target(
         if regles.is_sanctuary_territory(state, dst.id) and src.regiments < 40:
             continue
         if not regles.can_launch_expedition(state, src, dst, cell_width, cell_height):
+            continue
+        distance = regles.get_expedition_route_distance(
+            state, src.id, dst.id, cell_width, cell_height,
+        )
+        if distance is None or distance > regles.EXPEDITION_AI_MAX_DISTANCE_PX:
             continue
         if best is None or (dst.regiments, dst.id) < (best.regiments, best.id):
             best = dst
@@ -201,8 +208,14 @@ def iter_ai_expedition_launches(
     L'appelant resout la traversee et le debarquement avant de demander le
     depart suivant : l'etat mute entre deux visites, l'eligibilite est donc
     evaluee au moment de chaque visite (miroir exact x45 <-> serveur).
+
+    Une Cite commercante ne prend la mer qu'a partir du tour
+    ``COMMERCIAL_CITY_EXPEDITION_FIRST_TURN``, et aucune IA ne tente une
+    traversee de plus de ``EXPEDITION_AI_MAX_DISTANCE_PX`` pixels.
     """
     if regles.is_colonized_player(state, state.current_player):
+        return
+    if not regles.can_player_launch_expeditions(state, state.current_player):
         return
     current_is_commercial = regles.is_commercial_city_player(state, state.current_player)
     palace_built = current_is_commercial and "golden_pact_palace" in state.wonder_territories

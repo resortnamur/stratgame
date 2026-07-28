@@ -2,6 +2,10 @@
 territoire au hasard par palier, et merveilles culturelles (Rempart d'Ivoire,
 Fontaine de Cresus, Capitole d'Aurelia, Forge de Dedale).
 
+Le Capitole d'Aurelia donne le statut de nation sur-le-champ des que la
+capitale s'y trouve — capitale deplacee sur la merveille ou merveille batie
+sur la capitale — sans delai de conservation ni aucune autre condition.
+
 Ces tests chargent une sauvegarde reelle puis manipulent l'etat directement.
 
 Lancement, depuis le dossier "Jeux Strat" :
@@ -18,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from moteur import GameState
 from moteur import achats
+from moteur import actions
 from moteur import regles
 
 RACINE = Path(__file__).resolve().parents[1]
@@ -208,6 +213,103 @@ class TestCapitoleAurelia(unittest.TestCase):
         )
         state.wonder_territories["aurelia_capitol"] = autre
         self.assertFalse(regles.player_qualifies_for_nation_via_capitol(state, joueur))
+
+    def trouver_joueur_avec_capitale(self):
+        """Le premier etat sauvegarde ou un joueur non-nation a une capitale."""
+        for etat in iter_etats():
+            candidat = next(
+                (
+                    j for j in joueurs_actifs(etat)
+                    if j not in etat.nation_players
+                    and regles.get_active_regular_capital_id_for_player(etat, j) is not None
+                ),
+                None,
+            )
+            if candidat is not None:
+                return etat, candidat
+        self.skipTest("Aucun joueur non-nation avec capitale reguliere active.")
+
+    def test_statut_de_nation_immediat_sans_delai(self):
+        """Le Capitole dispense du delai de conservation de dix tours."""
+        state, joueur = self.trouver_joueur_avec_capitale()
+        capitale = regles.get_active_regular_capital_id_for_player(state, joueur)
+        state.wonder_territories["aurelia_capitol"] = capitale
+        state.nation_qualification_start_turns.pop(joueur, None)
+
+        message = regles.update_nation_qualification_progress(state, joueur)
+        self.assertIn(joueur, state.nation_players, "nation acquise des le premier controle")
+        self.assertIn("devient une nation", message or "")
+        self.assertNotIn(
+            joueur, state.nation_qualification_start_turns,
+            "aucun compte a rebours ne doit etre demarre",
+        )
+
+    def test_sans_capitole_le_delai_s_applique_toujours(self):
+        """Temoin : sans la merveille, la qualification demarre un decompte."""
+        state = joueur = None
+        for etat in iter_etats():
+            etat.wonder_territories.pop("aurelia_capitol", None)
+            candidat = next(
+                (
+                    j for j in joueurs_actifs(etat)
+                    if j not in etat.nation_players
+                    and regles.find_player_nation_component(etat, j) is not None
+                ),
+                None,
+            )
+            if candidat is not None:
+                state, joueur = etat, candidat
+                break
+        if joueur is None:
+            self.skipTest("Aucun joueur non-nation ne remplit les criteres classiques.")
+        state.nation_qualification_start_turns.pop(joueur, None)
+
+        regles.update_nation_qualification_progress(state, joueur)
+        self.assertNotIn(joueur, state.nation_players, "le delai doit encore courir")
+        self.assertIn(joueur, state.nation_qualification_start_turns)
+
+    def test_achat_de_capitale_sur_le_capitole_donne_la_nation_aussitot(self):
+        """Chemin du serveur web : l'achat « capitale » sacre la nation seance tenante."""
+        state, joueur = self.trouver_joueur_avec_capitale()
+        capitale = regles.get_active_regular_capital_id_for_player(state, joueur)
+        cible = next(
+            (
+                t.id for t in state.territories
+                if t.owner == joueur and t.id != capitale
+                and not regles.is_sanctuary_territory(state, t.id)
+            ),
+            None,
+        )
+        if cible is None:
+            self.skipTest("Ce joueur n'a qu'un seul territoire.")
+        state.wonder_territories["aurelia_capitol"] = cible
+        state.current_player = joueur
+        state.phase = "shopping"
+        state.player_money[joueur] = regles.CHANGE_CAPITAL_COST
+
+        outcome = actions.apply_action(
+            state, {"type": "acheter", "achat": "capitale", "territoire": cible},
+            1200 / state.cols, 620 / state.rows, random.Random(1),
+        )
+        self.assertTrue(outcome.ok, outcome.message)
+        self.assertIn(joueur, state.nation_players)
+        self.assertIn("devient une nation", outcome.message)
+
+    def test_merveille_batie_sur_la_capitale_declenche_le_statut(self):
+        """Batir le Capitole sur sa capitale suffit, sans autre condition."""
+        state, joueur = self.trouver_joueur_avec_capitale()
+        capitale = regles.get_active_regular_capital_id_for_player(state, joueur)
+        state.wonder_territories.pop("aurelia_capitol", None)
+        state.current_player = joueur
+        state.phase = "shopping"
+
+        regles.refresh_nation_states(state, trigger_player=joueur)
+        etait_nation = joueur in state.nation_players
+        state.wonder_territories["aurelia_capitol"] = capitale
+        regles.refresh_nation_states(state, trigger_player=joueur)
+        self.assertIn(joueur, state.nation_players)
+        if not etait_nation:
+            self.assertNotIn(joueur, state.nation_qualification_start_turns)
 
 
 class TestForgeDedale(unittest.TestCase):

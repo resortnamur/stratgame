@@ -110,7 +110,7 @@ const EFFETS_MERVEILLES = {
   golden_pact_palace: "Fait de son contrôleur l'unique allié de la Cité commerçante",
   ivory_rampart: "Protège ce territoire de toute attaque des joueurs IA",
   croesus_fountain: "Multiplie par 5 l'argent produit par ce territoire",
-  aurelia_capitol: "Ouvre le statut de nation si la capitale de son propriétaire s'y trouve",
+  aurelia_capitol: "Donne aussitôt le statut de nation si la capitale de son propriétaire s'y trouve, sans aucune autre condition",
   daedalus_forge: "Ponts construits ou détruits gratuitement depuis ce territoire",
 };
 

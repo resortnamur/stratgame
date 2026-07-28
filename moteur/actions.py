@@ -544,6 +544,23 @@ def apply_action(
     return _refuse("action_inconnue")
 
 
+def _with_nation_refresh(state: GameState, result: achats.AchatResult) -> achats.AchatResult:
+    """Reevalue les nations juste apres un achat, comme le fait x45.
+
+    x45 appelle ``refresh_nation_states`` apres chaque action de boutique.
+    Ici, seuls les deux achats qui peuvent faire basculer le statut de nation
+    dans l'instant le declenchent : batir le Capitole d'Aurelia sur sa
+    capitale, ou deplacer sa capitale sur le Capitole. Les messages produits
+    (« devient une nation ») sont ajoutes a celui de la boutique.
+    """
+    if not result.ok:
+        return result
+    notes = regles.refresh_nation_states(state, trigger_player=state.current_player)
+    if notes:
+        result.message = " ".join([result.message, *notes]).strip()
+    return result
+
+
 def _apply_purchase(
     state: GameState,
     action: Dict[str, Any],
@@ -608,9 +625,11 @@ def _apply_purchase(
     if achat == "detruire_universite":
         return outcome(achats.detruire_universite(state, terr))
     if achat == "merveille":
-        return outcome(achats.construire_merveille(state, terr, action.get("merveille")))
+        return outcome(_with_nation_refresh(
+            state, achats.construire_merveille(state, terr, action.get("merveille")),
+        ))
     if achat == "capitale":
-        return outcome(achats.changer_capitale(state, terr))
+        return outcome(_with_nation_refresh(state, achats.changer_capitale(state, terr)))
     if achat == "corruption":
         return outcome(achats.corrompre_territoire(state, terr))
     if achat == "revolte":

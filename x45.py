@@ -224,7 +224,7 @@ class GraphicalGame:
         },
         "aurelia_capitol": {
             "name": "Capitole d'Aurelia",
-            "effect": "Ouvre le statut de nation si la capitale de son proprietaire s'y trouve",
+            "effect": "Donne aussitot le statut de nation si la capitale de son proprietaire s'y trouve, sans aucune autre condition",
             "kind": "culture",
         },
         "daedalus_forge": {
@@ -6154,6 +6154,10 @@ class GraphicalGame:
         if component is None:
             self.reset_nation_qualification_progress(player)
             return None
+        if self.player_qualifies_for_nation_via_capitol(player):
+            # Capitole d'Aurelia : statut de nation acquis sur-le-champ, sans
+            # delai de conservation ni aucune autre condition.
+            return self.form_nation_for_player(player)
         if not hasattr(self, "nation_qualification_start_turns"):
             self.nation_qualification_start_turns = {}
         if player not in self.nation_qualification_start_turns:
@@ -8353,6 +8357,13 @@ class GraphicalGame:
         ]
         complete = all(ok for ok, _label in requirements)
         lines = [f"Bloc candidat: {len(candidate)} territoire(s) contigu(s)"]
+        if "aurelia_capitol" in getattr(self, "wonder_territories", {}):
+            # La voie du Capitole court-circuite tout le reste du bloc.
+            lines.insert(0, (
+                "Capitole d'Aurelia: capitale posee sur la merveille, nation acquise sans autre condition"
+                if self.player_qualifies_for_nation_via_capitol(player)
+                else "Voie du Capitole d'Aurelia: y poser sa capitale suffit, sans aucune autre condition"
+            ))
         if complete:
             remaining = self.get_nation_qualification_remaining_turns(player)
             if player in getattr(self, "nation_qualification_start_turns", {}):

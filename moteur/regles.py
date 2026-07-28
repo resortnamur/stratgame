@@ -81,7 +81,7 @@ WONDER_DEFINITIONS = {
     },
     "aurelia_capitol": {
         "name": "Capitole d'Aurelia",
-        "effect": "Ouvre le statut de nation si la capitale de son proprietaire s'y trouve",
+        "effect": "Donne aussitot le statut de nation si la capitale de son proprietaire s'y trouve, sans aucune autre condition",
         "kind": "culture",
     },
     "daedalus_forge": {
@@ -119,6 +119,11 @@ AI_NATION_SUBMISSION_DENOMINATOR = 100
 NATION_MIN_TERRITORIES = 10
 NATION_QUALIFICATION_DELAY_TURNS = 10
 NATION_CAPITAL_LOSS_DELAY_TURNS = 10
+# Une masse de terre de moins de dix territoires est une ile isolee : une IA
+# qui y garde sa capitale ne pourra jamais former son bloc national, elle
+# cherche donc a demenager sur un continent des qu'elle y possede un
+# territoire (meme seuil que NATION_MIN_TERRITORIES : c'est la meme raison).
+AI_MAINLAND_MIN_TERRITORIES = 10
 ALLIANCE_DURATION_TURNS = 10
 AI_NATION_ALLIANCE_DENOMINATOR = 20
 AI_MOBILIZATION_DENOMINATOR = 100
@@ -145,6 +150,12 @@ EXPEDITION_RISK_TIERS = (
 EXPEDITION_MAX_ATTACK_DICE = 2
 EXPEDITION_AI_MIN_REGIMENTS = 20
 EXPEDITION_AI_LAUNCH_DENOMINATOR = 10
+# Au-dela de 300 px (le deuxieme palier de risque), les debarquements des IA
+# echouaient trop souvent : elles s'interdisent les traversees plus longues.
+EXPEDITION_AI_MAX_DISTANCE_PX = 300.0
+# Les Cites commercantes n'embarquent pas avant ce tour : leurs expeditions
+# de debut de partie etaient trop punitives pour les joueurs humains.
+COMMERCIAL_CITY_EXPEDITION_FIRST_TURN = 50
 RELIGION_SPREAD_INTERVAL_BY_TEMPLE_COUNT = {
     1: 30,
     2: 25,
@@ -1848,7 +1859,13 @@ def component_has_active_regular_capital(state: GameState, player: int, territor
 
 def player_qualifies_for_nation_via_capitol(state: GameState, player: int) -> bool:
     """Capitole d'Aurelia : la capitale posee sur la merveille ouvre a elle
-    seule le statut de nation, sans exigence de taille ni de structures."""
+    seule le statut de nation, sans exigence de taille ni de structures.
+
+    Le statut est acquis immediatement (cf.
+    ``update_nation_qualification_progress``) : ni delai de conservation, ni
+    bloc d'un seul tenant, ni amenagements. Que la capitale ait ete deplacee
+    sur la merveille ou la merveille batie sur la capitale ne change rien.
+    """
     capitol_id = state.wonder_territories.get("aurelia_capitol")
     if capitol_id is None or not (0 <= capitol_id < len(state.territories)):
         return False
@@ -1934,6 +1951,11 @@ def update_nation_qualification_progress(state: GameState, player: int) -> Optio
     if component is None:
         reset_nation_qualification_progress(state, player)
         return None
+    if player_qualifies_for_nation_via_capitol(state, player):
+        # Capitole d'Aurelia : le statut de nation est acquis des que la
+        # capitale est posee sur la merveille (ou la merveille sur la
+        # capitale), sans delai de conservation ni aucune autre condition.
+        return form_nation_for_player(state, player)
     if player not in state.nation_qualification_start_turns:
         state.nation_qualification_start_turns[player] = state.turn
         return (
@@ -3482,6 +3504,18 @@ def get_expedition_risk_faces(distance_px: float) -> Tuple[int, ...]:
     return EXPEDITION_RISK_TIERS[-1][1]
 
 
+def can_player_launch_expeditions(state: GameState, player: int) -> bool:
+    """Ce joueur a-t-il le droit d'embarquer en ce moment de la partie ?
+
+    Les Cites commercantes restent a quai jusqu'au tour
+    ``COMMERCIAL_CITY_EXPEDITION_FIRST_TURN`` : leurs debarquements de debut
+    de partie faisaient trop mal aux joueurs humains.
+    """
+    if is_commercial_city_player(state, player):
+        return state.turn >= COMMERCIAL_CITY_EXPEDITION_FIRST_TURN
+    return True
+
+
 def can_launch_expedition(
     state: GameState,
     src: Territory,
@@ -3493,9 +3527,13 @@ def can_launch_expedition(
 
     Memes conditions qu'une attaque classique, sauf l'adjacence : la cible
     ne doit PAS etre voisine (les voisins s'attaquent normalement) et les
-    deux territoires doivent border la meme etendue d'eau continue.
+    deux territoires doivent border la meme etendue d'eau continue. Les
+    Cites commercantes n'embarquent pas avant le tour
+    ``COMMERCIAL_CITY_EXPEDITION_FIRST_TURN``.
     """
     if is_colonized_player(state, state.current_player):
+        return False
+    if not can_player_launch_expeditions(state, state.current_player):
         return False
     if (
         src.owner != state.current_player
@@ -4354,6 +4392,82 @@ def get_missing_player_industrial_types(state: GameState, player: int, rng=rando
     return missing
 
 
+def get_connected_landmass_ids(state: GameState, territory_id: int) -> List[int]:
+    """Les territoires atteignables depuis celui-ci par voie terrestre.
+
+    Suit l'adjacence des territoires — ponts et liaisons terrestres compris,
+    exactement comme les blocs nationaux de ``get_owned_components`` — sans
+    tenir compte des proprietaires : c'est la masse de terre accessible, pas
+    l'empire. Une ile sans pont ne renvoie qu'elle-meme.
+    """
+    if not (0 <= territory_id < len(state.territories)):
+        return []
+    seen = {territory_id}
+    stack = [territory_id]
+    while stack:
+        current = stack.pop()
+        for neighbor_id in state.territories[current].neighbors:
+            if neighbor_id not in seen and 0 <= neighbor_id < len(state.territories):
+                seen.add(neighbor_id)
+                stack.append(neighbor_id)
+    return sorted(seen)
+
+
+def is_isolated_island_territory(state: GameState, territory_id: int) -> bool:
+    """Ce territoire est-il sur une ile trop petite pour porter une nation ?
+
+    Moins de ``AI_MAINLAND_MIN_TERRITORIES`` territoires accessibles : meme
+    en conquerant toute l'ile, le bloc d'un seul tenant exige par le statut
+    de nation ne pourra jamais y etre atteint.
+    """
+    landmass = get_connected_landmass_ids(state, territory_id)
+    return bool(landmass) and len(landmass) < AI_MAINLAND_MIN_TERRITORIES
+
+
+def get_ai_mainland_capital_candidates(state: GameState, player: int) -> List[Territory]:
+    """Les territoires du joueur situes sur une masse de terre assez grande."""
+    return [
+        terr for terr in state.territories
+        if terr.owner == player
+        and not is_sanctuary_territory(state, terr.id)
+        and not is_isolated_island_territory(state, terr.id)
+    ]
+
+
+def choose_ai_mainland_capital_target(
+    state: GameState, player: int, rng=random,
+) -> Optional[Territory]:
+    """Ou une IA insulaire rapatrie sa capitale : meme choix que d'habitude
+    (revenu, voisins, garnison), restreint au continent."""
+    candidates = get_ai_mainland_capital_candidates(state, player)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda terr: (
+        calculate_territory_income(state, terr), len(terr.neighbors), terr.regiments, rng.random(),
+    ))
+
+
+def ai_should_move_capital_to_mainland(state: GameState, player: int) -> bool:
+    """Une IA doit-elle quitter son ile pour esperer devenir une nation ?
+
+    Sa capitale est posee sur une ile isolee (cf.
+    ``is_isolated_island_territory``) : elle demenage sur le continent des
+    qu'elle y possede un territoire. Les nations deja formees ne bougent
+    pas — notamment celles qui tiennent leur statut du Capitole d'Aurelia,
+    qu'un demenagement leur ferait perdre.
+    """
+    if not is_ai_player(state, player) or is_onu_player(state, player):
+        return False
+    if is_potential_commercial_city_player(state, player):
+        return False
+    if player in state.nation_players:
+        return False
+    capital_id = get_active_regular_capital_id_for_player(state, player)
+    if capital_id is None or not is_isolated_island_territory(state, capital_id):
+        return False
+    return bool(get_ai_mainland_capital_candidates(state, player))
+
+
 def ai_needs_new_capital_as_nation(state: GameState, player: int) -> bool:
     if not is_ai_player(state, player):
         return False
@@ -4699,6 +4813,20 @@ def execute_ai_economic_actions(state: GameState, player: int, rng=random) -> in
             state.player_money[player] -= CHANGE_CAPITAL_COST
             change_ai_capital_without_ui(state, player, target.id)
             message = f"Tour {state.turn}: J{player + 1}, nation sans capitale controlee, deplace sa capitale a {target.name}."
+            record_major_event(state, message)
+            actions += 1
+        if actions > 0:
+            refresh_nation_states(state, trigger_player=player)
+            return actions
+    elif ai_should_move_capital_to_mainland(state, player):
+        target = choose_ai_mainland_capital_target(state, player, rng)
+        if target is not None and state.player_money[player] >= CHANGE_CAPITAL_COST:
+            state.player_money[player] -= CHANGE_CAPITAL_COST
+            change_ai_capital_without_ui(state, player, target.id)
+            message = (
+                f"Tour {state.turn}: J{player + 1}, capitale prisonniere d'une ile isolee, "
+                f"la deplace sur le continent a {target.name}."
+            )
             record_major_event(state, message)
             actions += 1
         if actions > 0:
