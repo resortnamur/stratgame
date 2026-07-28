@@ -562,6 +562,33 @@ class SessionPartie:
                 return {"possible": False, "code": "expedition_invalide"}
             return {"possible": True, **apercu}
 
+    def apercu_transport(self, source: Any, cible: Any, regiments: Any = 1) -> Dict[str, Any]:
+        """L'apercu d'un transport maritime de fin de tour.
+
+        Lecture seule : distance, nombre de regiments retenu, maximum
+        embarquable et chances du de a 64 faces, pour l'encart
+        « Entreprendre un voyage a travers les oceans ? ». ``possible=False``
+        avec un code si le transport est impossible (territoires invalides,
+        destination qui n'est pas a moi, deja reliee par la terre, aucune
+        etendue d'eau commune, quota de deplacements epuise...).
+        """
+        with self.lock:
+            state = self.state
+            try:
+                source = int(source)
+                cible = int(cible)
+            except (TypeError, ValueError):
+                return {"possible": False, "code": "territoire_invalide"}
+            if not (0 <= source < len(state.territories) and 0 <= cible < len(state.territories)):
+                return {"possible": False, "code": "territoire_invalide"}
+            apercu = regles.get_sea_transport_preview(
+                state, state.territories[source], state.territories[cible], regiments,
+                self.cell_width, self.cell_height,
+            )
+            if apercu is None:
+                return {"possible": False, "code": "transport_invalide"}
+            return {"possible": True, **apercu}
+
     def consommer_modale_evenements(self, joueur: Optional[int]) -> Tuple[bool, str]:
         """Retire l'encart d'evenements courant (bouton « Compris » du client).
 

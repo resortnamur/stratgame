@@ -180,6 +180,8 @@ const LIBELLES_REFUS = {
   attaque_invalide: "Attaque impossible (voisinage, alliance ou garnison).",
   expedition_invalide: "Expédition impossible : pas d'étendue d'eau continue " +
     "entre les deux territoires (ou alliance, ou garnison insuffisante).",
+  transport_invalide: "Transport impossible : les deux territoires doivent être à toi, " +
+    "séparés par une même étendue d'eau, avec une garnison et des déplacements disponibles.",
   action_inconnue: "Action inconnue.",
   limite: "Limite de déplacements atteinte.",
   proprietaire: "Les deux territoires doivent être à toi.",
@@ -632,7 +634,9 @@ function traiterMessage(message) {
       // Comme x45 : après le dernier déplacement autorisé, le tour se
       // termine tout seul (le joueur ne peut de toute façon plus rien faire).
       if (message.joueur === client.monSiege
-          && message.action && message.action.type === "deplacer"
+          && message.action
+          && (message.action.type === "deplacer"
+              || message.action.type === "transport_maritime")
           && aMonTour() && client.etat.phase === "playing"
           && client.etat.turn_phase === "move"
           && client.etat.turn_move_count >= limiteDeplacements(client.etat)) {
@@ -962,6 +966,33 @@ function afficherEvenements() {
   }
 }
 
+// Miroir de regles.can_move_between : existe-t-il une chaîne de territoires
+// à moi entre les deux ? Si oui, un déplacement ordinaire suffit ; sinon la
+// seule voie est la mer.
+function relieParTerre(etat, source, cible) {
+  const proprietaire = etat.territories_state[source].owner;
+  const vus = new Set([source]);
+  const pile = [source];
+  while (pile.length) {
+    const tid = pile.pop();
+    if (tid === cible) return true;
+    for (const voisin of etat.territories[tid].neighbors) {
+      if (!vus.has(voisin) && etat.territories_state[voisin].owner === proprietaire) {
+        vus.add(voisin);
+        pile.push(voisin);
+      }
+    }
+  }
+  return false;
+}
+
+// Miroir de regles.get_sea_transport_max_regiments : la garnison doit garder
+// un régiment, et chaque régiment embarqué coûte un déplacement.
+function maxTransportMaritime(etat, source) {
+  const reste = limiteDeplacements(etat) - etat.turn_move_count;
+  return Math.max(0, Math.min(etat.territories_state[source].regiments - 1, reste));
+}
+
 function limiteDeplacements(etat) {
   // Miroir de get_end_turn_move_limit : 5, ou 10 dès 10 territoires.
   const possessions = etat.territories_state
@@ -997,6 +1028,7 @@ function afficherBarreActions() {
   // La bascule humain ↔ IA de son propre siège, toujours à portée de main.
   $("bouton-mode-ia").hidden = client.monSiege === null;
   $("bouton-mode-ia").textContent = monAuto ? "Reprendre la main" : "Laisser l'IA jouer";
+  afficherChampTransport(monTour && enDeplacement && !monAuto);
 
   if (monAuto) {
     $("indication-phase").textContent = etat.current_player === client.monSiege
@@ -1018,7 +1050,8 @@ function afficherBarreActions() {
     } else if (enDeplacement) {
       $("indication-phase").textContent =
         `Déplacements : ${etat.turn_move_count}/${limiteDeplacements(etat)} — ` +
-        "clic gauche = source, clic droit = destination (1 régiment par clic).";
+        "clic gauche = source, clic droit = destination (1 régiment par clic, " +
+        "ou un convoi entier si la destination est outre-mer).";
     }
     return;
   }
@@ -1040,6 +1073,86 @@ function afficherBarreActions() {
       `En attente du siège ${courant} (libre).`;
     $("bouton-jouer-siege").hidden = false;
   }
+}
+
+// Le champ « Transport maritime : n régiment(s) » de la barre d'actions :
+// visible pendant sa phase de déplacement dès qu'une source est choisie, il
+// fixe la taille du convoi avant le clic droit sur la destination.
+function afficherChampTransport(actif) {
+  const bloc = $("bloc-transport");
+  const champ = $("champ-transport");
+  const etat = client.etat;
+  const source = client.selection;
+  if (!actif || !etat || source === null || etat.territories_state[source].owner !== client.monSiege) {
+    bloc.hidden = true;
+    return;
+  }
+  const maximum = maxTransportMaritime(etat, source);
+  if (maximum <= 0) {
+    bloc.hidden = true;
+    return;
+  }
+  bloc.hidden = false;
+  champ.max = maximum;
+  const voulu = Number(champ.value) || 1;
+  champ.value = Math.max(1, Math.min(voulu, maximum));
+}
+
+function quantiteTransport(etat, source) {
+  const maximum = maxTransportMaritime(etat, source);
+  const voulu = Number($("champ-transport").value) || 1;
+  return Math.max(1, Math.min(voulu, maximum));
+}
+
+// La destination est à moi mais aucune chaîne de territoires alliés n'y mène :
+// on demande l'aperçu au serveur (distance, maximum, chances du dé à 64 faces)
+// puis on confirme le voyage.
+async function proposerTransportMaritime(source, cible) {
+  if (client.expedition || actionEnAttente()) return;
+  const etat = client.etat;
+  const regiments = quantiteTransport(etat, source);
+  let apercu;
+  try {
+    apercu = await api(
+      `/api/parties/${client.partieId}/transport` +
+      `?source=${source}&cible=${cible}&regiments=${regiments}`,
+    );
+  } catch (erreur) {
+    flash(`Aperçu du transport impossible : ${erreur.message}`);
+    return;
+  }
+  if (!apercu.possible) {
+    const texte = LIBELLES_REFUS[apercu.code] || "Transport maritime impossible.";
+    flash(texte);
+    journal(texte);
+    return;
+  }
+  const pourcent = Math.round((100 * apercu.faces_indemne) / apercu.faces);
+  const nomSource = etat.territories[source].name;
+  const nomCible = etat.territories[cible].name;
+  ouvrirEncartExpedition(
+    "Entreprendre un voyage à travers les océans ?",
+    [
+      `${nomSource} → ${nomCible} : ${Math.round(apercu.distance)} pixels de traversée.`,
+      `${apercu.regiments} régiment(s) embarquent sur ${apercu.maximum} possible(s) — ` +
+        `autant de déplacements consommés, même en cas de sinistre.`,
+      `${pourcent} % de chances d'arriver indemne (${apercu.faces_indemne} sur 64). ` +
+        `Sinon : 25 % de pertes (${apercu.faces_pertes["25"]}/64), ` +
+        `50 % (${apercu.faces_pertes["50"]}/64), ` +
+        `75 % (${apercu.faces_pertes["75"]}/64), ` +
+        `naufrage total (${apercu.faces_pertes["100"]}/64).`,
+      "Les régiments perdus en mer disparaissent ; les survivants débarquent chez eux.",
+    ],
+    {
+      confirmer: {
+        texte: "Embarquer",
+        action: () => envoyerAction({
+          type: "transport_maritime", source, cible, quantite: apercu.regiments,
+        }),
+      },
+      annuler: { texte: "Annuler" },
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1716,6 +1829,11 @@ function journalResultat(message) {
       }
     } else if (action.type === "deplacer") {
       journal(`${nomDuJoueur(message.joueur)} déplace un régiment.`);
+    } else if (action.type === "transport_maritime" && outcome.message) {
+      const resultat = (outcome.transport || {}).resultat;
+      journal(`${nomDuJoueur(message.joueur)} embarque un convoi — ` +
+              `dé de la traversée : ${resultat ? resultat.roll : "?"} sur 64.`);
+      journal(outcome.message);
     } else if (outcome.message) {
       journal(outcome.message);
     } else {
@@ -2676,6 +2794,15 @@ $("carte").addEventListener("contextmenu", (evenement) => {
   traiterClicTerritoire(territoireSousLaSouris(evenement), true);
 });
 
+// Changer de territoire sélectionné rafraîchit aussi la barre d'actions : le
+// champ « Transport maritime » dépend de la source choisie.
+function selectionnerTerritoire(tid) {
+  client.selection = tid;
+  afficherDetailTerritoire();
+  afficherBarreActions();
+  dessinerCarte();
+}
+
 function traiterClicTerritoire(tid, boutonDroit) {
   if (client.expedition || !$("encart-expedition").hidden) return;
   const etat = client.etat;
@@ -2691,9 +2818,7 @@ function traiterClicTerritoire(tid, boutonDroit) {
   if (aMonTour() && etat.phase === "playing" && tid !== null) {
     if (!boutonDroit && tid === source) {
       // Recliquer la source (clic gauche) la libère.
-      client.selection = null;
-      afficherDetailTerritoire();
-      dessinerCarte();
+      selectionnerTerritoire(null);
       return;
     }
     if (etat.turn_phase === "attack") {
@@ -2718,9 +2843,7 @@ function traiterClicTerritoire(tid, boutonDroit) {
         return;
       }
       if (aMoi) {
-        client.selection = tid;  // nouvelle source
-        afficherDetailTerritoire();
-        dessinerCarte();
+        selectionnerTerritoire(tid);  // nouvelle source
         return;
       }
     } else if (etat.turn_phase === "move") {
@@ -2729,22 +2852,23 @@ function traiterClicTerritoire(tid, boutonDroit) {
       if (boutonDroit) {
         if (source !== null && aMoi && source !== tid
             && etat.territories_state[source].owner === client.monSiege) {
-          envoyerAction({ type: "deplacer", source, cible: tid });
+          if (relieParTerre(etat, source, tid)) {
+            envoyerAction({ type: "deplacer", source, cible: tid });
+          } else {
+            // Destination à moi mais coupée par la mer : convoi maritime.
+            proposerTransportMaritime(source, tid);
+          }
         }
         return;  // le clic droit ne change jamais la sélection
       }
       if (aMoi) {
-        client.selection = tid;
-        afficherDetailTerritoire();
-        dessinerCarte();
+        selectionnerTerritoire(tid);
         return;
       }
     }
   }
   // Hors jeu (spectateur, pas mon tour, eau…) : simple sélection d'info.
-  client.selection = tid;
-  afficherDetailTerritoire();
-  dessinerCarte();
+  selectionnerTerritoire(tid);
 }
 
 // ---------------------------------------------------------------------------

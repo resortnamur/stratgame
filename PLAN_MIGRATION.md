@@ -562,6 +562,65 @@ en base.** Reste connu, non bloquant : pas de bouton « Sauvegarder » dans
 l'interface web (l'API existe : `POST /api/parties/{id}/sauvegarder`) ;
 pas de code d'accès au lobby (assumé entre amis).
 
+## Transports maritimes en phase de déplacement ✅ (2026-07-29)
+
+Envoyer des troupes par la mer entre deux de ses territoires, en plus de
+l'expédition maritime d'attaque. Valable dans les deux versions du jeu.
+
+Procédure (identique en ligne et dans x45) : choisir le territoire de
+départ, puis la taille du convoi, puis la destination — un territoire à soi
+qu'aucune chaîne de territoires alliés n'atteint —, et confirmer l'encart
+« Entreprendre un voyage à travers les océans ? ». Les rescapés débarquent,
+les autres disparaissent en mer.
+
+Règles (`moteur/regles.py`) :
+
+- `get_sea_transport_max_regiments` — deux plafonds : la garnison moins un
+  (comme un déplacement terrestre) et le quota de déplacements restant.
+  **Chaque régiment embarqué coûte un déplacement**, et le quota est débité
+  du convoi entier même en cas de sinistre : ceux qui ont péri avaient bel
+  et bien pris le large.
+- `can_transport_by_sea` — les deux territoires sont au joueur courant et
+  bordent la même étendue d'eau continue, mais ne sont **pas** reliés par
+  la terre : si `can_move_between` répond oui, le déplacement ordinaire
+  suffit et ne risque rien.
+- `get_sea_transport_preview` / `resolve_sea_transport` — mêmes chances
+  qu'une expédition d'attaque (dé à 64 faces, paliers de distance). Le
+  tirage de pertes commun est extrait dans `roll_sea_crossing_losses`, que
+  `resolve_expedition_crossing` utilise aussi — un seul chemin de code,
+  les 25 tests d'expédition restent verts.
+- `has_any_sea_transport_target` — pour que les interfaces n'annoncent le
+  convoi que s'il existe une destination.
+
+Action et serveur : `transport_maritime {source, cible, quantite}` en phase
+de déplacement (refus typé `transport_invalide`), et
+`GET /api/parties/{id}/transport?source&cible&regiments` pour l'encart.
+
+Interfaces :
+
+- **Web** : champ « Transport maritime : n régiment(s) » dans la barre
+  d'actions dès qu'une source est choisie (maximum calculé côté client,
+  miroir du moteur, qui reste l'autorité) ; clic droit sur un territoire à
+  soi outre-mer → encart avec distance, convoi et barème → « Embarquer ».
+  Le clic droit sur une destination reliée par terre garde son
+  comportement d'avant (un régiment). Correctif au passage : une simple
+  sélection ne rafraîchissait pas la barre d'actions (`selectionnerTerritoire`).
+- **x45** : convoi ajustable à la molette ou avec +/- une fois la source
+  choisie (affiché dans l'en-tête « Convoi: n/max »), clic droit sur un
+  territoire allié outre-mer → dialogue Tkinter → encart du résultat de la
+  traversée ; fin de tour automatique si le quota est épuisé.
+
+L'IA n'utilise pas encore le transport (elle garde sa concentration
+terrestre de fin de tour et ses expéditions d'attaque).
+
+Tests : `tests/test_transport_maritime.py` — 25 tests sur la carte
+synthétique des expéditions (autorisations, refus par la terre reliée via
+un pont, plafonds, traversée indemne / sinistre / naufrage, quota débité,
+vocabulaire d'actions). Suite complète : 187 tests verts. Vérifié dans le
+navigateur sur ISLA04 (convoi de 2, sinistre à 25 %, 1 rescapé débarqué,
+2 déplacements débités) et le déplacement terrestre inchangé ; flux x45
+rejoué sans interface.
+
 ## Version simplifiée ✅ (2026-07-28)
 
 Une option de départ — case « Version simplifiée » du lobby web, question 1

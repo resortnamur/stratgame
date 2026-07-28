@@ -3670,6 +3670,34 @@ def get_expedition_preview(
     }
 
 
+def roll_sea_crossing_losses(
+    fleet_size: int, distance_px: Optional[float], rng=random,
+) -> Tuple[int, int, int]:
+    """Tire le de a 64 faces d'une traversee et en deduit les pertes.
+
+    Partage par les expeditions d'attaque et les transports maritimes de fin
+    de tour : meme de, memes paliers de distance, meme arrondi (au plus
+    proche, avec au moins un regiment perdu des qu'il y a sinistre).
+    Retourne ``(jet, pourcentage_de_pertes, regiments_perdus)``.
+    """
+    faces = get_expedition_risk_faces(distance_px)
+    roll = rng.randint(1, EXPEDITION_DIE_FACES)
+    loss_percent = 0
+    threshold = 0
+    for percent, count in zip(EXPEDITION_LOSS_PERCENTS, faces):
+        threshold += count
+        if roll <= threshold:
+            loss_percent = percent
+            break
+    if loss_percent == 0:
+        regiments_lost = 0
+    else:
+        regiments_lost = min(
+            fleet_size, max(1, int(fleet_size * loss_percent / 100 + 0.5)),
+        )
+    return roll, loss_percent, regiments_lost
+
+
 @dataclass
 class ExpeditionCrossing:
     """Resultat de la traversee (jet du de a 64 faces), avant le debarquement."""
@@ -3705,23 +3733,10 @@ def resolve_expedition_crossing(
     elle conquiert ou disparait.
     """
     distance = get_expedition_route_distance(state, src.id, dst.id, cell_width, cell_height)
-    faces = get_expedition_risk_faces(distance)
     fleet_size = src.regiments - 1
-    roll = rng.randint(1, EXPEDITION_DIE_FACES)
-    loss_percent = 0
-    threshold = 0
-    for percent, count in zip(EXPEDITION_LOSS_PERCENTS, faces):
-        threshold += count
-        if roll <= threshold:
-            loss_percent = percent
-            break
-    if loss_percent == 0:
-        regiments_lost = 0
-    else:
-        # Arrondi au plus proche, avec au moins 1 regiment perdu par sinistre.
-        regiments_lost = min(
-            fleet_size, max(1, int(fleet_size * loss_percent / 100 + 0.5)),
-        )
+    roll, loss_percent, regiments_lost = roll_sea_crossing_losses(
+        fleet_size, distance, rng,
+    )
     survivors = fleet_size - regiments_lost
     src.regiments = 1 + survivors
     destroyed = survivors <= 0
@@ -3751,6 +3766,189 @@ def resolve_expedition_crossing(
     return ExpeditionCrossing(
         src.id, dst.id, distance, fleet_size, roll, loss_percent,
         regiments_lost, survivors, destroyed, message,
+    )
+
+
+# ----------------------------------------------------------------------
+# Transports maritimes (phase de deplacement)
+# ----------------------------------------------------------------------
+
+def get_sea_transport_max_regiments(state: GameState, src: Territory) -> int:
+    """Combien de regiments ``src`` peut embarquer maintenant.
+
+    Deux plafonds : la garnison (il reste toujours au moins 1 regiment sur
+    place, comme pour un deplacement terrestre) et le quota de deplacements
+    de fin de tour encore disponible — chaque regiment transporte coute un
+    deplacement.
+    """
+    if src.owner != state.current_player:
+        return 0
+    budget = get_end_turn_move_limit(state) - state.turn_move_count
+    return max(0, min(src.regiments - 1, budget))
+
+
+def can_transport_by_sea(
+    state: GameState,
+    src: Territory,
+    dst: Territory,
+    cell_width: float,
+    cell_height: float,
+) -> bool:
+    """Un transport maritime de ``src`` vers ``dst`` est-il possible ?
+
+    Memes conditions qu'un deplacement de fin de tour (deux territoires du
+    joueur courant, garnison suffisante, quota disponible) sauf la continuite
+    terrestre : elle doit justement manquer — si une chaine de territoires
+    allies relie les deux, le deplacement ordinaire suffit et ne risque
+    rien. Les deux territoires doivent border la meme etendue d'eau
+    continue, comme pour une expedition d'attaque.
+    """
+    if src.id == dst.id:
+        return False
+    if src.owner != state.current_player or dst.owner != state.current_player:
+        return False
+    if get_sea_transport_max_regiments(state, src) <= 0:
+        return False
+    if can_move_between(state, src, dst):
+        return False
+    return get_expedition_route_distance(state, src.id, dst.id, cell_width, cell_height) is not None
+
+
+def has_any_sea_transport_target(
+    state: GameState,
+    src: Territory,
+    cell_width: float,
+    cell_height: float,
+) -> bool:
+    """``src`` peut-il embarquer des troupes vers un territoire a lui ?
+
+    Sert aux interfaces : elles n'annoncent le transport que s'il existe une
+    destination possible.
+    """
+    return any(
+        can_transport_by_sea(state, src, dst, cell_width, cell_height)
+        for dst in state.territories
+    )
+
+
+def get_sea_transport_preview(
+    state: GameState,
+    src: Territory,
+    dst: Territory,
+    regiments: int,
+    cell_width: float,
+    cell_height: float,
+) -> Optional[dict]:
+    """L'apercu de l'encart « Entreprendre un voyage a travers les oceans ? ».
+
+    Memes chances qu'une expedition d'attaque (de a 64 faces, paliers de
+    distance). ``regiments`` est ramene entre 1 et le maximum autorise.
+    Retourne None si le transport est impossible.
+    """
+    if not can_transport_by_sea(state, src, dst, cell_width, cell_height):
+        return None
+    maximum = get_sea_transport_max_regiments(state, src)
+    try:
+        embarques = int(regiments)
+    except (TypeError, ValueError):
+        embarques = 1
+    embarques = max(1, min(embarques, maximum))
+    distance = get_expedition_route_distance(state, src.id, dst.id, cell_width, cell_height)
+    faces = get_expedition_risk_faces(distance)
+    return {
+        "source": src.id,
+        "cible": dst.id,
+        "distance": round(distance, 1),
+        "regiments": embarques,
+        "maximum": maximum,
+        "faces": EXPEDITION_DIE_FACES,
+        "faces_indemne": EXPEDITION_DIE_FACES - sum(faces),
+        "faces_pertes": {
+            str(percent): count
+            for percent, count in zip(EXPEDITION_LOSS_PERCENTS, faces)
+        },
+    }
+
+
+@dataclass
+class SeaTransportResult:
+    """Resultat d'un transport maritime de fin de tour."""
+
+    src_id: int
+    dst_id: int
+    distance_px: float
+    embarked: int          # regiments partis du territoire source
+    roll: int              # le jet du de a 64 faces
+    loss_percent: int      # 0, 25, 50, 75 ou 100
+    regiments_lost: int
+    survivors: int         # regiments effectivement debarques
+    destroyed: bool        # plus personne n'arrive a bon port
+    moves_spent: int       # deplacements consommes (= regiments embarques)
+    message: str = ""
+
+
+def resolve_sea_transport(
+    state: GameState,
+    src: Territory,
+    dst: Territory,
+    regiments: int,
+    cell_width: float,
+    cell_height: float,
+    rng=random,
+) -> Optional[SeaTransportResult]:
+    """Transporte ``regiments`` de ``src`` vers ``dst`` par la mer.
+
+    Mute l'etat : les regiments embarques quittent la source, les survivants
+    arrivent a destination, et le quota de deplacements est debite du nombre
+    embarque — ceux qui ont peri en mer avaient bel et bien pris le large.
+    Retourne None si le transport n'est pas permis.
+    """
+    if not can_transport_by_sea(state, src, dst, cell_width, cell_height):
+        return None
+    maximum = get_sea_transport_max_regiments(state, src)
+    try:
+        embarked = int(regiments)
+    except (TypeError, ValueError):
+        return None
+    if embarked < 1:
+        return None
+    embarked = min(embarked, maximum)
+
+    distance = get_expedition_route_distance(state, src.id, dst.id, cell_width, cell_height)
+    roll, loss_percent, regiments_lost = roll_sea_crossing_losses(embarked, distance, rng)
+    survivors = embarked - regiments_lost
+
+    src.regiments -= embarked
+    dst.regiments += survivors
+    state.turn_move_count += embarked
+    destroyed = survivors <= 0
+
+    if destroyed:
+        message = (
+            f"Transport maritime de {src.name} vers {dst.name} : naufrage en mer, "
+            f"les {embarked} regiment(s) embarques disparaissent corps et biens."
+        )
+        record_major_event(state, f"Tour {state.turn}: {message}")
+    elif regiments_lost:
+        message = (
+            f"Transport maritime de {src.name} vers {dst.name} : sinistre en mer, "
+            f"{regiments_lost} regiment(s) perdus ({loss_percent} % du convoi). "
+            f"{survivors} regiment(s) arrivent a bon port."
+        )
+    else:
+        message = (
+            f"Transport maritime de {src.name} vers {dst.name} : traversee indemne, "
+            f"{survivors} regiment(s) arrivent a bon port."
+        )
+    record_replay_snapshot(
+        state,
+        f"Tour {state.turn} - transport maritime de J{src.owner + 1} : "
+        f"{src.name} vers {dst.name}",
+        force=True,
+    )
+    return SeaTransportResult(
+        src.id, dst.id, distance, embarked, roll, loss_percent,
+        regiments_lost, survivors, destroyed, embarked, message,
     )
 
 

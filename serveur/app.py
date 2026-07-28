@@ -24,6 +24,9 @@ REST :
 - ``GET  /api/parties/{id}/expedition?source=3&cible=7`` — apercu d'une
   expedition maritime (distance, chances du de a 64 faces) pour l'encart
   de confirmation.
+- ``GET  /api/parties/{id}/transport?source=3&cible=7&regiments=4`` — apercu
+  d'un transport maritime de fin de tour (memes chances, plus le maximum
+  embarquable) pour l'encart « Entreprendre un voyage a travers les oceans ? ».
 - ``POST /api/parties/{id}/sauvegarder`` — ``{"fichier": "..."}`` optionnel
   (par defaut : le fichier d'origine).
 
@@ -359,6 +362,13 @@ def creer_app(dossier_parties: Optional[Path] = None,
         64 faces, pour l'encart de confirmation du client."""
         salle = get_salle(partie_id)
         return salle.session.apercu_expedition(source, cible)
+
+    @app.get("/api/parties/{partie_id}/transport")
+    def apercu_transport(partie_id: str, source: int, cible: int, regiments: int = 1):
+        """Apercu d'un transport maritime de fin de tour : distance, maximum
+        embarquable et chances du de a 64 faces, pour l'encart du client."""
+        salle = get_salle(partie_id)
+        return salle.session.apercu_transport(source, cible, regiments)
 
     @app.post("/api/parties/{partie_id}/sauvegarder")
     def sauvegarder_partie(partie_id: str, corps: Optional[Dict[str, Any]] = None):

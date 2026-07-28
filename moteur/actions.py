@@ -7,10 +7,10 @@ Deux niveaux :
   rapports structures (l'affichage reste a l'appelant : x45 aujourd'hui,
   le serveur web demain).
 - ``apply_action`` : le vocabulaire d'actions que le serveur recevra des
-  clients — ``attaquer``, ``assaut_total``, ``deplacer``,
-  ``terminer_attaque``, ``terminer_achats``, ``fin_de_tour`` — valide
-  contre l'etat courant (phase, tour, proprietaires) puis applique via les
-  regles du moteur.
+  clients — ``attaquer``, ``assaut_total``, ``expedition``, ``deplacer``,
+  ``transport_maritime``, ``terminer_attaque``, ``terminer_achats``,
+  ``fin_de_tour``, ``acheter`` — valide contre l'etat courant (phase, tour,
+  proprietaires) puis applique via les regles du moteur.
 
 Les dimensions de cellule (``cell_width``/``cell_height``) parametrent la
 geometrie des ponts, heritee de l'affichage de x45 : x45 passe les siennes,
@@ -373,7 +373,7 @@ def play_ai_turn(
 # ----------------------------------------------------------------------
 
 ACTION_TYPES = (
-    "attaquer", "assaut_total", "expedition", "deplacer",
+    "attaquer", "assaut_total", "expedition", "deplacer", "transport_maritime",
     "terminer_attaque", "terminer_achats", "fin_de_tour",
     "acheter",
 )
@@ -412,10 +412,11 @@ class ActionOutcome:
 
     ``ok=False`` : action refusee, ``code`` explique pourquoi
     ("action_inconnue", "phase_invalide", "territoire_invalide",
-    "attaque_invalide", "achat_inconnu", "achat_refuse", ou un code de refus
-    de deplacement : "limite", "proprietaire", "meme_territoire", "garnison",
-    "continuite"). Pour les achats, ``message`` porte le texte de la
-    boutique (succes comme refus).
+    "attaque_invalide", "expedition_invalide", "transport_invalide",
+    "achat_inconnu", "achat_refuse", ou un code de refus de deplacement :
+    "limite", "proprietaire", "meme_territoire", "garnison", "continuite").
+    Pour les achats, ``message`` porte le texte de la boutique (succes comme
+    refus).
     """
 
     ok: bool
@@ -430,6 +431,9 @@ class ActionOutcome:
     # debarquement enrichies des territoires touches, pour que les clients
     # puissent rejouer l'attaque progressivement.
     expedition: Optional[dict] = None
+    # Transport maritime de fin de tour : le resultat de la traversee et les
+    # deux territoires touches (source allegee, destination renforcee).
+    transport: Optional[dict] = None
 
 
 def _refuse(code: str) -> ActionOutcome:
@@ -541,6 +545,29 @@ def apply_action(
         if not moved:
             return _refuse(code)
         return ActionOutcome(ok=True)
+
+    if action_type == "transport_maritime":
+        if state.phase != "playing" or state.turn_phase != "move":
+            return _refuse("phase_invalide")
+        src = _get_territory(state, action, "source")
+        dst = _get_territory(state, action, "cible")
+        if src is None or dst is None:
+            return _refuse("territoire_invalide")
+        if not regles.can_transport_by_sea(state, src, dst, cell_width, cell_height):
+            return _refuse("transport_invalide")
+        transport = regles.resolve_sea_transport(
+            state, src, dst, action.get("quantite", 1), cell_width, cell_height, rng,
+        )
+        if transport is None:
+            return _refuse("transport_invalide")
+        return ActionOutcome(
+            ok=True,
+            message=transport.message,
+            transport={
+                "resultat": transport,
+                "territoires": [_territoire_snapshot(src), _territoire_snapshot(dst)],
+            },
+        )
 
     if action_type == "terminer_attaque":
         if state.phase != "playing" or state.turn_phase != "attack":
