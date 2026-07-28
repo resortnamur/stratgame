@@ -29,9 +29,17 @@ RANDOM_SEED = 20260722
 
 
 def sauvegardes_de_partie() -> list:
-    """Les vraies sauvegardes du dossier (ignore tout autre .json)."""
+    """Les vraies sauvegardes du dossier (ignore tout autre .json).
+
+    Les sauvegardes automatiques de securite (``auto_*``) sont ecartees :
+    elles apparaissent des qu'une partie est jouee sur le serveur local, et
+    elles trient avant les ``partie_*`` — de quoi fausser les tests qui
+    prennent « la premiere sauvegarde ».
+    """
     fichiers = []
     for chemin in sorted(DOSSIER_PARTIES.glob("*.json")):
+        if chemin.name.startswith("auto_"):
+            continue
         try:
             payload = json.loads(chemin.read_text(encoding="utf-8"))
         except (OSError, ValueError):

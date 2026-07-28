@@ -12,7 +12,9 @@ question 1 du setup de x45) :
   maritimes, renforts avec bonus +3/+5, territoires ONU (annexion seule),
   territoires dores, ponts aleatoires, forteresses — detruites apres trois
   captures et **remises en jeu** par tirage, faute de boutique — et les
-  trahisons/revoltes tous les dix tours.
+  trahisons/revoltes tous les dix tours ;
+- **regle propre a cette version** : un territoire fortifie ne se revolte ni
+  ne trahit jamais ; il faut venir le prendre au combat.
 
 Lancement, depuis le dossier "Jeux Strat" :
     python -m unittest discover -s tests -v
@@ -312,6 +314,144 @@ class TestEvenementsSimplifies(unittest.TestCase):
             messages = regles.maybe_trigger_empire_event(state, self.rng)
             apparitions += sum(1 for message in messages if "ONU" in message)
         self.assertGreater(apparitions, 0, "aucun evenement ONU en 58 tours")
+
+
+class TestForteressesFideles(unittest.TestCase):
+    """Version simplifiee : une forteresse ne se revolte ni ne trahit jamais."""
+
+    def setUp(self):
+        self.state, self.rng = nouvelle_partie_simple()
+        self.cw, self.ch = dimensions(self.state)
+
+    def _fortifier_tout_le_monde(self, state, joueur):
+        """Met une forteresse sur chaque territoire du joueur."""
+        for terr in state.territories:
+            if terr.owner == joueur:
+                state.fortress_territory_ids.add(terr.id)
+                state.fortress_capture_counts[terr.id] = 0
+
+    def test_la_regle_ne_vaut_qu_en_version_simplifiee(self):
+        state = self.state
+        tid = sorted(state.fortress_territory_ids)[0]
+        self.assertTrue(regles.is_protected_from_revolt(state, tid))
+        state.simple_mode = False
+        self.assertFalse(regles.is_protected_from_revolt(state, tid))
+        # Et un territoire sans forteresse n'est jamais protege.
+        state.simple_mode = True
+        sans_fort = next(
+            terr.id for terr in state.territories
+            if terr.id not in state.fortress_territory_ids
+        )
+        self.assertFalse(regles.is_protected_from_revolt(state, sans_fort))
+
+    def test_le_bloc_tire_ecarte_les_forteresses(self):
+        state = self.state
+        joueur = 0
+        possessions = [t.id for t in state.territories if t.owner == joueur]
+        self.assertGreater(len(possessions), 6, "il faut de la place pour le test")
+        # Trois forteresses chez ce joueur.
+        for tid in possessions[:3]:
+            state.fortress_territory_ids.add(tid)
+            state.fortress_capture_counts[tid] = 0
+        for _ in range(40):
+            bloc = regles.choose_owned_contiguous_block(
+                state, joueur, 5, self.rng, exclude_fortresses=True,
+            )
+            for terr in bloc:
+                self.assertNotIn(
+                    terr.id, state.fortress_territory_ids,
+                    "une forteresse a ete choisie pour une revolte",
+                )
+
+    def test_sans_le_drapeau_les_forteresses_restent_tirables(self):
+        """Temoin : la protection vient bien de exclude_fortresses."""
+        state = self.state
+        joueur = 0
+        self._fortifier_tout_le_monde(state, joueur)
+        bloc = regles.choose_owned_contiguous_block(state, joueur, 5, self.rng)
+        self.assertTrue(bloc, "sans exclusion, le tirage doit rester possible")
+
+    def test_un_empire_tout_fortifie_ne_perd_rien(self):
+        """Toutes ses forteresses : l'evenement d'empire n'a aucune cible."""
+        state = self.state
+        state.turn = 10
+        state.last_empire_event_turn = 9
+        # Le joueur vise est celui qui mene : on fortifie tout le monde.
+        for joueur in regles.get_active_players(state):
+            self._fortifier_tout_le_monde(state, joueur)
+        avant = [(t.id, t.owner) for t in state.territories]
+        messages = regles.maybe_trigger_empire_event(state, self.rng)
+        self.assertEqual(avant, [(t.id, t.owner) for t in state.territories],
+                         "des territoires ont change de camp malgre les forteresses")
+        self.assertIn("hors capitale et forteresse", " ".join(messages))
+
+    def test_les_forteresses_survivent_a_une_revolte_reelle(self):
+        state = self.state
+        state.turn = 10
+        state.last_empire_event_turn = 9
+        # Un joueur nettement en tete, dont la moitie des territoires est fortifiee.
+        joueur = 0
+        possessions = [t.id for t in state.territories if t.owner == joueur]
+        for tid in possessions[: len(possessions) // 2]:
+            state.fortress_territory_ids.add(tid)
+            state.fortress_capture_counts[tid] = 0
+        fortifies = {
+            tid for tid in state.fortress_territory_ids
+            if state.territories[tid].owner == joueur
+        }
+        proprietaires_avant = {tid: state.territories[tid].owner for tid in fortifies}
+        regles.maybe_trigger_empire_event(state, self.rng)
+        for tid, proprietaire in proprietaires_avant.items():
+            self.assertEqual(
+                state.territories[tid].owner, proprietaire,
+                f"la forteresse {tid} a change de camp sans combat",
+            )
+
+    def test_la_sanction_d_annexation_onu_epargne_aussi_les_forteresses(self):
+        state = self.state
+        joueur = 3  # un humain
+        possessions = [t.id for t in state.territories if t.owner == joueur]
+        self.assertTrue(possessions)
+        self._fortifier_tout_le_monde(state, joueur)
+        # Germe 1 : la sanction tiree est une revolte (et non un chaos mondial,
+        # qui suit ses propres regles et n'epargne pas les forteresses).
+        message = regles.trigger_sanctuary_annexation_event(state, joueur, random.Random(1))
+        self.assertNotIn("chaos", message, message)
+        self.assertIn("hors capitale et forteresse", message)
+        for tid in possessions:
+            self.assertEqual(state.territories[tid].owner, joueur)
+
+    def test_une_forteresse_reste_prenable_au_combat(self):
+        """La protection ne vaut que sans combat : l'attaque marche toujours."""
+        state = self.state
+        state.current_player = 3
+        paire = None
+        for src in state.territories:
+            if src.owner != 3:
+                continue
+            for nb in src.neighbors:
+                dst = state.territories[nb]
+                if regles.can_attack_specific_target(state, src, dst):
+                    paire = (src, dst)
+                    break
+            if paire:
+                break
+        self.assertIsNotNone(paire)
+        src, dst = paire
+        state.fortress_territory_ids.add(dst.id)
+        state.fortress_capture_counts[dst.id] = 0
+        src.regiments = 60
+        dst.regiments = 1
+        conquis = False
+        for _ in range(60):
+            if not regles.can_attack_specific_target(state, src, dst):
+                break
+            resultat = regles.resolve_attack_once(state, src, dst, self.rng)
+            if resultat.conquered:
+                conquis = True
+                break
+        self.assertTrue(conquis, "une forteresse doit rester prenable au combat")
+        self.assertEqual(dst.owner, 3)
 
 
 class TestPartieSimplifieeAutonome(unittest.TestCase):

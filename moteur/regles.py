@@ -2225,14 +2225,30 @@ def transfer_eliminated_player_money(state: GameState, eliminated_player: int, w
 # Evenements punitifs (annexion de sanctuaire, chaos)
 # ----------------------------------------------------------------------
 
-def choose_owned_contiguous_block(state: GameState, player: int, count: int, rng=random) -> List[Territory]:
+def is_protected_from_revolt(state: GameState, territory_id: int) -> bool:
+    """Ce territoire est-il a l'abri d'une revolte ou d'une trahison ?
+
+    Version simplifiee uniquement : une forteresse ne change jamais de camp
+    sans combat. Il faut venir la prendre.
+    """
+    return is_simple_mode(state) and territory_id in state.fortress_territory_ids
+
+
+def choose_owned_contiguous_block(
+    state: GameState, player: int, count: int, rng=random,
+    exclude_fortresses: bool = False,
+) -> List[Territory]:
     """Choisit si possible un bloc contigu de territoires appartenant au joueur.
 
     Les capitales ordinaires actives sont exclues du tirage.
+    ``exclude_fortresses`` ecarte en plus les territoires fortifies : les
+    appelants le passent pour les revoltes et les trahisons, ou la version
+    simplifiee protege les forteresses (``is_protected_from_revolt``).
     """
     owned_ids = [
         terr.id for terr in state.territories
         if terr.owner == player and not is_active_regular_capital(state, terr.id)
+        and not (exclude_fortresses and is_protected_from_revolt(state, terr.id))
     ]
     if count <= 0 or not owned_ids:
         return []
@@ -2401,9 +2417,14 @@ def trigger_sanctuary_annexation_event(state: GameState, human_player: int, rng=
     lost_count = calculate_cultural_revolt_or_betrayal_loss_count(state, human_player, default_lost_count)
     if lost_count <= 0:
         return f"Sanctuaire ONU annexe : sanction de revolte/trahison sans perte pour J{human_player + 1}{get_culture_protection_suffix(state, human_player)}."
-    territories_to_transfer = choose_owned_contiguous_block(state, human_player, lost_count, rng)
+    # La sanction est une revolte ou une trahison : en version simplifiee, les
+    # forteresses y echappent comme aux evenements d'empire.
+    territories_to_transfer = choose_owned_contiguous_block(
+        state, human_player, lost_count, rng, exclude_fortresses=True,
+    )
     if not territories_to_transfer:
-        return f"Sanctuaire ONU annexe : sanction de revolte/trahison impossible, aucune cible valide hors capitale pour J{human_player + 1}."
+        hors = "hors capitale et forteresse" if is_simple_mode(state) else "hors capitale"
+        return f"Sanctuaire ONU annexe : sanction de revolte/trahison impossible, aucune cible valide {hors} pour J{human_player + 1}."
     lost_count = len(territories_to_transfer)
 
     if event_type == "revolt_transfer":
@@ -4627,9 +4648,13 @@ def maybe_trigger_empire_event(state: GameState, rng=random) -> List[str]:
     else:
         empire_event_index = state.turn // 10 - state.turn // 40
     is_betrayal = empire_event_index % 2 == 0
-    territories_to_transfer = choose_owned_contiguous_block(state, target_player, lost_count, rng)
+    # Version simplifiee : les forteresses ne se revoltent ni ne trahissent.
+    territories_to_transfer = choose_owned_contiguous_block(
+        state, target_player, lost_count, rng, exclude_fortresses=True,
+    )
     if not territories_to_transfer:
-        event_message = f"Tour {state.turn}: evenement d'empire impossible pour J{target_player + 1}, aucune cible valide hors capitale."
+        hors = "hors capitale et forteresse" if is_simple_mode(state) else "hors capitale"
+        event_message = f"Tour {state.turn}: evenement d'empire impossible pour J{target_player + 1}, aucune cible valide {hors}."
         record_major_event(state, event_message)
         shown_messages.append(event_message)
         return shown_messages

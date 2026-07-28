@@ -676,7 +676,23 @@ Points d'architecture :
   Terr./Rég./Dorés/Fort.), le cycle des vues (religion retirée) et le badge
   du lobby. Côté x45 : en-tête sans E/C/S, suffixe « | Simplifiee ».
 
-Tests : `tests/test_mode_simplifie.py` — 23 tests (mise en place conforme,
+**Forteresses fidèles** (2026-07-29) : en version simplifiée, un territoire
+fortifié **ne se révolte ni ne trahit jamais** — il faut venir le prendre au
+combat. `regles.is_protected_from_revolt` nomme la règle, et
+`choose_owned_contiguous_block(..., exclude_fortresses=True)` l'applique aux
+deux seuls événements concernés : l'événement d'empire des tours multiples de
+10 (trahison ou révolte) et la sanction de révolte/trahison qui suit
+l'annexion d'un sanctuaire ONU par un humain. Si un empire n'a plus que des
+forteresses, l'événement le dit (« aucune cible valide hors capitale et
+forteresse ») et personne ne bascule. Le chaos mondial du mode Chaos garde ses
+propres règles et n'épargne pas les forteresses. Aucun changement d'interface :
+x45 comme le client web délèguent ces événements au moteur.
+
+Vérifié sur 200 tours simplifiés (même germe, ISLA01) : 20 événements de
+révolte/trahison, 104 territoires basculés, **zéro forteresse** — contre
+15 forteresses perdues sans combat dans la même partie en version complète.
+
+Tests : `tests/test_mode_simplifie.py` — 30 tests (mise en place conforme,
 aucun achat accepté, pas de phase d'achats, ni revenu ni science ni culture,
 3 dés maximum, pas de dernier bastion, pas de soumission ONU, forteresses
 qui réapparaissent sous la cible et pas au-delà, destruction à la 3ᵉ capture,
