@@ -39,6 +39,7 @@ def nouvelle_partie(
     ai_player_count: int,
     difficulty_level: str = "normal",
     tribes_mode: bool = False,
+    simple_mode: bool = False,
     rng=random,
 ) -> GameState:
     """Cree une partie prete a jouer depuis une carte sauvegardee.
@@ -48,6 +49,11 @@ def nouvelle_partie(
     le double appel a ``assign_random_bonus_territories`` (une fois via
     ``_distribute_armies``, une fois explicitement). L'appelant enchaine
     ensuite sur ``actions.begin_player_turn(state, 0, rng)``.
+
+    ``simple_mode=True`` cree une partie en version simplifiee : ni cite
+    commercante, ni capitale, ni industrie ou centre culturel — seules les
+    forteresses restent parmi les structures initiales. Les bonus +3, les
+    territoires dores et les sanctuaires ONU sont poses comme d'habitude.
     """
     if not (2 <= num_players <= 10):
         raise ValueError("Nombre de joueurs invalide (2-10).")
@@ -63,6 +69,7 @@ def nouvelle_partie(
     state.initial_ai_player_count = ai_player_count
     state.difficulty_level = normalize_difficulty_level(difficulty_level)
     state.tribes_mode = bool(tribes_mode) and ai_player_count > 0
+    state.simple_mode = bool(simple_mode)
     state.base_ai_players = set(range(ai_player_count))
     state.auto_controlled_players = set()
     state.commercial_city_players = set()
@@ -87,7 +94,8 @@ def nouvelle_partie(
     # Miroir de start_game_session apres le chargement de la carte.
     state.eliminated_human_players = set()
     state.human_controlled_players = set()
-    prepare_initial_commercial_cities(state, rng)
+    if not state.simple_mode:
+        prepare_initial_commercial_cities(state, rng)
     assign_initial_ownership_and_armies(state, rng)
     assign_random_bonus_territories(state, rng)
     assign_golden_territories(state, rng)
@@ -135,12 +143,18 @@ def prepare_initial_commercial_cities(state: GameState, rng=random) -> None:
 # ----------------------------------------------------------------------
 
 def assign_initial_ownership_and_armies(state: GameState, rng=random) -> None:
-    """Miroir de assign_initial_ownership_and_armies (x45)."""
+    """Miroir de assign_initial_ownership_and_armies (x45).
+
+    En version simplifiee, aucune capitale n'est posee : les joueurs
+    demarrent donc entierement disperses (ou en blocs contigus en mode
+    Tribus), sans le regroupement capitale + voisins directs.
+    """
     if state.tribes_mode and state.base_ai_players:
         _assign_ownership_tribes(state, rng)
     else:
         _assign_ownership_random(state, rng)
-    assign_initial_player_capitals(state, rng)
+    if not regles.is_simple_mode(state):
+        assign_initial_player_capitals(state, rng)
 
 
 def _assign_ownership_random(state: GameState, rng=random) -> None:
@@ -603,7 +617,11 @@ def choose_weighted_territory_ids_from_pool(
 
 def assign_initial_economic_structures(state: GameState, rng=random) -> None:
     """Miroir de assign_initial_economic_structures (x45) : forteresses
-    (ponderees par la connectivite), industries et centres culturels."""
+    (ponderees par la connectivite), industries et centres culturels.
+
+    En version simplifiee, seules les forteresses sont posees : industries et
+    centres culturels ne produisent que de l'or et de la culture.
+    """
     state.fortress_territory_ids = set()
     state.fortress_capture_counts = {}
     state.factory_territory_ids = set()
@@ -630,6 +648,9 @@ def assign_initial_economic_structures(state: GameState, rng=random) -> None:
     )
     state.fortress_territory_ids = set(fortress_ids)
     state.fortress_capture_counts = {tid: 0 for tid in state.fortress_territory_ids}
+
+    if regles.is_simple_mode(state):
+        return
 
     ids = list(non_commercial_ids)
     rng.shuffle(ids)

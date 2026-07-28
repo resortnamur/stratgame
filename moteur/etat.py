@@ -118,6 +118,10 @@ class GameState:
     initial_ai_player_count: int = 0
     difficulty_level: str = "normal"
     tribes_mode: bool = False
+    # Version simplifiee : partie uniquement basee sur le combat (ni achats,
+    # ni argent, science, culture, capitales, nations, religions, paradis
+    # fiscaux, cites commercantes). Voir regles.is_simple_mode.
+    simple_mode: bool = False
     base_ai_players: Set[int] = field(default_factory=set)
     auto_controlled_players: Set[int] = field(default_factory=set)
     human_controlled_players: Set[int] = field(default_factory=set)
@@ -496,6 +500,7 @@ class GameState:
         self.initial_ai_player_count = int(payload.get("initial_ai_player_count", self.ai_player_count))
         self.difficulty_level = normalize_difficulty_level(payload.get("difficulty_level", "normal"))
         self.tribes_mode = bool(payload.get("tribes_mode", False))
+        self.simple_mode = bool(payload.get("simple_mode", False))
         self.base_ai_players = {int(x) for x in payload.get("base_ai_players", [])}
         self.auto_controlled_players = {int(x) for x in payload.get("auto_controlled_players", [])}
         self.human_controlled_players = {int(x) for x in payload.get("human_controlled_players", [])}
@@ -893,6 +898,12 @@ class GameState:
                 for terr in self.territories
             ],
         })
+        # La version simplifiee est une option recente : la cle n'est emise que
+        # lorsqu'elle est active, pour qu'une partie ordinaire produise
+        # exactement le payload v13 d'origine (parite avec x45 verifiee cle
+        # par cle par tests/test_parite_original.py).
+        if self.simple_mode:
+            payload["simple_mode"] = True
         return payload
 
     def _build_map_payload(self) -> dict:

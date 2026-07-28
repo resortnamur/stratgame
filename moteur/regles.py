@@ -143,6 +143,12 @@ LATE_RESOURCE_LIFETIME_TURNS = 20
 LATE_RESOURCE_TARGET_COUNT = 3
 BRIDGE_SPAWN_DENOMINATOR = 20
 BRIDGE_COLLAPSE_DENOMINATOR = 30
+# Version simplifiee : les forteresses ne s'achetent plus, elles ne peuvent
+# donc que disparaitre (detruites apres trois captures). Une chance sur
+# SIMPLE_FORTRESS_SPAWN_DENOMINATOR par tour global en repose une, tant qu'il
+# en reste moins de SIMPLE_FORTRESS_TARGET_COUNT sur la carte.
+SIMPLE_FORTRESS_TARGET_COUNT = 5
+SIMPLE_FORTRESS_SPAWN_DENOMINATOR = 6
 BRIDGE_MAX_LENGTH_PX = 76.0
 # Expeditions maritimes : de a 64 faces tire a la traversee. Chaque palier
 # de distance (en pixels de la carte logique 1200x620) donne le nombre de
@@ -194,6 +200,20 @@ CORRUPTION_FORTRESS_SURCHARGE = 400
 CORRUPTION_INDUSTRIAL_SURCHARGE = 400
 CORRUPTION_CULTURAL_CENTER_SURCHARGE = 800
 CORRUPTION_BONUS_TERRITORY_SURCHARGE = 400
+
+
+# ----------------------------------------------------------------------
+# Version simplifiee
+# ----------------------------------------------------------------------
+
+def is_simple_mode(state) -> bool:
+    """La partie est-elle en version simplifiee (uniquement le combat) ?
+
+    ``getattr`` plutot qu'un acces direct : les regles s'appliquent aussi par
+    duck typing a ``GraphicalGame`` (x45) et a d'anciennes sauvegardes, qui
+    peuvent ne pas porter l'attribut.
+    """
+    return bool(getattr(state, "simple_mode", False))
 
 
 # ----------------------------------------------------------------------
@@ -1180,10 +1200,12 @@ def grant_reinforcements(state: GameState, player: int, rng=random) -> Optional[
     total_regiments = sum(max(0, terr.regiments) for terr in owned)
     regiment_limit = get_reinforcement_regiment_limit(state, player)
     if total_regiments >= regiment_limit:
+        # Sans boutique, il n'y a plus de mercenaires a proposer en secours.
+        recours = "" if is_simple_mode(state) else " Mercenaires toujours achetables."
         return ReinforcementReport(
             "plafond",
             f"Joueur {player + 1}: aucun renfort recu ({total_regiments} regiment(s), "
-            f"plafond {regiment_limit}). Mercenaires toujours achetables.",
+            f"plafond {regiment_limit}).{recours}",
         )
     controlled_territories = len(owned)
     ultra_owned = sum(1 for t in owned if t.reinforcement_bonus == 3)
@@ -1495,6 +1517,17 @@ def get_culture_protection_label(state: GameState, player: int) -> str:
     if level >= 25:
         return f"culture {culture}, pertes revolte/trahison limitees a 4, revolution limitee a 1/4"
     return f"culture {culture}, aucune protection culturelle"
+
+
+def get_culture_protection_suffix(state: GameState, player: int) -> str:
+    """Le rappel de protection culturelle colle a un message d'evenement.
+
+    Vide en version simplifiee : sans culture, « culture 0, aucune protection
+    culturelle » n'aurait aucun sens a l'ecran.
+    """
+    if is_simple_mode(state):
+        return ""
+    return f" ({get_culture_protection_label(state, player)})"
 
 
 def has_culture_advantage(
@@ -2367,7 +2400,7 @@ def trigger_sanctuary_annexation_event(state: GameState, human_player: int, rng=
     default_lost_count = min(5, len(owned))
     lost_count = calculate_cultural_revolt_or_betrayal_loss_count(state, human_player, default_lost_count)
     if lost_count <= 0:
-        return f"Sanctuaire ONU annexe : sanction de revolte/trahison sans perte pour J{human_player + 1} ({get_culture_protection_label(state, human_player)})."
+        return f"Sanctuaire ONU annexe : sanction de revolte/trahison sans perte pour J{human_player + 1}{get_culture_protection_suffix(state, human_player)}."
     territories_to_transfer = choose_owned_contiguous_block(state, human_player, lost_count, rng)
     if not territories_to_transfer:
         return f"Sanctuaire ONU annexe : sanction de revolte/trahison impossible, aucune cible valide hors capitale pour J{human_player + 1}."
@@ -3879,7 +3912,11 @@ def rotate_expired_late_resources(state: GameState, rng=random) -> List[str]:
 
 def maybe_spawn_scheduled_resources(state: GameState, rng=random) -> List[str]:
     """Fait apparaitre les ressources prevues au debut d'un nouveau tour global,
-    et fait tourner celles qui arrivent au bout de leur duree de vie."""
+    et fait tourner celles qui arrivent au bout de leur duree de vie.
+
+    En version simplifiee, seules les ressources +5 apparaissent : les mines
+    de minerais precieux ne rapportent que des ecus.
+    """
     messages: List[str] = []
 
     if (
@@ -3891,7 +3928,8 @@ def maybe_spawn_scheduled_resources(state: GameState, rng=random) -> List[str]:
             messages.append(f"Tour {state.turn}: {arrival}.")
 
     if (
-        state.turn in PRECIOUS_MINERAL_MINE_SPAWN_TURNS
+        not is_simple_mode(state)
+        and state.turn in PRECIOUS_MINERAL_MINE_SPAWN_TURNS
         and count_precious_mineral_mines(state) < LATE_RESOURCE_TARGET_COUNT
     ):
         arrival = spawn_precious_mineral_mine(state, rng)
@@ -3905,6 +3943,50 @@ def maybe_spawn_scheduled_resources(state: GameState, rng=random) -> List[str]:
     if messages:
         record_replay_snapshot(state, " | ".join(messages), force=True)
     return messages
+
+
+def maybe_spawn_random_fortress(state: GameState, rng=random) -> Optional[str]:
+    """Fait reapparaitre une forteresse (version simplifiee uniquement).
+
+    Sans boutique, le stock de forteresses ne peut que diminuer : chacune est
+    detruite a sa troisieme capture (``register_special_capture``). Ce tirage
+    de debut de tour global en repose une ailleurs tant qu'il en reste moins
+    que la cible, ponderee par la connectivite du territoire comme a la mise
+    en place. Aucune exclusion : un sanctuaire ONU peut en recevoir une, comme
+    c'est deja le cas au placement initial.
+    """
+    if not is_simple_mode(state):
+        return None
+    if len(state.fortress_territory_ids) >= SIMPLE_FORTRESS_TARGET_COUNT:
+        return None
+    if rng.randint(1, SIMPLE_FORTRESS_SPAWN_DENOMINATOR) != 1:
+        return None
+
+    candidates = [
+        terr for terr in state.territories
+        if terr.id not in state.fortress_territory_ids
+    ]
+    if not candidates:
+        return None
+    weights = [max(1, len(terr.neighbors)) ** 2 for terr in candidates]
+    pick = rng.uniform(0, sum(weights))
+    chosen = candidates[-1]
+    running = 0.0
+    for terr, weight in zip(candidates, weights):
+        running += weight
+        if pick <= running:
+            chosen = terr
+            break
+
+    state.fortress_territory_ids.add(chosen.id)
+    state.fortress_capture_counts[chosen.id] = 0
+    message = (
+        f"Tour {state.turn}: une forteresse est batie sur {chosen.name} "
+        f"(3 des en defense des 3 regiments, detruite apres 3 captures)."
+    )
+    record_major_event(state, message)
+    record_replay_snapshot(state, message, force=True)
+    return message
 
 
 def maybe_trigger_market_event(state: GameState, rng=random) -> Optional[str]:
@@ -4229,7 +4311,9 @@ def maybe_trigger_empire_event(state: GameState, rng=random) -> List[str]:
             shown_messages.append(chaos_message)
         return shown_messages
 
-    if state.turn % 40 == 0:
+    # Version simplifiee : les revolutions generales sont ecartees, les tours
+    # multiples de 40 tombent donc dans la branche trahison/revolte ci-dessous.
+    if state.turn % 40 == 0 and not is_simple_mode(state):
         active_players = get_active_players(state)
         if not active_players:
             return shown_messages
@@ -4333,12 +4417,17 @@ def maybe_trigger_empire_event(state: GameState, rng=random) -> List[str]:
     default_lost_count = min(5, len(owned))
     lost_count = calculate_cultural_revolt_or_betrayal_loss_count(state, target_player, default_lost_count)
     if lost_count <= 0:
-        event_message = f"Tour {state.turn}: evenement d'empire neutralise pour J{target_player + 1} ({get_culture_protection_label(state, target_player)})."
+        event_message = f"Tour {state.turn}: evenement d'empire neutralise pour J{target_player + 1}{get_culture_protection_suffix(state, target_player)}."
         record_major_event(state, event_message)
         shown_messages.append(event_message)
         return shown_messages
 
-    empire_event_index = state.turn // 10 - state.turn // 40
+    # Sans les revolutions des tours multiples de 40, l'alternance
+    # trahison/revolte ne doit plus les decompter.
+    if is_simple_mode(state):
+        empire_event_index = state.turn // 10
+    else:
+        empire_event_index = state.turn // 10 - state.turn // 40
     is_betrayal = empire_event_index % 2 == 0
     territories_to_transfer = choose_owned_contiguous_block(state, target_player, lost_count, rng)
     if not territories_to_transfer:
@@ -4367,7 +4456,7 @@ def maybe_trigger_empire_event(state: GameState, rng=random) -> List[str]:
             terr.owner = beneficiary_player
 
         refresh_eliminated_human_players(state)
-        event_message = f"Tour {state.turn}: trahison. J{target_player + 1} perd {lost_count} territoire(s) au profit de J{beneficiary_player + 1} ({get_culture_protection_label(state, target_player)})."
+        event_message = f"Tour {state.turn}: trahison. J{target_player + 1} perd {lost_count} territoire(s) au profit de J{beneficiary_player + 1}{get_culture_protection_suffix(state, target_player)}."
         record_major_event(state, event_message)
         shown_messages.append(event_message)
         return shown_messages
@@ -4379,7 +4468,7 @@ def maybe_trigger_empire_event(state: GameState, rng=random) -> List[str]:
 
     refresh_eliminated_human_players(state)
     comeback_text = " Nouveau joueur controle par l'ordinateur."
-    event_message = f"Tour {state.turn}: revolte chez J{target_player + 1}. {lost_count} territoire(s) rebelle(s) passent sous le controle de J{new_player + 1} ({get_culture_protection_label(state, target_player)})." + comeback_text
+    event_message = f"Tour {state.turn}: revolte chez J{target_player + 1}. {lost_count} territoire(s) rebelle(s) passent sous le controle de J{new_player + 1}{get_culture_protection_suffix(state, target_player)}." + comeback_text
     record_major_event(state, event_message)
     shown_messages.append(event_message)
     return shown_messages
@@ -4390,6 +4479,10 @@ def maybe_trigger_empire_event(state: GameState, rng=random) -> List[str]:
 # ----------------------------------------------------------------------
 
 def activate_last_stand_bonus_if_needed(state: GameState, player: int) -> Optional[str]:
+    # Version simplifiee : le bonus de dernier bastion est un paradis fiscal
+    # (revenu x10) double d'une forteresse gratuite — les deux sont ecartes.
+    if is_simple_mode(state):
+        return None
     if player < 0 or is_onu_player(state, player) or is_commercial_city_player(state, player):
         return None
     owned = [terr for terr in state.territories if terr.owner == player]

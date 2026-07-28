@@ -561,3 +561,69 @@ revient au lobby avec un message clair. `tests/test_serveur.py` : 26 tests.
 en base.** Reste connu, non bloquant : pas de bouton « Sauvegarder » dans
 l'interface web (l'API existe : `POST /api/parties/{id}/sauvegarder`) ;
 pas de code d'accès au lobby (assumé entre amis).
+
+## Version simplifiée ✅ (2026-07-28)
+
+Une option de départ — case « Version simplifiée » du lobby web, question 1
+du setup de x45 — pour une partie **uniquement basée sur le combat**.
+
+**Disparaissent** : la boutique et toute la phase d'achats, l'argent, la
+science, la culture, les capitales, les nations, les religions et lieux
+saints, les paradis fiscaux (dont le bonus de dernier bastion : revenu ×10
+*et* forteresse gratuite), les cités commerçantes, les mines de minerais,
+industries, temples, universités, centres culturels, merveilles, les
+alliances (achetées comme tirées au sort entre IA — réservées aux nations),
+la sédition et les révolutions générales des tours multiples de 40.
+
+**Restent** : le choix des cartes (et l'import), les joueurs/IA, le mode
+Tribus et les trois modes de difficulté ; le combat (3 dés au maximum, le
+4ᵉ étant débloqué par 100 de science), les expéditions maritimes, les
+renforts et leurs bonus +3/+5, les territoires ONU (apparition, libération,
+**annexion seule** — le tribut d'une soumission était en écus), les
+territoires dorés, les ponts aléatoires (apparition et effondrement), les
+forteresses, et les trahisons/révoltes tous les 10 tours.
+
+Points d'architecture :
+
+- **Un seul drapeau**, `GameState.simple_mode`, câblé comme `tribes_mode`
+  (état, payload, `mise_en_place.nouvelle_partie`, `SessionPartie.nouvelle`,
+  `POST /api/parties {"simple": true}`, lobby, x45). `regles.is_simple_mode`
+  le lit par `getattr` : les règles s'appliquent aussi à `GraphicalGame`
+  (duck typing) et aux vieilles sauvegardes.
+- **La clé `simple_mode` n'est émise dans le payload que si elle est vraie**
+  (moteur et x45) : une partie ordinaire produit exactement le payload v13
+  d'avant, et `tests/test_parite_x45.py` (jeux de clés identiques) reste vert.
+- **Presque tout s'éteint tout seul** : les mécaniques retirées sont pilotées
+  par des ensembles d'état, donc si la mise en place ne crée ni capitale, ni
+  CC, ni structure économique, les règles correspondantes retournent 0 ou
+  `[]` sans garde. `resolve_attack_once` n'a pas changé d'une ligne.
+- Les gardes explicites tiennent en quelques `if` : mise en place (CC,
+  capitales, industries/centres culturels), `begin_player_turn` (dérivé vers
+  `_begin_player_turn_simple` : plus que la mobilisation IA), `advance_turn`
+  (IA économique, sédition, religion, marché, vieillissements),
+  `maybe_spawn_scheduled_resources` (mines), `maybe_trigger_empire_event`
+  (révolutions %40, et l'alternance trahison/révolte repasse à `turn // 10`),
+  `activate_last_stand_bonus_if_needed`, et `terminer_attaque` qui saute la
+  phase d'achats.
+- **Nouveauté de règle** : `regles.maybe_spawn_random_fortress` — sans
+  boutique le stock de forteresses ne pourrait que fondre (chacune détruite à
+  sa 3ᵉ capture), donc une chance sur 6 par tour global en repose une tant
+  qu'il en reste moins de 5, pondérée par la connectivité comme à la mise en
+  place, sanctuaires ONU compris (comme au placement initial).
+- Interfaces : la boutique et le bouton « Terminer les achats » se masquent
+  d'eux-mêmes (la phase n'existe plus) ; sont adaptés l'en-tête (« Version
+  simplifiée » au lieu du trésor), les lignes de sièges, « Mon empire »
+  (forteresses, sans checklist de nation), « Situation générale » (colonnes
+  Terr./Rég./Dorés/Fort.), le cycle des vues (religion retirée) et le badge
+  du lobby. Côté x45 : en-tête sans E/C/S, suffixe « | Simplifiee ».
+
+Tests : `tests/test_mode_simplifie.py` — 23 tests (mise en place conforme,
+aucun achat accepté, pas de phase d'achats, ni revenu ni science ni culture,
+3 dés maximum, pas de dernier bastion, pas de soumission ONU, forteresses
+qui réapparaissent sous la cible et pas au-delà, destruction à la 3ᵉ capture,
+pas de sédition ni de révolution au tour 40, ONU toujours active, et une
+partie de 60 tours jouée par le moteur seul). Suite complète : 162 tests
+verts. Vérifié en direct dans le navigateur (partie créée avec la case
+cochée, siège pris, fin d'attaque → déplacements sans boutique, tours IA
+diffusés avec dés à 3 maximum et renforts +3, trésors à zéro, badge du
+lobby), console et logs serveur sans erreur.

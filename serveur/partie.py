@@ -133,6 +133,7 @@ class SessionPartie:
         ai_player_count: int,
         difficulty_level: str = "normal",
         tribes_mode: bool = False,
+        simple_mode: bool = False,
         seed: Optional[int] = None,
     ) -> "SessionPartie":
         """Cree une partie neuve depuis une carte (miroir de start_game_session).
@@ -140,11 +141,16 @@ class SessionPartie:
         Le premier tour est demarre (``begin_player_turn``), comme dans x45 ;
         si le joueur 0 est une IA, l'appelant declenche ensuite
         ``jouer_tours_ia_en_attente``.
+
+        ``simple_mode`` : version simplifiee, uniquement basee sur le combat
+        (ni boutique, ni economie, ni capitales — voir
+        ``mise_en_place.nouvelle_partie``).
         """
         rng = random.Random(seed)
         state = mise_en_place.nouvelle_partie(
             carte_payload, num_players, ai_player_count,
-            difficulty_level=difficulty_level, tribes_mode=tribes_mode, rng=rng,
+            difficulty_level=difficulty_level, tribes_mode=tribes_mode,
+            simple_mode=simple_mode, rng=rng,
         )
         session = cls(partie_id, state, source=None, seed=None)
         session.rng = rng
@@ -484,6 +490,7 @@ class SessionPartie:
                 "phase": self.state.phase,
                 "phase_tour": self.state.turn_phase,
                 "num_players": self.state.num_players,
+                "simple_mode": bool(self.state.simple_mode),
                 "sieges": self.sieges(),
                 "source": self.source,
             }
@@ -800,6 +807,7 @@ class GestionnaireParties:
         ai_player_count: int,
         difficulty_level: str = "normal",
         tribes_mode: bool = False,
+        simple_mode: bool = False,
         seed: Optional[int] = None,
     ) -> SessionPartie:
         contenu = (
@@ -811,7 +819,8 @@ class GestionnaireParties:
         carte_payload = json.loads(contenu)
         session = SessionPartie.nouvelle(
             self._nouvel_id(), carte_payload, num_players, ai_player_count,
-            difficulty_level=difficulty_level, tribes_mode=tribes_mode, seed=seed,
+            difficulty_level=difficulty_level, tribes_mode=tribes_mode,
+            simple_mode=simple_mode, seed=seed,
         )
         # Les sauvegardes futures de cette partie neuve iront au catalogue.
         session.stockage = self.stockage_sauvegardes

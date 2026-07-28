@@ -13,8 +13,10 @@ REST :
 - ``POST /api/parties``                — ouvre une partie :
   ``{"sauvegarde": "partie_001.json"}`` pour recharger une sauvegarde, ou
   ``{"carte": "Alpha.json", "joueurs": 4, "ia": 2, "mode": "normal",
-  "tribus": false}`` pour une partie neuve (mise en place du moteur) ;
-  ``seed`` optionnel pour des tests reproductibles.
+  "tribus": false, "simple": false}`` pour une partie neuve (mise en place du
+  moteur) ; ``simple`` demande la version simplifiee (uniquement le combat :
+  ni boutique, ni economie, ni capitales) ; ``seed`` optionnel pour des tests
+  reproductibles.
 - ``GET  /api/parties/{id}/etat``      — etat complet (sans historique replay).
 - ``GET  /api/parties/{id}/replay``    — l'historique replay (a la demande).
 - ``GET  /api/parties/{id}/bilans``    — etat des lieux par joueur actif
@@ -322,6 +324,7 @@ def creer_app(dossier_parties: Optional[Path] = None,
                     ai_player_count=int(corps.get("ia", 0)),
                     difficulty_level=str(corps.get("mode", "normal")),
                     tribes_mode=bool(corps.get("tribus", False)),
+                    simple_mode=bool(corps.get("simple", False)),
                     seed=seed,
                 )
             except FileNotFoundError:

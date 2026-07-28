@@ -41,6 +41,30 @@ class BeginTurnReport:
     skipped: bool = False  # phase != "playing" : rien n'a ete fait
 
 
+def _begin_player_turn_simple(state: GameState, player: int, rng=random) -> BeginTurnReport:
+    """Debut de tour en version simplifiee : rien que le militaire.
+
+    Les alliances aleatoires entre IA ne sont pas reprises : elles sont
+    reservees aux nations (``maybe_trigger_random_ai_alliance``), qui
+    n'existent pas ici. Le tresor n'est meme pas initialise, ce qui garde
+    ``player_money`` vide dans les sauvegardes.
+    """
+    if regles.is_human_player_id(state, player):
+        pending_events = state.pending_major_events_for_humans.pop(player, [])
+        if pending_events:
+            regles.queue_major_event_modal(
+                state,
+                "Evenements survenus pendant les autres tours",
+                pending_events,
+            )
+    mobilization_note = regles.maybe_trigger_ai_mobilization(state, player, rng)
+    turn_notes = [note for note in (mobilization_note,) if note]
+    regles.record_replay_snapshot(state, f"Tour {state.turn} - debut du tour de J{player + 1}")
+    if state.phase == "playing" and regles.is_ai_player(state, state.current_player):
+        regles.prepare_ai_behavior_for_turn(state, state.current_player, rng)
+    return BeginTurnReport(turn_notes)
+
+
 @dataclass
 class TurnAdvanceReport:
     """Evenements d'une fin de tour (miroir de complete_turn)."""
@@ -59,9 +83,16 @@ class TurnAdvanceReport:
 
 
 def begin_player_turn(state: GameState, player: int, rng=random) -> BeginTurnReport:
-    """Demarre le tour de ``player`` : evenements, revenus, science, culture."""
+    """Demarre le tour de ``player`` : evenements, revenus, science, culture.
+
+    En version simplifiee, il ne reste que les evenements militaires
+    (mobilisation et alliances aleatoires des IA) : ni revenu, ni science, ni
+    culture, ni nation, ni cite commercante, ni dernier bastion.
+    """
     if state.phase != "playing":
         return BeginTurnReport(skipped=True)
+    if regles.is_simple_mode(state):
+        return _begin_player_turn_simple(state, player, rng)
     if regles.is_human_player_id(state, player):
         pending_events = state.pending_major_events_for_humans.pop(player, [])
         if pending_events:
@@ -114,11 +145,13 @@ def advance_turn(
     ``begin_player_turn`` (utilise par x45, qui y greffe son interface).
     """
     report = TurnAdvanceReport()
+    simple = regles.is_simple_mode(state)
     state.turn_phase = "attack"
     state.turn_move_count = 0
     regles.cleanup_expired_alliances(state)
     previous_player = state.current_player
-    regles.execute_ai_economic_actions(state, previous_player, rng)
+    if not simple:
+        regles.execute_ai_economic_actions(state, previous_player, rng)
     report.reinforcement_report = regles.grant_reinforcements(state, previous_player, rng)
     active_players = regles.get_active_players(state)
     report.has_active_players = bool(active_players)
@@ -133,7 +166,8 @@ def advance_turn(
         if state.current_player <= previous_player:
             state.collecting_between_turn_events = True
             report.new_global_turn = True
-            report.sedition_message = regles.maybe_trigger_sedition_at_end_of_turn(state, rng)
+            if not simple:
+                report.sedition_message = regles.maybe_trigger_sedition_at_end_of_turn(state, rng)
             winner, reason = regles.evaluate_winner(state)
             if winner is not None:
                 state.collecting_between_turn_events = False
@@ -148,15 +182,19 @@ def advance_turn(
             bridge_message = regles.maybe_spawn_random_bridge(state, cell_width, cell_height, rng)
             if bridge_message:
                 resource_messages.append(bridge_message)
+            fortress_message = regles.maybe_spawn_random_fortress(state, rng)
+            if fortress_message:
+                resource_messages.append(fortress_message)
             report.resource_messages = resource_messages
-            religion_notes = regles.expand_religious_influences_if_due(state)
-            if religion_notes:
-                regles.record_major_event(state, f"Tour {state.turn}: " + " ".join(religion_notes))
-            report.religion_messages = religion_notes
-            regles.snapshot_tax_haven_turn_start_territory_counts(state)
-            regles.age_cultural_centers_one_turn(state)
-            regles.age_universities_one_turn(state)
-            report.market_message = regles.maybe_trigger_market_event(state, rng)
+            if not simple:
+                religion_notes = regles.expand_religious_influences_if_due(state)
+                if religion_notes:
+                    regles.record_major_event(state, f"Tour {state.turn}: " + " ".join(religion_notes))
+                report.religion_messages = religion_notes
+                regles.snapshot_tax_haven_turn_start_territory_counts(state)
+                regles.age_cultural_centers_one_turn(state)
+                regles.age_universities_one_turn(state)
+                report.market_message = regles.maybe_trigger_market_event(state, rng)
             report.empire_messages = regles.maybe_trigger_empire_event(state, rng)
             active_players = regles.get_active_players(state)
             sorted_players = sorted(active_players)
@@ -509,7 +547,13 @@ def apply_action(
             return _refuse("phase_invalide")
         # Miroir de handle_end_turn_action : les humains passent par la
         # phase d'achats, les IA (et anciens colonises) filent aux deplacements.
-        if regles.is_ai_player(state, state.current_player) or regles.is_colonized_player(state, state.current_player):
+        # En version simplifiee, il n'y a pas de boutique : tout le monde
+        # enchaine sur les deplacements.
+        if (
+            regles.is_simple_mode(state)
+            or regles.is_ai_player(state, state.current_player)
+            or regles.is_colonized_player(state, state.current_player)
+        ):
             state.turn_phase = "move"
             state.turn_move_count = 0
             return ActionOutcome(ok=True, next_phase="move")

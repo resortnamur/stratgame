@@ -286,6 +286,7 @@ function afficherParties(parties) {
       `Partie ${partie.id} — tour ${partie.tour}, ` +
       `${humains.length} humain(s)` +
       (occupants.length ? ` (${occupants.join(", ")})` : "") +
+      (partie.simple_mode ? " — version simplifiée" : "") +
       (partie.source ? ` — ${partie.source}` : "");
     const bouton = document.createElement("button");
     bouton.textContent = "Rejoindre";
@@ -389,6 +390,7 @@ $("form-nouvelle").addEventListener("submit", async (evenement) => {
       ia: Number($("champ-ia").value),
       mode: $("champ-mode").value,
       tribus: $("champ-tribus").checked,
+      simple: $("champ-simple").checked,
     });
     entrerEnPartie(resume.id);
   } catch (erreur) {
@@ -770,6 +772,12 @@ function nomDuJoueur(joueur) {
 }
 
 function toutRafraichir() {
+  // La vue religion n'a pas de sens en version simplifiée : si elle traînait
+  // en préférence locale, on revient à la vue forteresses.
+  if (modeSimple() && client.vueCarte === "religion") {
+    client.vueCarte = "fortress";
+    localStorage.setItem("jeux_strat_vue", "fortress");
+  }
   afficherEnTete();
   afficherSieges();
   afficherBarreActions();
@@ -841,6 +849,11 @@ function planifierBilans() {
   }, 1200);
 }
 
+function modeSimple() {
+  // Version simplifiée : le serveur n'émet la clé que dans ce cas.
+  return !!(client.etat && client.etat.simple_mode);
+}
+
 function afficherEmpire() {
   const zone = $("detail-empire");
   if (client.monSiege === null) {
@@ -860,15 +873,23 @@ function afficherEmpire() {
       `<strong>${bilan.regiments}</strong> régiments`,
     `Territoires dorés : ${bilan.dores}/${donnees.nb_dores}` +
       (bilan.mines ? ` — mines de minerais : ${bilan.mines}` : ""),
-    `Aménagements (${amenagements.total}) : ` +
+  ];
+  // Version simplifiée : seules les forteresses existent, et il n'y a pas de
+  // statut de nation à viser.
+  lignes.push(modeSimple()
+    ? `Forteresses : ${amenagements.forteresses}`
+    : `Aménagements (${amenagements.total}) : ` +
       `${amenagements.forteresses} forteresse(s), ${amenagements.usines} usine(s), ` +
       `${amenagements.aeroports} aéroport(s), ${amenagements.ports} port(s), ` +
       `${amenagements.temples} temple(s), ${amenagements.centres_culturels} centre(s) culturel(s), ` +
-      `${amenagements.universites} université(s)`,
-  ];
+      `${amenagements.universites} université(s)`);
   if (Object.keys(bilan.bonus).length) {
     lignes.push("Bonus de renforts : " + Object.entries(bilan.bonus)
       .map(([valeur, nombre]) => `${nombre} territoire(s) ${valeur}`).join(", "));
+  }
+  if (modeSimple()) {
+    zone.innerHTML = lignes.join("<br>");
+    return;
   }
   lignes.push(bilan.nation.est_nation
     ? "<strong>Statut de nation : acquis ✓</strong>"
@@ -888,24 +909,32 @@ function afficherSituation() {
     zone.textContent = "Chargement…";
     return;
   }
-  const colonnes = ["Joueur", "Terr.", "Rég.", "Écus", "+Rev", "Sci", "Cult", "Amén.", "Nation"];
+  // Version simplifiée : ni écus, ni science, ni culture, ni nation à afficher.
+  const simple = modeSimple();
+  const colonnes = simple
+    ? ["Joueur", "Terr.", "Rég.", "Dorés", "Fort."]
+    : ["Joueur", "Terr.", "Rég.", "Écus", "+Rev", "Sci", "Cult", "Amén.", "Nation"];
   const lignes = [];
   for (const [cle, bilan] of Object.entries(donnees.bilans)) {
     const joueur = Number(cle);
     const apercu = (etat.apercus || {})[cle] || {};
+    const pion =
+      `<span class="pion" style="background:${rgb(couleurJoueur(joueur))}"></span>${nomDuJoueur(joueur)}`;
     lignes.push({
       joueur,
-      cellules: [
-        `<span class="pion" style="background:${rgb(couleurJoueur(joueur))}"></span>${nomDuJoueur(joueur)}`,
-        bilan.territoires,
-        bilan.regiments,
-        etat.player_money[cle] || 0,
-        `+${apercu.revenu ?? "?"}`,
-        etat.player_science[cle] || 0,
-        apercu.culture ?? "?",
-        bilan.amenagements.total,
-        bilan.nation.est_nation ? "✓" : "",
-      ],
+      cellules: simple
+        ? [pion, bilan.territoires, bilan.regiments, bilan.dores, bilan.amenagements.forteresses]
+        : [
+          pion,
+          bilan.territoires,
+          bilan.regiments,
+          etat.player_money[cle] || 0,
+          `+${apercu.revenu ?? "?"}`,
+          etat.player_science[cle] || 0,
+          apercu.culture ?? "?",
+          bilan.amenagements.total,
+          bilan.nation.est_nation ? "✓" : "",
+        ],
     });
   }
   lignes.sort((a, b) => b.cellules[1] - a.cellules[1]);  // par territoires
@@ -1359,8 +1388,12 @@ $("replay-position").addEventListener("input", () => {
 });
 
 // Le bouton de vue cycle forteresses → toutes les icônes → religion (x45).
+// En version simplifiée, la vue religion est retirée du cycle : il n'y a
+// aucune religion à montrer.
 $("bouton-vue").addEventListener("click", () => {
-  const suivante = VUES_CARTE[(VUES_CARTE.indexOf(client.vueCarte) + 1) % VUES_CARTE.length];
+  const vues = modeSimple() ? VUES_CARTE.filter((v) => v !== "religion") : VUES_CARTE;
+  const courante = vues.indexOf(client.vueCarte);
+  const suivante = vues[(courante + 1) % vues.length];
   client.vueCarte = suivante;
   localStorage.setItem("jeux_strat_vue", suivante);
   $("bouton-vue").textContent = LIBELLES_VUES[suivante];
@@ -1434,7 +1467,12 @@ function afficherEnTete() {
     : (phases[etat.turn_phase] || etat.turn_phase);
   $("info-tour").textContent =
     `Tour ${etat.turn} — ${nomDuJoueur(etat.current_player)} (${phase})`;
-  if (client.monSiege !== null) {
+  if (modeSimple()) {
+    // Aucun trésor à afficher : on rappelle juste la version en cours.
+    $("info-tresor").textContent = client.monSiege === null
+      ? "Spectateur — version simplifiée"
+      : "Version simplifiée";
+  } else if (client.monSiege !== null) {
     const cle = String(client.monSiege);
     const or = etat.player_money[cle] || 0;
     const science = etat.player_science[cle] || 0;
@@ -1486,11 +1524,12 @@ function afficherSieges() {
       const apercu = (etat.apercus || {})[cle];
       const stats = document.createElement("span");
       stats.className = "statistiques";
-      stats.textContent =
-        `${possessions.length} terr. · ${regiments} rég. · ` +
-        `${etat.player_money[cle] || 0} écus` +
-        (apercu ? ` (+${apercu.revenu}) · sci ${etat.player_science[cle] || 0}` +
-                  ` (+${apercu.science_gain}) · cult ${apercu.culture}` : "");
+      stats.textContent = modeSimple()
+        ? `${possessions.length} terr. · ${regiments} rég.`
+        : `${possessions.length} terr. · ${regiments} rég. · ` +
+          `${etat.player_money[cle] || 0} écus` +
+          (apercu ? ` (+${apercu.revenu}) · sci ${etat.player_science[cle] || 0}` +
+                    ` (+${apercu.science_gain}) · cult ${apercu.culture}` : "");
       texte.append(stats);
     }
     element.append(pion, texte);

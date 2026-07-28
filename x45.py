@@ -273,6 +273,9 @@ class GraphicalGame:
         self.message_timer = 0
 
         self.tribes_mode = False
+        # Version simplifiee : partie uniquement basee sur le combat (les
+        # regles du moteur consultent cet attribut via regles.is_simple_mode).
+        self.simple_mode = False
         self.ai_state = "idle"
         self.ai_next_action_time = 0
         # Expeditions maritimes : iterateur des departs IA du tour courant
@@ -765,7 +768,8 @@ class GraphicalGame:
         else:
             mode_label = "standard"
         tribes_label = " - Tribus" if self.tribes_mode else ""
-        self.show_message(f"Debut de la partie - carte {mode_label} - mode {self.get_difficulty_label()}{tribes_label}", 2200)
+        simple_label = " - version simplifiee" if self.simple_mode else ""
+        self.show_message(f"Debut de la partie - carte {mode_label} - mode {self.get_difficulty_label()}{tribes_label}{simple_label}", 2200)
         self.current_player = 0
         self.turn = 1
         self.selected_source = None
@@ -798,6 +802,18 @@ class GraphicalGame:
         return 10 if self.difficulty_level == "gouvernement_mondial" else 15
 
     def setup_players(self) -> None:
+        version_choice = self.ask_int(
+            "Version du jeu :\n"
+            "1 - Complete : achats, argent, science, culture, capitales, nations,\n"
+            "    religions, paradis fiscaux, cites commercantes\n"
+            "2 - Simplifiee : uniquement le combat. Restent les ressources +3 et +5,\n"
+            "    les territoires ONU et dores, les ponts aleatoires, les forteresses,\n"
+            "    les renforts et les expeditions maritimes\n\n"
+            "Votre choix (1-2) : ",
+            1,
+            2,
+        )
+        self.simple_mode = version_choice == 2
         self.num_players = self.ask_int("Nombre de joueurs (2-10) : ", 2, 10)
         self.ai_player_count = self.ask_int(
             f"Combien de joueurs doivent etre controles par ordinateur ? (0-{self.num_players}) : ",
@@ -1102,7 +1118,7 @@ class GraphicalGame:
 
     def build_game_payload(self) -> dict:
         map_payload = self.build_map_payload()
-        return {
+        payload = {
             **map_payload,
             "kind": "game",
             "num_players": self.num_players,
@@ -1296,6 +1312,12 @@ class GraphicalGame:
                 for terr in self.territories
             ],
         }
+        # La version simplifiee n'ajoute sa cle que lorsqu'elle est active :
+        # une partie ordinaire produit exactement le meme payload qu'avant
+        # (parite avec le moteur verifiee cle par cle par les tests).
+        if self.simple_mode:
+            payload["simple_mode"] = True
+        return payload
 
     def save_current_game_to_file(self) -> str:
         existing = sorted(self.saved_games_dir.glob("*.json"))
@@ -1346,6 +1368,7 @@ class GraphicalGame:
         self.initial_ai_player_count = int(payload.get("initial_ai_player_count", self.ai_player_count))
         self.difficulty_level = self.normalize_difficulty_level(payload.get("difficulty_level", "normal"))
         self.tribes_mode = bool(payload.get("tribes_mode", False))
+        self.simple_mode = bool(payload.get("simple_mode", False))
         self.base_ai_players = set(int(x) for x in payload.get("base_ai_players", []))
         self.auto_controlled_players = set(int(x) for x in payload.get("auto_controlled_players", []))
         self.human_controlled_players = set(int(x) for x in payload.get("human_controlled_players", []))
@@ -1832,6 +1855,9 @@ class GraphicalGame:
         self.commercial_city_players = set()
         self.commercial_city_capital_ids = {}
         self.pending_commercial_city_spawns = 0
+        # Version simplifiee : la Cite commercante ne vit que d'economie.
+        if self.simple_mode:
+            return
         for _ in range(self.INITIAL_COMMERCIAL_CITY_COUNT):
             player = self.num_players
             self.num_players += 1
@@ -4304,7 +4330,10 @@ class GraphicalGame:
             self._assign_ownership_tribes()
         else:
             self._assign_ownership_random()
-        self.assign_initial_player_capitals()
+        # Version simplifiee : aucune capitale, donc aucun regroupement
+        # capitale + voisins directs au depart.
+        if not self.simple_mode:
+            self.assign_initial_player_capitals()
 
     def _assign_ownership_random(self) -> None:
         ids = list(range(len(self.territories)))
@@ -5698,6 +5727,11 @@ class GraphicalGame:
         )
         self.fortress_territory_ids = set(fortress_ids)
         self.fortress_capture_counts = {tid: 0 for tid in self.fortress_territory_ids}
+
+        # Version simplifiee : seules les forteresses sont posees (industries et
+        # centres culturels ne produisent que de l'or et de la culture).
+        if self.simple_mode:
+            return
 
         ids = list(non_commercial_ids)
         random.shuffle(ids)
@@ -8238,7 +8272,8 @@ class GraphicalGame:
 
     def toggle_all_map_icons(self) -> None:
         current = getattr(self, "map_icon_view", "all" if getattr(self, "show_all_map_icons", False) else "fortress")
-        order = ["fortress", "all", "religion"]
+        # Version simplifiee : aucune religion a montrer, la vue est retiree du cycle.
+        order = ["fortress", "all"] if self.simple_mode else ["fortress", "all", "religion"]
         try:
             next_mode = order[(order.index(current) + 1) % len(order)]
         except ValueError:
@@ -9375,7 +9410,13 @@ class GraphicalGame:
         if self.pending_expedition_battle is not None:
             return  # pas de fin de tour pendant un debarquement
         if self.turn_phase == "attack":
-            if self.is_ai_player(self.current_player) or self.is_colonized_player(self.current_player):
+            # Version simplifiee : pas de boutique, on enchaine directement sur
+            # les deplacements (comme les IA).
+            if (
+                self.simple_mode
+                or self.is_ai_player(self.current_player)
+                or self.is_colonized_player(self.current_player)
+            ):
                 self.start_move_phase()
             else:
                 self.begin_shopping_phase()
@@ -11316,7 +11357,8 @@ class GraphicalGame:
         else:
             self.screen.blit(self.font_medium.render(f"Tour {self.turn}", True, (236, 240, 241)), (20, 18))
             tribes_suffix = " | Tribus" if self.tribes_mode else ""
-            difficulty_label = f"Mode: {self.get_difficulty_label()}{tribes_suffix}"
+            simple_suffix = " | Simplifiee" if self.simple_mode else ""
+            difficulty_label = f"Mode: {self.get_difficulty_label()}{tribes_suffix}{simple_suffix}"
             self.screen.blit(self.font_small.render(f"Carte: {map_label}", True, (189, 195, 199)), (22, 42))
             self.screen.blit(self.font_small.render(difficulty_label, True, (189, 195, 199)), (22, 60))
             if self.turn_phase == "move" and not self.is_ai_player(self.current_player):
@@ -11324,7 +11366,8 @@ class GraphicalGame:
             else:
                 phase_text = "Phase: attaque" if self.turn_phase == "attack" else "Phase: deplacement"
             self.screen.blit(self.font_small.render(phase_text, True, (189, 195, 199)), (180, 60))
-            if self.current_player >= 0:
+            # Version simplifiee : ni ecus, ni culture, ni science a afficher.
+            if self.current_player >= 0 and not self.simple_mode:
                 economy_text = f"E:{self.get_player_money(self.current_player)}(+{self.calculate_player_income(self.current_player)}) | C:{self.calculate_player_culture(self.current_player)} | S:{self.get_player_science(self.current_player)}(+{self.calculate_player_science_income(self.current_player)})"
                 self.screen.blit(self.font_small.render(economy_text, True, (244, 208, 63)), (360, 60))
             player_color = self.PLAYER_COLORS[self.current_player % len(self.PLAYER_COLORS)]
