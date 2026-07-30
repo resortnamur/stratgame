@@ -567,6 +567,11 @@ def construire_pont(
         return _refus(f"Ponts verrouilles : {SCIENCE_BRIDGE_THRESHOLD} points de science requis.")
     if territory_a == territory_b:
         return _refus("Choisissez deux territoires differents.")
+    # Un pont se construit depuis chez soi : le joueur doit controler au
+    # moins une des deux extremites (pas forcement les deux).
+    if (state.territories[territory_a].owner != state.current_player
+            and state.territories[territory_b].owner != state.current_player):
+        return _refus("Pont impossible : vous devez controler au moins un des deux territoires.")
     key = tuple(sorted((territory_a, territory_b)))
     if key in state.bridge_links or territory_b in state.territories[territory_a].neighbors:
         return _refus("Ces deux territoires sont deja directement relies.")
