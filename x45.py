@@ -4,7 +4,7 @@ import os
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import pygame
 
@@ -1657,40 +1657,21 @@ class GraphicalGame:
 
 
     def setup_map_options(self) -> None:
-        map_choice = self.ask_int(
-            "Type de carte :\n"
-            "1 - Carte standard\n"
-            "2 - Carte continents (entre 20% et 35% d'eau)\n"
-            "3 - Carte continents (entre 40% et 50% d'eau)\n"
-            "4 - Carte Terre (5 grands continents lisibles et bien separes)\n"
-            "5 - Carte GIGA/MEGA (grand archipel dense inspire des cartes sauvegardees)\n\n"
-            "Votre choix (1-5) : ",
-            1,
-            5,
+        # Generation aleatoire unique (portage du "Completer le monde" de
+        # l'editeur de monde Jeux Strat 2) : l'utilisateur ne choisit que le
+        # nombre de territoires et le nombre de continents. Tout le reste est
+        # tire au sort (mode "mix") : formes bloc/etoile, tailles variees,
+        # noyaux jamais petits poses au large, territoires agglomeres dans
+        # les creux des continents.
+        territoires = self.ask_int("Nombre de territoires (2-300) : ", 2, 300)
+        continents = self.ask_int("Nombre de continents (1-50) : ", 1, 50)
+        self.map_mode = "custom"
+        self.random_map_territories = territoires
+        self.random_map_continents = min(continents, territoires)
+        print(
+            f"Carte aleatoire : {territoires} territoires en "
+            f"{self.random_map_continents} continent(s), formes et tailles au hasard."
         )
-        if map_choice == 1:
-            self.map_mode = "standard"
-            self.setup_water_density()
-        elif map_choice == 2:
-            self.map_mode = "continents"
-            self.min_water_ratio = self.continent_min_water_ratio
-            self.max_water_ratio = self.continent_max_water_ratio
-            print("Mode continent : quantite d'eau fixee automatiquement (entre 20% et 35% de la carte).")
-        elif map_choice == 3:
-            self.map_mode = "continents_45"
-            self.min_water_ratio = self.continent_dense_min_water_ratio
-            self.max_water_ratio = self.continent_dense_max_water_ratio
-            print("Mode continent : quantite d'eau fixee automatiquement (entre 40% et 50% de la carte).")
-        elif map_choice == 4:
-            self.map_mode = "terre"
-            self.min_water_ratio = 0.34
-            self.max_water_ratio = 0.50
-            print("Mode Terre : 5 grands continents lisibles, entre 34% et 50% d'eau, avec mers plus nettes et liaisons centre-a-centre.")
-        else:
-            self.map_mode = "gigamega"
-            self.min_water_ratio = 0.46
-            self.max_water_ratio = 0.58
-            print("Mode GIGA/MEGA : 80 a 100 territoires, archipel dense, passages etroits, environ 46% a 58% d'eau.")
 
     def setup_water_density(self) -> None:
         choice = self.ask_int(
@@ -4084,9 +4065,268 @@ class GraphicalGame:
 
         raise RuntimeError("Impossible de generer une carte GIGA/MEGA correcte.")
 
+    # ------------------------------------------------------------------
+    # Carte aleatoire (portage du "Completer le monde" de l'editeur de
+    # monde Jeux Strat 2) : noyaux au large + accretion dans les creux.
+    # ------------------------------------------------------------------
+
+    RANDOM_MAP_SIZES = {
+        "petite": (80, 3, 5),
+        "moyenne": (160, 4, 7),
+        "grande": (250, 6, 10),
+        "immense": (720, 12, 20),
+    }
+    RANDOM_MAP_SIZE_ORDER = ["petite", "moyenne", "grande", "immense"]
+
+    def _random_map_shape(self, center: Tuple[int, int], size_name: str, shape_name: str, available: set) -> Optional[set]:
+        """Une forme organique (bloc ou etoile) confinee a ``available``,
+        d'un seul tenant autour de ``center`` — memes garanties que
+        ``generate_custom_territory_shape`` mais sur un domaine restreint."""
+        target, min_radius, max_radius = self.RANDOM_MAP_SIZES[size_name]
+        generator = (
+            self.generate_star_custom_shape if shape_name == "etoile"
+            else self.generate_block_custom_shape
+        )
+        if center not in available:
+            return None
+        for _ in range(8):
+            cells = generator(center[0], center[1], target, min_radius, max_radius, available)
+            if not cells:
+                continue
+            cells = {cell for cell in cells if cell in available}
+            cells.add(center)
+            cells = self.extract_connected_component(cells, center)
+            if len(cells) >= max(24, target // 4):
+                return cells
+        return None
+
+    def generate_random_map(self) -> None:
+        """Genere la carte aleatoire : seuls le nombre de territoires et le
+        nombre de continents sont imposes, tout le reste est tire au sort.
+
+        Regles (identiques a l'editeur de monde) :
+        - noyaux des continents jamais petits, poses "au large" (les plus
+          loin possible de toutes les terres), un par continent ;
+        - autour d'un noyau bloc : blocs ou etoiles de taille inferieure ;
+          autour d'un noyau etoile : blocs de la meme taille ;
+        - chaque territoire suivant nait dans le creux le plus encaisse de
+          la frontiere (continents compacts, etoiles imbriquees) ;
+        - cote bruitee le long des bords (pas de flancs rectilignes),
+          franchie seulement s'il n'y a plus de place ailleurs ;
+        - si le nombre demande ne tient pas, on en place autant que possible.
+        """
+        nombre = max(2, int(getattr(self, "random_map_territories", 40) or 40))
+        continents = min(int(getattr(self, "random_map_continents", 4) or 4), nombre)
+        self.reset_custom_map_editor()
+        rows, cols = self.rows, self.cols
+
+        # Cote bruitee : profondeur d'exclusion 2..6, en marche aleatoire.
+        def profil(longueur: int) -> List[int]:
+            valeur = random.randint(2, 5)
+            valeurs = []
+            for _ in range(longueur):
+                valeur = min(6, max(2, valeur + random.randint(-1, 1)))
+                valeurs.append(valeur)
+            return valeurs
+
+        haut, bas = profil(cols), profil(cols)
+        gauche, droite = profil(rows), profil(rows)
+
+        def pres_du_bord(cell: Tuple[int, int]) -> bool:
+            r, c = cell
+            return r < haut[c] or r >= rows - bas[c] or c < gauche[r] or c >= cols - droite[r]
+
+        libres = {(r, c) for r in range(rows) for c in range(cols) if not pres_du_bord((r, c))}
+
+        # Frontiere d'accretion : cases libres au contact d'un territoire
+        # pose pendant cette generation (tirage aleatoire en O(1)).
+        frontiere_liste: List[Tuple[int, int]] = []
+        frontiere_index: Dict[Tuple[int, int], int] = {}
+
+        def frontiere_ajouter(cell: Tuple[int, int]) -> None:
+            if cell in frontiere_index:
+                return
+            frontiere_index[cell] = len(frontiere_liste)
+            frontiere_liste.append(cell)
+
+        def frontiere_retirer(cell: Tuple[int, int]) -> None:
+            position = frontiere_index.pop(cell, None)
+            if position is None:
+                return
+            derniere = frontiere_liste.pop()
+            if derniere != cell:
+                frontiere_liste[position] = derniere
+                frontiere_index[derniere] = position
+
+        def voisins_toriques(cell: Tuple[int, int]) -> List[Tuple[int, int]]:
+            r, c = cell
+            return [
+                ((r + 1) % rows, c), ((r - 1) % rows, c),
+                (r, (c + 1) % cols), (r, (c - 1) % cols),
+            ]
+
+        def etendre_frontiere(cells) -> None:
+            for cell in cells:
+                for voisin in voisins_toriques(cell):
+                    if self.grid_territory[voisin[0]][voisin[1]] == -1:
+                        frontiere_ajouter(voisin)
+
+        posees: List[Tuple[int, int]] = []
+        ensembles: Dict[int, Tuple[str, str]] = {}  # tid -> (forme, taille) du noyau
+        ajoutes = 0
+
+        def poser(centre: Tuple[int, int], taille: str, forme_nom: str) -> Optional[int]:
+            nonlocal ajoutes
+            cells = self._random_map_shape(centre, taille, forme_nom, libres)
+            cible = self.RANDOM_MAP_SIZES[taille][0]
+            # Une forme trop a l'etroit (moins de 60% de sa cible) est
+            # rejetee : les territoires gardent leur belle allure.
+            if not cells or len(cells) < 0.6 * cible:
+                return None
+            tid = len(self.territories)
+            self.territories.append(Territory(
+                id=tid, name=f"T{tid + 1}", owner=-1, regiments=0,
+                cells=sorted(cells), neighbors=[], reinforcement_bonus=1,
+            ))
+            for cell in cells:
+                self.grid_territory[cell[0]][cell[1]] = tid
+                libres.discard(cell)
+                frontiere_retirer(cell)
+                posees.append(cell)
+            etendre_frontiere(cells)
+            ajoutes += 1
+            return tid
+
+        def champ_distances() -> Optional[List[List[int]]]:
+            distances = [[-1] * cols for _ in range(rows)]
+            file: List[Tuple[int, int]] = []
+            for r in range(rows):
+                for c in range(cols):
+                    if self.grid_territory[r][c] >= 0:
+                        distances[r][c] = 0
+                        file.append((r, c))
+            if not file:
+                return None
+            tete = 0
+            while tete < len(file):
+                cell = file[tete]
+                tete += 1
+                for voisin in voisins_toriques(cell):
+                    if distances[voisin[0]][voisin[1]] == -1:
+                        distances[voisin[0]][voisin[1]] = distances[cell[0]][cell[1]] + 1
+                        file.append(voisin)
+            return distances
+
+        def cellule_au_large() -> Tuple[int, int]:
+            distances = champ_distances()
+            if distances is None:
+                return random.choice(tuple(libres))
+            maximum = max(distances[r][c] for (r, c) in libres)
+            if maximum <= 1:
+                return random.choice(tuple(libres))
+            seuil = max(1, int(maximum * 0.8))
+            candidates = [cell for cell in libres if distances[cell[0]][cell[1]] >= seuil]
+            return random.choice(candidates)
+
+        def taille_inferieure(taille: str) -> str:
+            position = self.RANDOM_MAP_SIZE_ORDER.index(taille)
+            if position <= 0:
+                return "petite"
+            return random.choice(self.RANDOM_MAP_SIZE_ORDER[:position])
+
+        def parametres_satellite(ensemble: Optional[Tuple[str, str]]) -> Tuple[str, str]:
+            if ensemble is None:
+                return (
+                    random.choice(self.RANDOM_MAP_SIZE_ORDER),
+                    random.choice(["bloc", "etoile"]),
+                )
+            forme_noyau, taille_noyau = ensemble
+            if forme_noyau == "etoile":
+                # Autour d'une etoile : des blocs de la meme taille.
+                return taille_noyau, "bloc"
+            # Autour d'un bloc : blocs ou etoiles de taille inferieure.
+            return taille_inferieure(taille_noyau), random.choice(["bloc", "etoile"])
+
+        def ensemble_pour(centre: Tuple[int, int]) -> Optional[Tuple[str, str]]:
+            for voisin in voisins_toriques(centre):
+                tid = self.grid_territory[voisin[0]][voisin[1]]
+                if tid >= 0 and tid in ensembles:
+                    return ensembles[tid]
+            return None
+
+        def poser_noyaux() -> None:
+            echecs = 0
+            while ajoutes < min(continents, nombre) and echecs < 50:
+                if len(libres) < self.RANDOM_MAP_SIZES["petite"][0]:
+                    break
+                # Un noyau n'est jamais petit.
+                taille = random.choice(["moyenne", "grande", "immense"])
+                forme_nom = random.choice(["bloc", "etoile"])
+                tid = poser(cellule_au_large(), taille, forme_nom)
+                if tid is not None:
+                    ensembles[tid] = (forme_nom, taille)
+                    echecs = 0
+                else:
+                    echecs += 1
+
+        def score_creux(cell: Tuple[int, int]) -> int:
+            r0, c0 = cell
+            score = 0
+            for dr in range(-4, 5):
+                for dc in range(-4, 5):
+                    if self.grid_territory[(r0 + dr) % rows][(c0 + dc) % cols] >= 0:
+                        score += 1
+            return score
+
+        def croissance() -> None:
+            echecs = 0
+            while ajoutes < nombre and echecs < 80:
+                candidats: List[Tuple[int, int]] = []
+                tirages = 0
+                while len(candidats) < 15 and tirages < 45 and frontiere_liste:
+                    tirages += 1
+                    candidat = frontiere_liste[random.randrange(len(frontiere_liste))]
+                    if candidat not in libres:
+                        frontiere_retirer(candidat)
+                        continue
+                    if candidat not in candidats:
+                        candidats.append(candidat)
+                if not candidats:
+                    break
+                centre = max(candidats, key=lambda cell: score_creux(cell) + random.random())
+                ensemble = ensemble_pour(centre)
+                taille, forme_nom = parametres_satellite(ensemble)
+                tid = poser(centre, taille, forme_nom)
+                if tid is not None:
+                    if ensemble is not None:
+                        ensembles[tid] = ensemble
+                    echecs = 0
+                else:
+                    frontiere_retirer(centre)
+                    echecs += 1
+
+        poser_noyaux()
+        croissance()
+
+        # Repli "plus le choix" : on autorise les abords des bords.
+        if ajoutes < nombre:
+            for r in range(rows):
+                for c in range(cols):
+                    if self.grid_territory[r][c] == -1 and pres_du_bord((r, c)):
+                        libres.add((r, c))
+            etendre_frontiere(posees)
+            poser_noyaux()
+            croissance()
+
+        self.rebuild_cells_from_grid()
+        self.recompute_neighbors_from_grid()
+
     def generate_grid_map(self) -> None:
         if self.map_mode == "custom":
-            self.reset_custom_map_editor()
+            if getattr(self, "random_map_territories", None):
+                self.generate_random_map()
+            else:
+                self.reset_custom_map_editor()
             return
         if self.map_mode == "terre":
             self.generate_terre_map()
