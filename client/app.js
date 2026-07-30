@@ -298,19 +298,33 @@ function afficherParties(parties) {
   }
 }
 
+// Valeur spéciale du sélecteur de carte : génération aléatoire au moment de
+// créer la partie (generation.js — le « Compléter le monde » de l'éditeur).
+const CARTE_ALEATOIRE = "__aleatoire__";
+
 function afficherCartes(cartes) {
   const champ = $("champ-carte");
   champ.textContent = "";
+  const optionAleatoire = document.createElement("option");
+  optionAleatoire.value = CARTE_ALEATOIRE;
+  optionAleatoire.textContent = "🎲 Carte aléatoire";
+  champ.append(optionAleatoire);
   for (const carte of cartes) {
     const option = document.createElement("option");
     option.value = carte.fichier;
     option.textContent = `${carte.fichier.replace(/\.json$/, "")} (${carte.territoires} terr.)`;
     champ.append(option);
   }
-  // Pas de création tant que le catalogue n'est pas là (évite d'envoyer
-  // une carte vide si on soumet très vite après l'ouverture du lobby).
-  $("bouton-creer").disabled = cartes.length === 0;
+  champ.value = CARTE_ALEATOIRE;
+  ajusterZoneAleatoire();
+  $("bouton-creer").disabled = false;
 }
+
+function ajusterZoneAleatoire() {
+  $("zone-aleatoire").hidden = $("champ-carte").value !== CARTE_ALEATOIRE;
+}
+
+$("champ-carte").addEventListener("change", ajusterZoneAleatoire);
 
 function afficherSauvegardes(sauvegardes) {
   const liste = $("liste-sauvegardes");
@@ -385,9 +399,21 @@ async function importerCarte(nom, carte, remplacer) {
 $("form-nouvelle").addEventListener("submit", async (evenement) => {
   evenement.preventDefault();
   $("erreur-lobby").textContent = "";
+  let carte = $("champ-carte").value;
+  if (carte === CARTE_ALEATOIRE) {
+    // La carte est générée ici même et accompagne la création de la partie.
+    carte = GENERATION.genererCarteAleatoire(
+      Number($("champ-territoires").value),
+      Number($("champ-continents").value),
+    );
+    if (!carte) {
+      $("erreur-lobby").textContent = "Impossible de générer la carte, réessayez.";
+      return;
+    }
+  }
   try {
     const resume = await api("/api/parties", {
-      carte: $("champ-carte").value,
+      carte,
       joueurs: Number($("champ-joueurs").value),
       ia: Number($("champ-ia").value),
       mode: $("champ-mode").value,

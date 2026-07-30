@@ -14,7 +14,9 @@ REST :
   ``{"sauvegarde": "partie_001.json"}`` pour recharger une sauvegarde, ou
   ``{"carte": "Alpha.json", "joueurs": 4, "ia": 2, "mode": "normal",
   "tribus": false, "simple": false}`` pour une partie neuve (mise en place du
-  moteur) ; ``simple`` demande la version simplifiee (uniquement le combat :
+  moteur) ; ``carte`` accepte aussi un payload complet (dict) — c'est le
+  chemin des cartes aleatoires generees par le lobby, non cataloguees ;
+  ``simple`` demande la version simplifiee (uniquement le combat :
   ni boutique, ni economie, ni capitales) ; ``seed`` optionnel pour des tests
   reproductibles.
 - ``GET  /api/parties/{id}/etat``      — etat complet (sans historique replay).
@@ -332,6 +334,24 @@ def creer_app(dossier_parties: Optional[Path] = None,
                 )
             except FileNotFoundError:
                 raise HTTPException(status_code=404, detail="Carte inconnue.")
+            except (ValueError, KeyError, TypeError):
+                raise HTTPException(
+                    status_code=422,
+                    detail="Parametres invalides (joueurs 2-10, ia 0-joueurs, carte lisible).",
+                )
+        elif isinstance(carte, dict):
+            # Carte fournie en ligne (carte aleatoire generee par le lobby) :
+            # elle n'est pas cataloguee, elle sert juste a cette partie.
+            try:
+                session = gestionnaire.creer_depuis_payload(
+                    carte,
+                    num_players=int(corps.get("joueurs")),
+                    ai_player_count=int(corps.get("ia", 0)),
+                    difficulty_level=str(corps.get("mode", "normal")),
+                    tribes_mode=bool(corps.get("tribus", False)),
+                    simple_mode=bool(corps.get("simple", False)),
+                    seed=seed,
+                )
             except (ValueError, KeyError, TypeError):
                 raise HTTPException(
                     status_code=422,

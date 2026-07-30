@@ -856,6 +856,43 @@ class GestionnaireParties:
         self.parties[session.id] = session
         return session
 
+    def creer_depuis_payload(
+        self,
+        carte_payload: Any,
+        num_players: int,
+        ai_player_count: int,
+        difficulty_level: str = "normal",
+        tribes_mode: bool = False,
+        simple_mode: bool = False,
+        seed: Optional[int] = None,
+    ) -> SessionPartie:
+        """Cree une partie depuis une carte fournie en ligne (non cataloguee).
+
+        C'est le chemin des cartes aleatoires generees par le lobby : la
+        carte accompagne la creation de la partie sans passer par le
+        catalogue ``cartes_sauvegardees``. Memes garde-fous que
+        ``importer_carte`` : taille bornee et carte que le moteur sait
+        vraiment charger (``ValueError('carte_invalide')`` sinon).
+        """
+        if not isinstance(carte_payload, dict):
+            raise ValueError("carte_invalide")
+        if len(json.dumps(carte_payload, ensure_ascii=False)) > self.TAILLE_CARTE_MAX:
+            raise ValueError("carte_trop_grosse")
+        try:
+            GameState.from_map_payload(carte_payload)
+        except Exception:
+            raise ValueError("carte_invalide")
+        session = SessionPartie.nouvelle(
+            self._nouvel_id(), carte_payload, num_players, ai_player_count,
+            difficulty_level=difficulty_level, tribes_mode=tribes_mode,
+            simple_mode=simple_mode, seed=seed,
+        )
+        session.stockage = self.stockage_sauvegardes
+        if self.sauvegarde_auto:
+            session.preparer_sauvegarde_auto()
+        self.parties[session.id] = session
+        return session
+
     def importer_carte(self, nom: Any, payload: Any, remplacer: bool = False) -> Dict[str, Any]:
         """Valide et range une carte fournie par un client (lobby).
 
