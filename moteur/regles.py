@@ -1177,11 +1177,18 @@ def get_ai_reinforcement_bonus(state: GameState, player: int) -> int:
 
 
 def place_end_turn_reinforcement(state: GameState, terr: Territory, player: int) -> bool:
-    """Place un renfort, ou le convertit en ecus si le territoire a une universite."""
+    """Place un renfort, ou le convertit en ecus si le territoire a une universite.
+
+    Exception : un joueur reduit a son dernier territoire touche ses renforts
+    en regiments meme sous une universite — elle ne doit pas le condamner en
+    asphyxiant sa seule source de troupes.
+    """
     if terr.id in state.university_territory_ids:
-        ensure_player_economy(state, player)
-        state.player_money[player] += 10
-        return True
+        owned_count = sum(1 for t in state.territories if t.owner == player)
+        if owned_count > 1:
+            ensure_player_economy(state, player)
+            state.player_money[player] += 10
+            return True
     terr.regiments += 1
     return False
 

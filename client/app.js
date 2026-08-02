@@ -1054,7 +1054,6 @@ function afficherBarreActions() {
   // La bascule humain ↔ IA de son propre siège, toujours à portée de main.
   $("bouton-mode-ia").hidden = client.monSiege === null;
   $("bouton-mode-ia").textContent = monAuto ? "Reprendre la main" : "Laisser l'IA jouer";
-  afficherChampTransport(monTour && enDeplacement && !monAuto);
 
   if (monAuto) {
     $("indication-phase").textContent = etat.current_player === client.monSiege
@@ -1101,42 +1100,13 @@ function afficherBarreActions() {
   }
 }
 
-// Le champ « Transport maritime : n régiment(s) » de la barre d'actions :
-// visible pendant sa phase de déplacement dès qu'une source est choisie, il
-// fixe la taille du convoi avant le clic droit sur la destination.
-function afficherChampTransport(actif) {
-  const bloc = $("bloc-transport");
-  const champ = $("champ-transport");
-  const etat = client.etat;
-  const source = client.selection;
-  if (!actif || !etat || source === null || etat.territories_state[source].owner !== client.monSiege) {
-    bloc.hidden = true;
-    return;
-  }
-  const maximum = maxTransportMaritime(etat, source);
-  if (maximum <= 0) {
-    bloc.hidden = true;
-    return;
-  }
-  bloc.hidden = false;
-  champ.max = maximum;
-  const voulu = Number(champ.value) || 1;
-  champ.value = Math.max(1, Math.min(voulu, maximum));
-}
-
-function quantiteTransport(etat, source) {
-  const maximum = maxTransportMaritime(etat, source);
-  const voulu = Number($("champ-transport").value) || 1;
-  return Math.max(1, Math.min(voulu, maximum));
-}
-
 // La destination est à moi mais aucune chaîne de territoires alliés n'y mène :
 // on demande l'aperçu au serveur (distance, maximum, chances du dé à 64 faces)
 // puis on confirme le voyage.
 async function proposerTransportMaritime(source, cible) {
   if (client.expedition || actionEnAttente()) return;
   const etat = client.etat;
-  const regiments = quantiteTransport(etat, source);
+  const regiments = maxTransportMaritime(etat, source);
   let apercu;
   try {
     apercu = await api(
@@ -1160,8 +1130,8 @@ async function proposerTransportMaritime(source, cible) {
     "Entreprendre un voyage à travers les océans ?",
     [
       `${nomSource} → ${nomCible} : ${Math.round(apercu.distance)} pixels de traversée.`,
-      `${apercu.regiments} régiment(s) embarquent sur ${apercu.maximum} possible(s) — ` +
-        `autant de déplacements consommés, même en cas de sinistre.`,
+      `Jusqu'à ${apercu.maximum} régiment(s) peuvent embarquer — chaque régiment ` +
+        `consomme un déplacement, même en cas de sinistre.`,
       `${pourcent} % de chances d'arriver indemne (${apercu.faces_indemne} sur 64). ` +
         `Sinon : 25 % de pertes (${apercu.faces_pertes["25"]}/64), ` +
         `50 % (${apercu.faces_pertes["50"]}/64), ` +
@@ -1172,11 +1142,17 @@ async function proposerTransportMaritime(source, cible) {
     {
       confirmer: {
         texte: "Embarquer",
-        action: () => envoyerAction({
-          type: "transport_maritime", source, cible, quantite: apercu.regiments,
+        action: (quantite) => envoyerAction({
+          type: "transport_maritime", source, cible, quantite,
         }),
       },
       annuler: { texte: "Annuler" },
+    },
+    {
+      libelle: "Régiments à embarquer :",
+      min: 1,
+      max: apercu.maximum,
+      valeur: apercu.maximum,
     },
   );
 }
@@ -2630,7 +2606,7 @@ function dessinerVueReligion(contexte, etat, largeurCellule, hauteurCellule) {
 
 const delai = (ms) => new Promise((resoudre) => setTimeout(resoudre, ms));
 
-function ouvrirEncartExpedition(titre, lignes, boutons) {
+function ouvrirEncartExpedition(titre, lignes, boutons, saisie) {
   $("titre-expedition").textContent = titre;
   const liste = $("liste-expedition");
   liste.textContent = "";
@@ -2639,14 +2615,34 @@ function ouvrirEncartExpedition(titre, lignes, boutons) {
     item.textContent = ligne;
     liste.append(item);
   }
+  // Saisie optionnelle d'un nombre (ex. taille du convoi maritime) : la
+  // valeur, bornée entre min et max, est passée à l'action de confirmation.
+  let champSaisie = null;
+  if (saisie) {
+    const item = document.createElement("li");
+    const etiquette = document.createElement("label");
+    etiquette.textContent = `${saisie.libelle} `;
+    champSaisie = document.createElement("input");
+    champSaisie.type = "number";
+    champSaisie.min = saisie.min;
+    champSaisie.max = saisie.max;
+    champSaisie.value = saisie.valeur;
+    etiquette.append(champSaisie);
+    item.append(etiquette);
+    liste.append(item);
+  }
   const confirmer = $("bouton-expedition-confirmer");
   const annuler = $("bouton-expedition-annuler");
   confirmer.textContent = boutons.confirmer ? boutons.confirmer.texte : "";
   annuler.hidden = !boutons.annuler;
   if (boutons.annuler) annuler.textContent = boutons.annuler.texte;
   confirmer.onclick = () => {
+    let valeur;
+    if (champSaisie) {
+      valeur = Math.max(saisie.min, Math.min(saisie.max, Number(champSaisie.value) || saisie.min));
+    }
     fermerEncartExpedition();
-    if (boutons.confirmer && boutons.confirmer.action) boutons.confirmer.action();
+    if (boutons.confirmer && boutons.confirmer.action) boutons.confirmer.action(valeur);
   };
   annuler.onclick = () => {
     fermerEncartExpedition();
@@ -2820,8 +2816,7 @@ $("carte").addEventListener("contextmenu", (evenement) => {
   traiterClicTerritoire(territoireSousLaSouris(evenement), true);
 });
 
-// Changer de territoire sélectionné rafraîchit aussi la barre d'actions : le
-// champ « Transport maritime » dépend de la source choisie.
+// Changer de territoire sélectionné rafraîchit aussi la barre d'actions.
 function selectionnerTerritoire(tid) {
   client.selection = tid;
   afficherDetailTerritoire();

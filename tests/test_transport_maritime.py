@@ -1,9 +1,9 @@
 """Transports maritimes : envoyer des troupes par la mer en phase de deplacement.
 
 Procedure (identique en ligne et dans x45) : choisir le territoire de depart,
-puis la taille du convoi, puis la destination — un territoire a soi que
-n'atteint aucune chaine de territoires allies — et confirmer l'encart
-« Entreprendre un voyage a travers les oceans ? ». Le convoi subit le meme
+puis la destination — un territoire a soi que n'atteint aucune chaine de
+territoires allies — et confirmer l'encart « Entreprendre un voyage a travers
+les oceans ? », qui demande la taille du convoi (preremplie au maximum). Le convoi subit le meme
 de a 64 faces qu'une expedition d'attaque ; les rescapes debarquent, les
 autres disparaissent en mer.
 

@@ -282,9 +282,6 @@ class GraphicalGame:
         # et debarquement en cours (humain ou IA), rejoue passe par passe.
         self.ai_expedition_iter = None
         self.pending_expedition_battle: Optional[dict] = None
-        # Transport maritime de fin de tour : taille du convoi choisie avant
-        # de designer la destination (molette ou +/-).
-        self.sea_transport_quantity = 1
         self.fast_ai_movements = False
         self.ai_speed_mode = "normal"
         self.ai_personalities: dict[int, str] = {}
@@ -9515,11 +9512,17 @@ class GraphicalGame:
         pygame.quit()
 
     def place_end_turn_reinforcement(self, terr: Territory, player: int) -> bool:
-        """Place un renfort de fin de tour, ou le convertit en ecus si le territoire a une universite."""
+        """Place un renfort de fin de tour, ou le convertit en ecus si le territoire a une universite.
+
+        Exception : un joueur reduit a son dernier territoire touche ses renforts
+        en regiments meme sous une universite.
+        """
         if terr.id in self.university_territory_ids:
-            self.ensure_player_economy(player)
-            self.player_money[player] += 10
-            return True
+            owned_count = sum(1 for t in self.territories if t.owner == player)
+            if owned_count > 1:
+                self.ensure_player_economy(player)
+                self.player_money[player] += 10
+                return True
         terr.regiments += 1
         return False
 
@@ -9882,10 +9885,6 @@ class GraphicalGame:
                     if self.replay_return_rect.collidepoint(event.pos):
                         self.stop_replay()
                         return
-            elif event.type == pygame.MOUSEWHEEL:
-                # Molette en phase de deplacement : taille du convoi maritime.
-                if self.phase == "playing" and not ai_turn and self.turn_phase == "move":
-                    self.adjust_sea_transport_quantity(1 if event.y > 0 else -1)
             elif event.type == pygame.MOUSEMOTION:
                 self.update_hovered_territory(event.pos)
                 if self.phase == "map_editor" and self.custom_dragging_territory_id is not None:
@@ -9909,18 +9908,6 @@ class GraphicalGame:
                     continue
                 if self.phase == "shopping" and event.key in (pygame.K_RETURN, pygame.K_ESCAPE):
                     self.finish_shopping_phase()
-                    continue
-                # Taille du convoi maritime : +/- (pave numerique compris).
-                if (
-                    self.phase == "playing" and not ai_turn and self.turn_phase == "move"
-                    and event.key in (
-                        pygame.K_PLUS, pygame.K_KP_PLUS, pygame.K_EQUALS,
-                        pygame.K_MINUS, pygame.K_KP_MINUS,
-                    )
-                ):
-                    self.adjust_sea_transport_quantity(
-                        -1 if event.key in (pygame.K_MINUS, pygame.K_KP_MINUS) else 1,
-                    )
                     continue
                 if self.phase == "playing" and not ai_turn and event.key in (pygame.K_RETURN, pygame.K_ESCAPE):
                     self.handle_end_turn_action()
@@ -10215,7 +10202,6 @@ class GraphicalGame:
             return
         self.selected_source = terr.id
         self.selected_target = None
-        self.sea_transport_quantity = 1
         maximum = moteur_regles.get_sea_transport_max_regiments(self, terr)
         outre_mer = maximum > 0 and moteur_regles.has_any_sea_transport_target(
             self, terr, self.cell_width, self.cell_height,
@@ -10226,27 +10212,10 @@ class GraphicalGame:
         )
         if outre_mer:
             message += (
-                f" Territoire allie outre-mer : convoi maritime de {self.sea_transport_quantity} "
-                f"regiment(s) (molette ou +/- pour ajuster, max {maximum})."
+                f" Territoire allie outre-mer : convoi maritime (jusqu'a {maximum} regiment(s), "
+                "le nombre est demande a l'embarquement)."
             )
         self.show_message(message, 2800 if outre_mer else 2000)
-
-    def adjust_sea_transport_quantity(self, delta: int) -> None:
-        """Ajuste la taille du convoi maritime (molette ou touches +/-)."""
-        if self.turn_phase != "move" or self.selected_source is None:
-            return
-        src = self.territories[self.selected_source]
-        maximum = moteur_regles.get_sea_transport_max_regiments(self, src)
-        if maximum <= 0:
-            return
-        self.sea_transport_quantity = max(
-            1, min(maximum, self.sea_transport_quantity + delta),
-        )
-        self.show_message(
-            f"Convoi maritime : {self.sea_transport_quantity} regiment(s) sur {maximum} "
-            "possible(s). Clic droit sur un territoire allie outre-mer pour embarquer.",
-            1600,
-        )
 
     def move_random_regiments_to_territory(self, dst: Territory) -> bool:
         """Concentre au hasard le maximum de regiments autorise sur un territoire.
@@ -10612,8 +10581,9 @@ class GraphicalGame:
         Appele en phase de deplacement quand la destination appartient au
         joueur mais qu'aucune chaine de territoires allies n'y mene.
         """
+        maximum = moteur_regles.get_sea_transport_max_regiments(self, src)
         preview = moteur_regles.get_sea_transport_preview(
-            self, src, dst, self.sea_transport_quantity,
+            self, src, dst, maximum,
             self.cell_width, self.cell_height,
         )
         if preview is None:
@@ -10623,19 +10593,19 @@ class GraphicalGame:
                 2800,
             )
             return False
-        if not self.confirm_sea_transport(src, dst, preview):
+        quantity = self.confirm_sea_transport(src, dst, preview)
+        if quantity is None:
             self.show_message("Transport maritime annule.", 1400)
             return False
 
         move_limit = self.get_end_turn_move_limit()
         result = moteur_regles.resolve_sea_transport(
-            self, src, dst, preview["regiments"], self.cell_width, self.cell_height,
+            self, src, dst, quantity, self.cell_width, self.cell_height,
         )
         if result is None:
             self.show_message("Transport maritime impossible.", 2000)
             return False
         self.selected_target = dst.id
-        self.sea_transport_quantity = 1
         self.queue_major_event_modal(
             "Transport maritime - resultat de la traversee",
             [f"De de la traversee : {result.roll} sur 64.", result.message],
@@ -10657,12 +10627,17 @@ class GraphicalGame:
             )
         return True
 
-    def confirm_sea_transport(self, src: Territory, dst: Territory, preview: dict) -> bool:
-        """Dialogue Tkinter « Entreprendre un voyage a travers les oceans ? »."""
-        if tk is None or messagebox is None:
+    def confirm_sea_transport(self, src: Territory, dst: Territory, preview: dict) -> Optional[int]:
+        """Dialogue Tkinter « Entreprendre un voyage a travers les oceans ? ».
+
+        Demande directement la taille du convoi (preremplie au maximum) et la
+        retourne, ou None si le joueur annule.
+        """
+        if tk is None or simpledialog is None:
             self.show_message("Dialogue indisponible (Tkinter absent) : transport annule.", 2600)
-            return False
+            return None
         safe_percent = round(100 * preview["faces_indemne"] / preview["faces"])
+        maximum = preview["maximum"]
         root = tk.Tk()
         root.withdraw()
         try:
@@ -10670,23 +10645,29 @@ class GraphicalGame:
         except tk.TclError:
             pass
         try:
-            return bool(messagebox.askokcancel(
+            quantity = simpledialog.askinteger(
                 "Transport maritime",
                 "Entreprendre un voyage a travers les oceans ?\n\n"
                 f"{src.name} -> {dst.name} : {preview['distance']:.0f} pixels de traversee.\n"
-                f"{preview['regiments']} regiment(s) embarquent sur {preview['maximum']} "
-                "possible(s) — autant de deplacements consommes, meme en cas de sinistre.\n\n"
+                f"Jusqu'a {maximum} regiment(s) peuvent embarquer — chaque regiment "
+                "consomme un deplacement, meme en cas de sinistre.\n\n"
                 f"{safe_percent} % de chances d'arriver indemne ({preview['faces_indemne']}/64).\n"
                 f"Sinon : 25 % de pertes ({preview['faces_pertes']['25']}/64), "
                 f"50 % ({preview['faces_pertes']['50']}/64), "
                 f"75 % ({preview['faces_pertes']['75']}/64), "
                 f"naufrage total ({preview['faces_pertes']['100']}/64).\n\n"
                 "Les regiments perdus en mer disparaissent ; les survivants debarquent chez eux.\n\n"
-                "OK : embarquer. Annuler : annuler.",
+                f"Combien de regiments embarquer ? (1 a {maximum})",
                 parent=root,
-            ))
+                initialvalue=maximum,
+                minvalue=1,
+                maxvalue=maximum,
+            )
         finally:
             root.destroy()
+        if quantity is None:
+            return None
+        return max(1, min(int(quantity), maximum))
 
     def try_launch_expedition(self, src: Territory, dst: Territory) -> None:
         """Encart de confirmation puis lancement d'une expedition maritime."""
@@ -11747,13 +11728,13 @@ class GraphicalGame:
             self.screen.blit(self.font_small.render(difficulty_label, True, (189, 195, 199)), (22, 60))
             if self.turn_phase == "move" and not self.is_ai_player(self.current_player):
                 phase_text = f"Deplacements restants: {self.get_end_turn_move_limit() - self.turn_move_count}"
-                # Taille du convoi maritime en attente d'une destination.
+                # Convoi maritime possible depuis la source selectionnee.
                 if self.selected_source is not None:
                     maximum = moteur_regles.get_sea_transport_max_regiments(
                         self, self.territories[self.selected_source],
                     )
                     if maximum > 0:
-                        phase_text += f" | Convoi: {min(self.sea_transport_quantity, maximum)}/{maximum}"
+                        phase_text += f" | Convoi maritime: jusqu'a {maximum}"
             else:
                 phase_text = "Phase: attaque" if self.turn_phase == "attack" else "Phase: deplacement"
             self.screen.blit(self.font_small.render(phase_text, True, (189, 195, 199)), (180, 60))
