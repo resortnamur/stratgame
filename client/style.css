@@ -260,9 +260,9 @@ header {
   font-size: 1rem;
 }
 
-/* --- Encart d'expédition maritime (confirmation et traversée) --------- */
+/* --- Encarts d'expédition maritime et de soumission (nation) ---------- */
 
-#encart-expedition {
+#encart-expedition, #encart-soumission {
   position: absolute;
   inset: 0;
   display: flex;
@@ -272,7 +272,7 @@ header {
   border-radius: 6px;
   z-index: 5;
 }
-#encart-expedition .boite-evenements {
+#encart-expedition .boite-evenements, #encart-soumission .boite-evenements {
   background: linear-gradient(160deg, rgb(30, 52, 66), rgb(18, 32, 46));
   border: 2px solid rgb(93, 173, 226);
   border-radius: 12px;
@@ -284,28 +284,31 @@ header {
   box-shadow: 0 12px 42px rgba(0, 0, 0, 0.6);
   animation: victoire-pop 0.4s cubic-bezier(0.2, 1.4, 0.4, 1);
 }
-#encart-expedition h2 {
+#encart-expedition h2, #encart-soumission h2 {
   margin: 0 0 10px;
   color: rgb(133, 193, 233);
   font-size: 1.1rem;
   text-align: center;
 }
-#encart-expedition ul {
+#encart-expedition ul, #encart-soumission ul {
   margin: 0 0 14px;
   padding-left: 20px;
   overflow-y: auto;
   color: rgb(234, 240, 246);
   line-height: 1.45;
 }
-#encart-expedition li { margin-bottom: 6px; }
-#encart-expedition .boutons-expedition {
+#encart-expedition li, #encart-soumission li { margin-bottom: 6px; }
+#encart-expedition .boutons-expedition, #encart-soumission .boutons-expedition {
   display: flex;
   justify-content: center;
   gap: 14px;
+  flex-wrap: wrap;
 }
-#encart-expedition button {
+#encart-expedition button, #encart-soumission button {
   padding: 8px 22px;
   font-size: 1rem;
+  /* Cible confortable au doigt : les encarts sont aussi joués au téléphone. */
+  min-height: 44px;
 }
 
 /* --- Écran de victoire ------------------------------------------------ */

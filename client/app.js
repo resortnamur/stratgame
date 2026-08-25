@@ -544,10 +544,14 @@ $("info-connexion").addEventListener("click", () => {
   }
 });
 
+// Retourne false si le message n'a pas pu partir (socket fermé) : à
+// l'appelant de décider s'il peut l'ignorer ou s'il doit prévenir le joueur.
 function envoyer(message) {
   if (client.ws && client.ws.readyState === WebSocket.OPEN) {
     client.ws.send(JSON.stringify(message));
+    return true;
   }
+  return false;
 }
 
 function enModeAuto(joueur) {
@@ -584,6 +588,10 @@ function traiterMessage(message) {
   switch (message.type) {
     case "bienvenue":
       annulerAnimationExpedition();
+      // Une question de soumission restée à l'écran appartient à la
+      // connexion d'avant : le serveur la repose juste après ce message si
+      // elle est toujours en attente.
+      fermerQuestionSoumission();
       client.monSiege = message.joueur;
       client.etat = message.etat;
       client.actionDepuis = null;
@@ -638,6 +646,9 @@ function traiterMessage(message) {
       // Un état plus récent arrive : une animation d'expédition encore en
       // cours n'a plus de raison d'être (elle rejouerait du passé).
       annulerAnimationExpedition();
+      // L'attaque est tranchée : plus rien à demander (cas du délai de
+      // garde côté serveur, qui annexe sans attendre notre réponse).
+      fermerQuestionSoumission();
       // Expédition maritime : la traversée et le débarquement se rejouent
       // progressivement (pour le suspense) avant d'appliquer l'état final.
       if (message.action && message.action.type === "expedition"
@@ -745,15 +756,9 @@ function traiterMessage(message) {
       client.etat = message.etat;
       toutRafraichir();
       break;
-    case "question_soumission": {
-      // OK = annexer (le choix par défaut) ; Annuler = soumettre (tribut).
-      const annexer = confirm(
-        `${message.nom} est conquis (${message.regiments_vaincus} régiments vaincus).\n` +
-        "OK = annexer, Annuler = soumettre (tribut).",
-      );
-      envoyer({ type: "decision_soumission", reponse: !annexer });
+    case "question_soumission":
+      ouvrirQuestionSoumission(message);
       break;
-    }
     case "victoire":
       client.victoire = { vainqueur: message.vainqueur, raison: message.raison };
       afficherVictoire();
@@ -853,6 +858,53 @@ $("bouton-encart").addEventListener("click", () => {
   $("encart-evenements").hidden = true;
   envoyer({ type: "modale_lue" });
 });
+
+// ---------------------------------------------------------------------------
+// Question posée à une nation qui vient de conquérir : annexer ou soumettre.
+//
+// C'était un confirm() natif. Sur téléphone, cette boîte de dialogue met la
+// page en veille : le WebSocket meurt sans que rien ne le signale, la réponse
+// partait dans le vide (envoyer() abandonne en silence si le socket est
+// fermé) et le serveur restait à attendre — verrou de la partie en main —
+// jusqu'à son délai de garde de deux minutes. D'où la partie figée après
+// avoir cliqué « OK ». L'encart ci-dessous vit dans la page : il ne suspend
+// rien, et la question est reposée par le serveur si la connexion a sauté.
+// ---------------------------------------------------------------------------
+
+function ouvrirQuestionSoumission(message) {
+  $("titre-soumission").textContent = `${message.nom} est conquis`;
+  const liste = $("liste-soumission");
+  liste.textContent = "";
+  const lignes = [
+    `${message.regiments_vaincus} régiment(s) vaincu(s).`,
+    "Annexer : le territoire rejoint ton empire.",
+    "Soumettre : il passe sous la protection de l'ONU et te verse un tribut.",
+  ];
+  for (const ligne of lignes) {
+    const item = document.createElement("li");
+    item.textContent = ligne;
+    liste.append(item);
+  }
+  $("encart-soumission").hidden = false;
+}
+
+function fermerQuestionSoumission() {
+  $("encart-soumission").hidden = true;
+}
+
+function repondreSoumission(soumettre) {
+  fermerQuestionSoumission();
+  if (!envoyer({ type: "decision_soumission", reponse: soumettre })) {
+    // Connexion coupée pendant la lecture : le serveur reposera la question
+    // dès la reconnexion (elle est attachée au siège, pas au socket).
+    journal("Connexion perdue : la question sera reposée dans un instant.");
+  }
+}
+
+$("bouton-soumission-annexer")
+  .addEventListener("click", () => repondreSoumission(false));
+$("bouton-soumission-soumettre")
+  .addEventListener("click", () => repondreSoumission(true));
 
 // ---------------------------------------------------------------------------
 // Bilans (état des lieux) — chargés du serveur, throttlés pendant les IA
@@ -1564,6 +1616,9 @@ document.addEventListener("keydown", (evenement) => {
     focus.blur();
   }
   evenement.preventDefault();
+  // Une question de soumission attend une réponse explicite : ni Entrée ni
+  // Échap ne doivent la contourner (ni terminer la phase par ricochet).
+  if (!$("encart-soumission").hidden) return;
   // L'encart des événements du tour passé se ferme d'abord : Entrée ou Échap
   // le consomme sans enchaîner sur la fin de phase (comme x45).
   if (!$("encart-evenements").hidden) {

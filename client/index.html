@@ -5,7 +5,7 @@
 <title>Jeux Strat</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- ?v=... force le navigateur à reprendre les fichiers après une mise à jour -->
-<link rel="stylesheet" href="style.css?v=22">
+<link rel="stylesheet" href="style.css?v=23">
 </head>
 <body>
 
@@ -124,6 +124,16 @@
           <button id="bouton-encart" type="button">Compris — jouer (Entrée ou Échap)</button>
         </div>
       </div>
+      <div id="encart-soumission" hidden>
+        <div class="boite-evenements">
+          <h2 id="titre-soumission"></h2>
+          <ul id="liste-soumission"></ul>
+          <div class="boutons-expedition">
+            <button id="bouton-soumission-annexer" type="button">Annexer</button>
+            <button id="bouton-soumission-soumettre" class="secondaire" type="button">Soumettre (tribut)</button>
+          </div>
+        </div>
+      </div>
       <div id="encart-expedition" hidden>
         <div class="boite-evenements">
           <h2 id="titre-expedition"></h2>
@@ -180,6 +190,6 @@
 </section>
 
 <script src="generation.js?v=1"></script>
-<script src="app.js?v=35"></script>
+<script src="app.js?v=36"></script>
 </body>
 </html>

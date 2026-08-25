@@ -73,7 +73,10 @@ Serveur vers client :
 - ``{"type": "refus", "code": "pas_votre_tour"|...}`` — a l'emetteur seul.
 - ``{"type": "question_soumission", "territoire": id, "nom": "...",
      "regiments_vaincus": n}`` — au joueur attaquant seul, pendant une
-  attaque de nation ; sans reponse sous ``DELAI_DECISION_S``, annexion.
+  attaque de nation ; sans reponse sous ``DELAI_DECISION_S``, annexion. La
+  question est attachee au *siege* : une coupure ne la perd pas, elle est
+  reposee a la reconnexion (et n'importe quelle connexion assise a ce
+  siege peut y repondre).
 - ``{"type": "chat", "joueur": n|null, "nom": "...", "texte": "..."}``
 - ``{"type": "siege_pris", "joueur": n}`` / ``{"type": "siege_quitte"}`` —
   accuses de reception de ``prendre_siege`` / ``quitter_siege``.
@@ -132,7 +135,6 @@ class ConnexionClient:
         self.nom: Optional[str] = None
         self.joueur: Optional[int] = None
         self.action_en_cours = False
-        self.decision_future: Optional[asyncio.Future] = None
 
     async def envoyer(self, message: Dict[str, Any]) -> None:
         await self.websocket.send_json(message)
@@ -148,6 +150,12 @@ class SallePartie:
         self.delai_tour_ia = delai_tour_ia
         self.delai_pas_ia = delai_pas_ia
         self._tache_ia: Optional[asyncio.Task] = None
+        # Question "soumettre ou annexer ?" en cours, par siege (et non par
+        # connexion) : une coupure au mauvais moment — un telephone qui met
+        # la page en veille pendant que le joueur lit — ne doit pas perdre
+        # la question. La reconnexion la repose au meme siege.
+        self.questions: Dict[int, Dict[str, Any]] = {}
+        self.decisions: Dict[int, asyncio.Future] = {}
 
     async def sauvegarder_auto(self) -> None:
         """Sauvegarde de securite apres chaque coup joue (jamais bloquante)."""
@@ -168,8 +176,11 @@ class SallePartie:
         """
         if self._tache_ia is not None and not self._tache_ia.done():
             return
-        if not self.session.tour_ia_en_attente():
-            return
+        # Le "est-ce a une IA de jouer ?" n'est PAS teste ici : il prend le
+        # verrou de la partie, et la boucle asyncio ne doit jamais s'y
+        # bloquer (une question de soumission le tient jusqu'a la reponse
+        # du joueur). ``demarrer_tour_ia`` rend None si rien a jouer : la
+        # tache s'arrete d'elle-meme des le premier tour.
         self._tache_ia = asyncio.create_task(self._boucle_ia())
 
     async def _boucle_ia(self) -> None:
@@ -197,7 +208,11 @@ class SallePartie:
                 await asyncio.sleep(self.delai_tour_ia)
 
     def message_presence(self) -> Dict[str, Any]:
-        """Les sieges (reservataire, connecte ou non) et les spectateurs."""
+        """Les sieges (reservataire, connecte ou non) et les spectateurs.
+
+        ``sieges()`` lit sans prendre le verrou de la partie : la presence
+        reste diffusable meme pendant une action en cours.
+        """
         connectes = {c.joueur for c in self.connexions if c.joueur is not None}
         return {
             "type": "presence",
@@ -207,6 +222,19 @@ class SallePartie:
             ],
             "spectateurs": [c.nom for c in self.connexions if c.joueur is None],
         }
+
+    async def etat_diffusable(self) -> Dict[str, Any]:
+        """L'etat reseau, lu dans un thread plutot que sur la boucle.
+
+        ``etat_reseau()`` prend le verrou de la session, tenu pendant toute
+        une action — y compris pendant la question "soumettre ou annexer ?"
+        posee a une nation, qui attend la reponse d'un humain (jusqu'a
+        ``DELAI_DECISION_S``). L'appeler directement depuis la boucle
+        asyncio la bloquait entierement : plus aucun message recu, donc plus
+        aucune reponse possible ni aucune coupure detectee — la partie se
+        figeait pour tout le monde jusqu'au delai de garde.
+        """
+        return await asyncio.to_thread(self.session.etat_reseau)
 
     async def diffuser(self, message: Dict[str, Any]) -> None:
         for connexion in list(self.connexions):
@@ -219,6 +247,16 @@ class SallePartie:
     async def diffuser_presence(self) -> None:
         await self.diffuser(self.message_presence())
 
+    async def envoyer_au_siege(self, joueur: int, message: Dict[str, Any]) -> None:
+        """Message destine au seul occupant d'un siege (question, refus...)."""
+        for connexion in list(self.connexions):
+            if connexion.joueur != joueur:
+                continue
+            try:
+                await connexion.envoyer(message)
+            except Exception:
+                pass
+
     async def diffuser_resultat(
         self, joueur: int, action: Optional[Dict[str, Any]], resultat: ResultatAction,
     ) -> None:
@@ -227,7 +265,7 @@ class SallePartie:
             "joueur": joueur,
             "action": action,
             "resultat": to_jsonable(resultat),
-            "etat": self.session.etat_reseau(),
+            "etat": await self.etat_diffusable(),
         })
         if resultat.winner is not None:
             await self.diffuser({
@@ -436,30 +474,73 @@ def creer_app(dossier_parties: Optional[Path] = None,
             """Pont moteur -> client : pose la question dans la boucle asyncio.
 
             Appele depuis le thread qui applique l'action ; bloque jusqu'a la
-            reponse du client (ou le delai, ou sa deconnexion) puis retourne
-            la decision. Par defaut : annexion (False), comme x45 sans Tkinter.
+            reponse du joueur (ou le delai) puis retourne la decision. Par
+            defaut : annexion (False), comme x45 sans Tkinter.
+
+            La question est rangee au *siege* (``salle.questions``) et non a
+            la connexion : sur telephone, la page est souvent suspendue le
+            temps que le joueur lise, et le socket meurt sans prevenir. La
+            reconnexion — le meme siege, quelques secondes plus tard —
+            retrouve la question et peut y repondre.
             """
+            question = {
+                "type": "question_soumission",
+                "territoire": territoire.id,
+                "nom": territoire.name,
+                "regiments_vaincus": regiments_vaincus,
+            }
+
             async def poser_question() -> asyncio.Future:
-                connexion.decision_future = boucle.create_future()
-                await connexion.envoyer({
-                    "type": "question_soumission",
-                    "territoire": territoire.id,
-                    "nom": territoire.name,
-                    "regiments_vaincus": regiments_vaincus,
-                })
-                return connexion.decision_future
+                future = boucle.create_future()
+                salle.questions[attaquant] = question
+                salle.decisions[attaquant] = future
+                await salle.envoyer_au_siege(attaquant, question)
+                return future
+
+            async def attendre_reponse(future: asyncio.Future) -> bool:
+                # ``shield`` est construit dans la boucle (et non dans ce
+                # thread) : sans cela l'attente etait armee hors boucle.
+                try:
+                    return bool(await asyncio.wait_for(
+                        asyncio.shield(future), DELAI_DECISION_S,
+                    ))
+                except asyncio.TimeoutError:
+                    return False
 
             try:
                 future = asyncio.run_coroutine_threadsafe(poser_question(), boucle).result(10.0)
-                attente = asyncio.run_coroutine_threadsafe(
-                    asyncio.wait_for(asyncio.shield(future), DELAI_DECISION_S), boucle,
-                )
+                attente = asyncio.run_coroutine_threadsafe(attendre_reponse(future), boucle)
                 return bool(attente.result(DELAI_DECISION_S + 10.0))
             except Exception:
-                # Delai depasse, client deconnecte... : annexion par defaut.
+                # Delai depasse, boucle saturee... : annexion par defaut.
                 return False
             finally:
-                connexion.decision_future = None
+                salle.questions.pop(attaquant, None)
+                salle.decisions.pop(attaquant, None)
+
+        async def accueillir(connexion: ConnexionClient) -> None:
+            """Envoie l'etat d'accueil, puis la presence, puis relance les IA.
+
+            Detache de la boucle de reception : ``etat_diffusable`` attend le
+            verrou de la partie tant qu'une action n'est pas finie, et ce
+            client doit pouvoir continuer a parler pendant ce temps.
+            """
+            try:
+                etat = await salle.etat_diffusable()
+                await connexion.envoyer({
+                    "type": "bienvenue",
+                    "joueur": connexion.joueur,
+                    "nom": connexion.nom,
+                    "etat": etat,
+                    "sieges": session.sieges(),
+                })
+                await salle.diffuser_presence()
+            except Exception:
+                # Client reparti entre-temps : sa propre boucle le retirera.
+                return
+            # Si une IA est au trait (sauvegarde chargee, partie neuve, ou
+            # boucle arretee faute de spectateurs), l'arrivee la relance.
+            salle.lancer_tours_ia()
 
         async def traiter_action(action: Dict[str, Any]) -> None:
             joueur = connexion.joueur
@@ -515,9 +596,16 @@ def creer_app(dossier_parties: Optional[Path] = None,
                             continue
                         connexion.jeton, connexion.nom = jeton, nom
                     joueur = message.get("joueur")
+                    # ``siege_de`` ne prend pas le verrou de la partie : on
+                    # sait donc tout de suite, meme au milieu d'une action,
+                    # quel siege ce jeton detient deja.
+                    siege_reserve = (
+                        session.siege_de(connexion.jeton)
+                        if connexion.jeton is not None else None
+                    )
                     if joueur is None and connexion.jeton is not None:
                         # Reconnexion : l'identite retrouve son siege reserve.
-                        joueur = session.siege_de(connexion.jeton)
+                        joueur = siege_reserve
                     if joueur is not None:
                         if connexion.jeton is None:
                             await connexion.envoyer({"type": "refus", "code": "identite_requise"})
@@ -527,10 +615,17 @@ def creer_app(dossier_parties: Optional[Path] = None,
                         except (TypeError, ValueError):
                             await connexion.envoyer({"type": "refus", "code": "siege_indisponible"})
                             continue
-                        ok, code = session.reserver_siege(joueur, connexion.jeton, connexion.nom)
-                        if not ok:
-                            await connexion.envoyer({"type": "refus", "code": code})
-                            continue
+                        if joueur != siege_reserve:
+                            # Siege neuf : l'arbitrage prend le verrou de la
+                            # partie. Reprendre le sien (reconnexion) n'en a
+                            # pas besoin — il est deja a ce jeton, et c'est
+                            # le cas ou une question peut l'attendre.
+                            ok, code = await asyncio.to_thread(
+                                session.reserver_siege, joueur, connexion.jeton, connexion.nom,
+                            )
+                            if not ok:
+                                await connexion.envoyer({"type": "refus", "code": code})
+                                continue
                         connexion.joueur = joueur
                     # Une meme identite n'a qu'une connexion : l'ancienne
                     # (onglet oublie, coupure pas encore detectee) est fermee.
@@ -543,18 +638,18 @@ def creer_app(dossier_parties: Optional[Path] = None,
                                 except Exception:
                                     pass
                     salle.connexions.append(connexion)
-                    await connexion.envoyer({
-                        "type": "bienvenue",
-                        "joueur": connexion.joueur,
-                        "nom": connexion.nom,
-                        "etat": session.etat_reseau(),
-                        "sieges": session.sieges(),
-                    })
-                    await salle.diffuser_presence()
-                    # Si une IA est au trait (sauvegarde chargee, partie
-                    # neuve, ou boucle arretee faute de spectateurs), la
-                    # nouvelle connexion relance le deroule des tours IA.
-                    salle.lancer_tours_ia()
+                    # Une question "soumettre ou annexer ?" attendait ce
+                    # siege (coupure pendant que le joueur lisait) : elle
+                    # part AVANT l'etat — c'est justement la reponse qui
+                    # liberera le verrou que l'etat attend.
+                    question = salle.questions.get(connexion.joueur)
+                    if question is not None:
+                        await connexion.envoyer(question)
+                    # L'etat complet part a part : il peut attendre le verrou
+                    # de la partie (une action en cours le tient), et la
+                    # boucle de reception de ce client doit rester libre —
+                    # sinon sa reponse a la question n'arriverait jamais.
+                    asyncio.create_task(accueillir(connexion))
 
                 elif type_message == "action":
                     if connexion.joueur is None:
@@ -579,7 +674,9 @@ def creer_app(dossier_parties: Optional[Path] = None,
                     except (TypeError, ValueError):
                         await connexion.envoyer({"type": "refus", "code": "siege_indisponible"})
                         continue
-                    ok, code = session.reserver_siege(joueur, connexion.jeton, connexion.nom)
+                    ok, code = await asyncio.to_thread(
+                        session.reserver_siege, joueur, connexion.jeton, connexion.nom,
+                    )
                     if not ok:
                         await connexion.envoyer({"type": "refus", "code": code})
                         continue
@@ -591,7 +688,7 @@ def creer_app(dossier_parties: Optional[Path] = None,
                     if connexion.joueur is None:
                         await connexion.envoyer({"type": "refus", "code": "aucun_siege"})
                         continue
-                    session.liberer_siege(connexion.jeton)
+                    await asyncio.to_thread(session.liberer_siege, connexion.jeton)
                     connexion.joueur = None
                     await connexion.envoyer({"type": "siege_quitte"})
                     await salle.diffuser_presence()
@@ -601,7 +698,9 @@ def creer_app(dossier_parties: Optional[Path] = None,
                         await connexion.envoyer({"type": "refus", "code": "aucun_siege"})
                         continue
                     actif = bool(message.get("actif"))
-                    ok, code = session.definir_mode_auto(connexion.joueur, actif)
+                    ok, code = await asyncio.to_thread(
+                        session.definir_mode_auto, connexion.joueur, actif,
+                    )
                     if not ok:
                         await connexion.envoyer({"type": "refus", "code": code})
                         continue
@@ -635,19 +734,23 @@ def creer_app(dossier_parties: Optional[Path] = None,
                     # Le joueur au trait a lu l'encart des evenements : on le
                     # retire de l'etat et on lui renvoie l'etat a jour (pour
                     # enchainer sur l'encart suivant s'il y en a un).
-                    ok, code = session.consommer_modale_evenements(connexion.joueur)
+                    ok, code = await asyncio.to_thread(
+                        session.consommer_modale_evenements, connexion.joueur,
+                    )
                     if not ok:
                         await connexion.envoyer({"type": "refus", "code": code})
                         continue
                     await salle.sauvegarder_auto()
                     await connexion.envoyer({
                         "type": "modale_suivante",
-                        "etat": session.etat_reseau(),
+                        "etat": await salle.etat_diffusable(),
                     })
 
                 elif type_message == "decision_soumission":
-                    future = connexion.decision_future
-                    if future is not None and not future.done():
+                    # La question appartient au siege : une connexion neuve
+                    # (reconnexion apres une coupure) peut donc y repondre.
+                    future = salle.decisions.get(connexion.joueur)
+                    if connexion.joueur is not None and future is not None and not future.done():
                         future.set_result(bool(message.get("reponse")))
                     else:
                         await connexion.envoyer({"type": "refus", "code": "aucune_question"})
@@ -658,9 +761,10 @@ def creer_app(dossier_parties: Optional[Path] = None,
         except WebSocketDisconnect:
             pass
         finally:
-            future = connexion.decision_future
-            if future is not None and not future.done():
-                future.set_result(False)
+            # Une question en cours n'est PAS tranchee ici : la coupure est
+            # le plus souvent momentanee (telephone en veille), et le joueur
+            # la retrouve en se reconnectant. Sans retour de sa part,
+            # ``DELAI_DECISION_S`` tranche (annexion).
             if connexion in salle.connexions:
                 salle.connexions.remove(connexion)
                 await salle.diffuser_presence()
