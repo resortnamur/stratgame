@@ -200,6 +200,22 @@ class GraphicalGame:
     SECOND_WONDER_RELIGION_ID = 6
     WONDER_RELIGION_IDS = (5, 6)
     LATE_WONDER_FIRST_TURN = 42
+    # Les vues de la carte, dans l'ordre du bouton. Les forteresses seules,
+    # puis les forteresses avec les merveilles, puis tous les autres
+    # amenagements — et enfin l'influence religieuse.
+    MAP_ICON_VIEWS = ("fortress", "wonders", "amenities", "religion")
+    MAP_ICON_VIEW_LABELS = {
+        "fortress": "forteresses seules",
+        "wonders": "forteresses et merveilles",
+        "amenities": "autres amenagements",
+        "religion": "vue religion",
+    }
+    MAP_ICON_VIEW_BUTTONS = {
+        "fortress": "Icones: fort.",
+        "wonders": "Fort. + merv.",
+        "amenities": "Amenagements",
+        "religion": "Vue: religion",
+    }
     VICTORY_CONDITION_LABELS = {
         "lieux_sacres": "lieux sacres",
         "religion": "religion",
@@ -519,7 +535,6 @@ class GraphicalGame:
         self.shop_gift_amount = 10
         self.hover_details_enabled = False
         self.pending_details_click_time: Optional[int] = None
-        self.show_all_map_icons = False
         self.map_icon_view = "fortress"
         self.hovered_territory_id: Optional[int] = None
         self.hovered_territory_pos: Tuple[int, int] = (0, 0)
@@ -5625,8 +5640,23 @@ class GraphicalGame:
             return self.RELIGIONS[religion_id]["color"]
         return (200, 200, 200)
 
+    def get_map_icon_view(self) -> str:
+        view = getattr(self, "map_icon_view", "fortress")
+        return view if view in self.MAP_ICON_VIEWS else "fortress"
+
+    def map_view_shows_fortresses(self) -> bool:
+        """La vue des autres amenagements est la seule a masquer les forteresses."""
+        return self.get_map_icon_view() != "amenities"
+
+    def map_view_shows_wonders(self) -> bool:
+        return self.get_map_icon_view() == "wonders"
+
+    def map_view_shows_amenities(self) -> bool:
+        """Usines, ports, temples, centres culturels, ruines et universites."""
+        return self.get_map_icon_view() == "amenities"
+
     def is_religion_view_active(self) -> bool:
-        return getattr(self, "map_icon_view", "all" if getattr(self, "show_all_map_icons", False) else "fortress") == "religion"
+        return self.get_map_icon_view() == "religion"
 
     def is_territory_tax_haven_immune_to_religion(self, territory_id: int) -> bool:
         return self.is_last_stand_bonus_territory(territory_id)
@@ -8642,21 +8672,15 @@ class GraphicalGame:
             self.toggle_hover_details()
 
     def toggle_all_map_icons(self) -> None:
-        current = getattr(self, "map_icon_view", "all" if getattr(self, "show_all_map_icons", False) else "fortress")
+        current = self.get_map_icon_view()
         # Version simplifiee : aucune religion a montrer, la vue est retiree du cycle.
-        order = ["fortress", "all"] if self.simple_mode else ["fortress", "all", "religion"]
+        order = [view for view in self.MAP_ICON_VIEWS if not (self.simple_mode and view == "religion")]
         try:
             next_mode = order[(order.index(current) + 1) % len(order)]
         except ValueError:
-            next_mode = "fortress"
+            next_mode = order[0]
         self.map_icon_view = next_mode
-        self.show_all_map_icons = next_mode == "all"
-        labels = {
-            "fortress": "forteresses seules",
-            "all": "toutes les icones",
-            "religion": "vue religion",
-        }
-        self.show_message(f"Vue carte : {labels[next_mode]}.", 1400)
+        self.show_message(f"Vue carte : {self.MAP_ICON_VIEW_LABELS[next_mode]}.", 1400)
 
     def get_empire_structure_counts(self, player: int) -> dict[str, int]:
         owned_ids = {terr.id for terr in self.territories if terr.owner == player}
@@ -11747,13 +11771,13 @@ class GraphicalGame:
                     pygame.draw.circle(self.screen, (255, 235, 120), (golden_x, golden_y), 9)
                     pygame.draw.circle(self.screen, (255, 250, 210), (golden_x, golden_y), 5)
                 special_icon_types = []
-                if terr.id in self.fortress_territory_ids:
+                if terr.id in self.fortress_territory_ids and self.map_view_shows_fortresses():
                     special_icon_types.append("fortress")
                 if terr.id in self.precious_mineral_mine_ids:
                     special_icon_types.append("precious_mine")
-                # Les merveilles sont devenues nombreuses : elles n'encombrent
-                # plus la vue par defaut et n'apparaissent qu'en « icones : tout ».
-                if self.show_all_map_icons:
+                # Les merveilles sont devenues nombreuses : elles ont leur
+                # propre vue, aux cotes des forteresses.
+                if self.map_view_shows_wonders():
                     wonder_type = self.get_wonder_type_at_territory(terr.id)
                     if wonder_type is not None:
                         special_icon_types.append(f"wonder:{wonder_type}")
@@ -11771,10 +11795,10 @@ class GraphicalGame:
                 if holy_site_religion_id is not None and holy_site_religion_id not in self.WONDER_RELIGION_IDS:
                     special_icon_types.append(f"holy_site:{holy_site_religion_id}")
 
-                # Le mode "icones : forteresses" ne masque que les amenagements
-                # secondaires. Les statuts restent visibles, sinon on confond une
-                # capitale, un PF ou une CC avec un simple territoire ordinaire.
-                if self.show_all_map_icons:
+                # Les statuts (mine, lieu saint, capitale, paradis fiscal)
+                # restent visibles dans toutes les vues : sans eux on confond
+                # une capitale ou une CC avec un territoire ordinaire.
+                if self.map_view_shows_amenities():
                     if terr.id in self.factory_territory_ids:
                         special_icon_types.append("factory")
                     if terr.id in self.airport_territory_ids:
@@ -12029,16 +12053,13 @@ class GraphicalGame:
             details_text = self.font_small.render("Details", True, (236, 240, 241) if geo_enabled else (140, 146, 153))
             self.screen.blit(details_text, details_text.get_rect(center=self.details_button_rect.center))
 
-            view_mode = getattr(self, "map_icon_view", "all" if self.show_all_map_icons else "fortress")
-            if view_mode == "religion":
-                all_icons_base = (90, 70, 120)
-                all_icons_label = "Vue: religion"
-            elif view_mode == "all":
-                all_icons_base = (60, 86, 66)
-                all_icons_label = "Icones: tout"
-            else:
-                all_icons_base = (45, 58, 72)
-                all_icons_label = "Icones: fort."
+            view_mode = self.get_map_icon_view()
+            all_icons_base = {
+                "religion": (90, 70, 120),
+                "wonders": (60, 86, 66),
+                "amenities": (66, 78, 52),
+            }.get(view_mode, (45, 58, 72))
+            all_icons_label = self.MAP_ICON_VIEW_BUTTONS[view_mode]
             all_icons_color = tuple(min(255, c + 14) for c in all_icons_base) if self.all_icons_button_rect.collidepoint(pygame.mouse.get_pos()) else all_icons_base
             pygame.draw.rect(self.screen, all_icons_color, self.all_icons_button_rect, border_radius=6)
             pygame.draw.rect(self.screen, (180, 190, 198), self.all_icons_button_rect, width=1, border_radius=6)

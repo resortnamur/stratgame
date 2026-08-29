@@ -52,11 +52,14 @@ function toursRestantsRessource(etat, tid, sorte) {
   return Math.max(0, DUREE_RESSOURCE_TARDIVE - (etat.turn - Number(depart)));
 }
 
-// Les trois vues de carte de x45, dans l'ordre du bouton.
-const VUES_CARTE = ["fortress", "all", "religion"];
+// Les vues de carte de x45, dans l'ordre du bouton : les forteresses
+// seules, puis les forteresses avec les merveilles, puis tous les autres
+// aménagements — et enfin l'influence religieuse.
+const VUES_CARTE = ["fortress", "wonders", "amenities", "religion"];
 const LIBELLES_VUES = {
   fortress: "Icônes : fort.",
-  all: "Icônes : tout",
+  wonders: "Fort. + merv.",
+  amenities: "Aménagements",
   religion: "Vue : religion",
 };
 
@@ -77,7 +80,10 @@ const client = {
   actionDepuis: null,  // horodatage de l'action en attente de réponse
   achat: null,          // article de boutique sélectionné (entrée du catalogue)
   territoiresAchat: [],  // territoires déjà cliqués pour l'achat en cours
-  vueCarte: localStorage.getItem("jeux_strat_vue") || "fortress",
+  // L'ancienne vue « tout » a été scindée en deux : une préférence
+  // enregistrée qui ne fait plus partie du cycle retombe sur les forteresses.
+  vueCarte: VUES_CARTE.includes(localStorage.getItem("jeux_strat_vue"))
+    ? localStorage.getItem("jeux_strat_vue") : "fortress",
   replay: null,  // {histoire, index, enPause, minuterie} pendant un replay
   bilans: null,  // dernier état des lieux par joueur (GET /bilans)
   victoire: null,  // {vainqueur, raison} une fois la partie gagnée
@@ -2577,7 +2583,10 @@ function dessinerCercleAmenagements(ctx, x, y, compte, maximum, couleur) {
 }
 
 function dessinerEtiquettes(contexte, etat, largeurCellule, hauteurCellule) {
-  const vueComplete = client.vueCarte === "all";
+  // La vue des autres aménagements est la seule à masquer les forteresses.
+  const vueForteresses = client.vueCarte !== "amenities";
+  const vueMerveilles = client.vueCarte === "wonders";
+  const vueAmenagements = client.vueCarte === "amenities";
   const capitalesPF = capitalesParadisFiscal(etat);
   contexte.textBaseline = "middle";
   for (const territoire of etat.territories) {
@@ -2655,16 +2664,18 @@ function dessinerEtiquettes(contexte, etat, largeurCellule, hauteurCellule) {
     // les statuts restent visibles dans toutes les vues, les aménagements
     // secondaires seulement en vue « toutes les icônes ».
     const badges = [];
-    if (etat.fortress_territory_ids.includes(tid)) badges.push("fortress");
+    if (etat.fortress_territory_ids.includes(tid) && vueForteresses) badges.push("fortress");
     if (etat.precious_mineral_mine_ids.includes(tid)) badges.push("precious_mine");
     const religionSainte = lieuSaint(etat, tid);
     if (religionSainte !== null) badges.push(`holy_site:${religionSainte}`);
-    if (vueComplete) {
-      // Les merveilles sont devenues nombreuses : elles n'apparaissent plus
-      // que dans la vue « toutes les icônes ».
+    if (vueMerveilles) {
+      // Les merveilles sont devenues nombreuses : elles ont leur propre vue,
+      // aux côtés des forteresses.
       for (const [typeMerveille, siege] of Object.entries(etat.wonder_territories)) {
         if (siege === tid) badges.push(`wonder:${typeMerveille}`);
       }
+    }
+    if (vueAmenagements) {
       if (etat.factory_territory_ids.includes(tid)) badges.push("factory");
       if (etat.airport_territory_ids.includes(tid)) badges.push("airport");
       if (etat.port_territory_ids.includes(tid)) badges.push("port");
