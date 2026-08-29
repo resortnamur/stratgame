@@ -2433,11 +2433,18 @@ function dessinerBadge(ctx, type, x, y, etat, tid) {
       croesus_fountain: ["rgb(24,96,58)", "rgb(150,245,185)", "F"],
       aurelia_capitol: ["rgb(98,36,84)", "rgb(245,190,235)", "C"],
       daedalus_forge: ["rgb(122,68,24)", "rgb(255,196,128)", "D"],
+      // Merveilles tardives : sans ces entrées, elles tombaient sur le gris
+      // de secours et son point d'interrogation. Deux lettres, parce que
+      // leurs initiales se cognent à celles des huit premières.
+      solmyre_oracle: ["rgb(150,84,8)", "rgb(255,206,122)", "So"],
+      kaleth_gardens: ["rgb(58,104,32)", "rgb(206,245,150)", "Ka"],
+      selene_dome: ["rgb(20,92,100)", "rgb(170,240,250)", "Sé"],
+      orvane_oath: ["rgb(124,34,44)", "rgb(255,178,178)", "Or"],
     };
     const [fond, symbole, lettre] = couleurs[type.split(":")[1]]
       || ["rgb(70,70,70)", "rgb(235,235,235)", "?"];
     fondBadge(ctx, x, y, 30, 26, fond, symbole, 7);
-    glypheBadge(ctx, x, y, lettre, symbole, 13);
+    glypheBadge(ctx, x, y, lettre, symbole, lettre.length > 1 ? 11 : 13);
   } else if (type === "factory") {
     fondBadge(ctx, x, y, 28, 24, "rgb(133,193,233)", "rgb(44,62,80)");
     ctx.fillStyle = "rgb(28,42,56)";

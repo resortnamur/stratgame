@@ -216,6 +216,23 @@ class GraphicalGame:
         "amenities": "Amenagements",
         "religion": "Vue: religion",
     }
+    # Couleurs des badges de merveille : fond, puis symbole. Toute merveille
+    # absente de cette table tombe sur un gris muet — c'est ce qui est arrive
+    # aux quatre merveilles tardives a leur arrivee.
+    WONDER_BADGE_COLORS = {
+        "elyrion_sanctuary": ((52, 88, 116), (174, 235, 255)),
+        "thousand_voices_theatre": ((92, 50, 112), (235, 188, 255)),
+        "atlas_observatory": ((32, 68, 108), (150, 215, 255)),
+        "golden_pact_palace": ((105, 77, 20), (255, 220, 92)),
+        "ivory_rampart": ((60, 72, 88), (240, 234, 214)),
+        "croesus_fountain": ((24, 96, 58), (150, 245, 185)),
+        "aurelia_capitol": ((98, 36, 84), (245, 190, 235)),
+        "daedalus_forge": ((122, 68, 24), (255, 196, 128)),
+        "solmyre_oracle": ((150, 84, 8), (255, 206, 122)),
+        "kaleth_gardens": ((58, 104, 32), (206, 245, 150)),
+        "selene_dome": ((20, 92, 100), (170, 240, 250)),
+        "orvane_oath": ((124, 34, 44), (255, 178, 178)),
+    }
     VICTORY_CONDITION_LABELS = {
         "lieux_sacres": "lieux sacres",
         "religion": "religion",
@@ -11490,17 +11507,9 @@ class GraphicalGame:
     def draw_wonder_badge(self, x: int, y: int, wonder_type: str) -> None:
         badge_rect = pygame.Rect(0, 0, 30, 26)
         badge_rect.center = (x, y)
-        colors = {
-            "elyrion_sanctuary": ((52, 88, 116), (174, 235, 255)),
-            "thousand_voices_theatre": ((92, 50, 112), (235, 188, 255)),
-            "atlas_observatory": ((32, 68, 108), (150, 215, 255)),
-            "golden_pact_palace": ((105, 77, 20), (255, 220, 92)),
-            "ivory_rampart": ((60, 72, 88), (240, 234, 214)),
-            "croesus_fountain": ((24, 96, 58), (150, 245, 185)),
-            "aurelia_capitol": ((98, 36, 84), (245, 190, 235)),
-            "daedalus_forge": ((122, 68, 24), (255, 196, 128)),
-        }
-        background, symbol_color = colors.get(wonder_type, ((70, 70, 70), (235, 235, 235)))
+        background, symbol_color = self.WONDER_BADGE_COLORS.get(
+            wonder_type, ((70, 70, 70), (235, 235, 235)),
+        )
         pygame.draw.rect(self.screen, background, badge_rect, border_radius=7)
         pygame.draw.rect(self.screen, symbol_color, badge_rect, width=2, border_radius=7)
 
@@ -11547,6 +11556,30 @@ class GraphicalGame:
             pygame.draw.line(self.screen, symbol_color, (cx - 8, cy - 3), (cx + 8, cy - 3), 2)
             pygame.draw.line(self.screen, symbol_color, (cx - 8, cy - 3), (cx - 8, cy + 7), 2)
             pygame.draw.line(self.screen, symbol_color, (cx + 8, cy - 3), (cx + 8, cy + 7), 2)
+        elif wonder_type == "solmyre_oracle":
+            # Soleil : la religion conquerante de l'Oracle
+            pygame.draw.circle(self.screen, symbol_color, (cx, cy), 5, 2)
+            for angle in range(0, 360, 45):
+                radians = math.radians(angle)
+                start = (cx + int(7 * math.cos(radians)), cy + int(7 * math.sin(radians)))
+                end = (cx + int(10 * math.cos(radians)), cy + int(10 * math.sin(radians)))
+                pygame.draw.line(self.screen, symbol_color, start, end, 2)
+        elif wonder_type == "kaleth_gardens":
+            # Arbre des jardins : feuillage et tronc
+            pygame.draw.circle(self.screen, symbol_color, (cx, cy - 3), 6, 2)
+            pygame.draw.line(self.screen, symbol_color, (cx, cy + 2), (cx, cy + 9), 2)
+            pygame.draw.line(self.screen, symbol_color, (cx - 5, cy + 9), (cx + 5, cy + 9), 2)
+        elif wonder_type == "selene_dome":
+            # Dome protecteur sous un croissant de lune
+            pygame.draw.arc(self.screen, symbol_color, (cx - 9, cy + 1, 18, 14), 0, math.pi, 2)
+            pygame.draw.line(self.screen, symbol_color, (cx - 9, cy + 8), (cx + 9, cy + 8), 2)
+            pygame.draw.circle(self.screen, symbol_color, (cx - 1, cy - 5), 5)
+            pygame.draw.circle(self.screen, background, (cx + 2, cy - 6), 5)
+        elif wonder_type == "orvane_oath":
+            # Parchemin du serment : la bande et ses deux rouleaux
+            pygame.draw.rect(self.screen, symbol_color, (cx - 5, cy - 5, 10, 11), 2)
+            pygame.draw.circle(self.screen, symbol_color, (cx - 7, cy - 5), 3, 2)
+            pygame.draw.circle(self.screen, symbol_color, (cx + 7, cy + 6), 3, 2)
 
     def draw_money_bonus_badge(self, x: int, y: int, commercial_city: bool = False, vassal: bool = False) -> None:
         badge_rect = pygame.Rect(0, 0, 28, 24)
