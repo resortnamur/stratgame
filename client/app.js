@@ -1046,6 +1046,7 @@ const LIBELLES_MENACES = {
   religion: "Religion",
   culture: "Culture",
   science: "Science",
+  conquete: "Conquête totale",
 };
 
 function afficherMenacesVictoire() {
@@ -1055,9 +1056,27 @@ function afficherMenacesVictoire() {
     zone.textContent = "Chargement…";
     return;
   }
+  const paliers = donnees.paliers || [];
+  const total = donnees.nb_conditions || 7;
+  // Les paliers déjà franchis : chacun ferme une condition pour de bon et
+  // vaut un point de victoire à son auteur.
+  let entete = "";
+  if (paliers.length) {
+    const franchis = paliers.map((palier) => {
+      const pion = `<span class="pion" style="background:${rgb(couleurJoueur(palier.joueur))}"></span>`;
+      const moyen = LIBELLES_MENACES[palier.condition] || palier.condition;
+      return `<li class="palier">${pion}${nomDuJoueur(palier.joueur)} — <strong>${moyen}</strong>`
+        + ` <span class="tour-palier">(tour ${palier.tour})</span></li>`;
+    });
+    entete = `<p class='menace-calme'>${paliers.length}/${total} paliers franchis, `
+      + `${total - paliers.length} encore ouverts.</p>`
+      + "<ul class='liste-paliers'>" + franchis.join("") + "</ul>";
+  } else {
+    entete = `<p class='menace-calme'>Aucun palier franchi : les ${total} conditions sont ouvertes.</p>`;
+  }
   const menaces = donnees.menaces || [];
   if (!menaces.length) {
-    zone.innerHTML = "<p class='menace-calme'>Personne n'approche d'une victoire.</p>";
+    zone.innerHTML = entete + "<p class='menace-calme'>Personne n'approche d'un palier.</p>";
     return;
   }
   const lignes = menaces.map((menace) => {
@@ -1071,7 +1090,7 @@ function afficherMenacesVictoire() {
       + ` — victoire <strong>${moyen}</strong> : ${menace.detail} (${pourcent} %, ${reste})`
       + `<span class="jauge"><span style="width:${pourcent}%"></span></span></li>`;
   });
-  zone.innerHTML = "<ul class='liste-menaces'>" + lignes.join("") + "</ul>";
+  zone.innerHTML = entete + "<ul class='liste-menaces'>" + lignes.join("") + "</ul>";
 }
 
 function afficherSituation() {
@@ -1087,7 +1106,7 @@ function afficherSituation() {
   const simple = modeSimple();
   const colonnes = simple
     ? ["Joueur", "Terr.", "Rég.", "Dorés", "Fort."]
-    : ["Joueur", "Terr.", "Rég.", "Écus", "+Rev", "Sci", "Cult", "Amén.", "Nation"];
+    : ["Joueur", "Pts", "Terr.", "Rég.", "Écus", "+Rev", "Sci", "Cult", "Amén.", "Nation"];
   const lignes = [];
   for (const [cle, bilan] of Object.entries(donnees.bilans)) {
     const joueur = Number(cle);
@@ -1100,6 +1119,7 @@ function afficherSituation() {
         ? [pion, bilan.territoires, bilan.regiments, bilan.dores, bilan.amenagements.forteresses]
         : [
           pion,
+          bilan.points_victoire ?? 0,
           bilan.territoires,
           bilan.regiments,
           etat.player_money[cle] || 0,
@@ -1111,7 +1131,10 @@ function afficherSituation() {
         ],
     });
   }
-  lignes.sort((a, b) => b.cellules[1] - a.cellules[1]);  // par territoires
+  // Par points de victoire puis par territoires — l'ordre du décompte final.
+  lignes.sort((a, b) => simple
+    ? b.cellules[1] - a.cellules[1]
+    : (b.cellules[1] - a.cellules[1]) || (b.cellules[2] - a.cellules[2]));
   zone.innerHTML =
     "<table><tr>" + colonnes.map((c) => `<th>${c}</th>`).join("") + "</tr>" +
     lignes.map((ligne) =>

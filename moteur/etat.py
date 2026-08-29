@@ -206,6 +206,9 @@ class GameState:
     # A qui il a prete serment : si la merveille change de mains, le
     # serment tombe au lieu de suivre son nouveau proprietaire.
     eternal_ally_patron: Optional[int] = None
+    # Les paliers de victoire deja franchis, dans l'ordre : chacun ne se
+    # franchit qu'une fois et vaut un point de victoire a son auteur.
+    victory_milestones: List[dict] = field(default_factory=list)
     # Registre "une merveille par joueur et par tour" : memoire de session
     # uniquement, volontairement absent des sauvegardes (parite du format
     # avec x45-original).
@@ -648,6 +651,10 @@ class GameState:
         self.eternal_ally_player = None if allie is None else int(allie)
         patron = payload.get("eternal_ally_patron")
         self.eternal_ally_patron = None if patron is None else int(patron)
+        self.victory_milestones = [
+            palier for palier in payload.get("victory_milestones", [])
+            if isinstance(palier, dict)
+        ]
         self.wonder_construction_turns = {}
 
         # Paradis fiscaux
@@ -862,6 +869,7 @@ class GameState:
             "eternal_ally_patron": (
                 None if self.eternal_ally_patron is None else int(self.eternal_ally_patron)
             ),
+            "victory_milestones": [dict(palier) for palier in self.victory_milestones],
             "last_stand_bonus_players": sorted(self.last_stand_bonus_players),
             "last_stand_bonus_territory": {
                 str(k): sorted(int(tid) for tid in self.get_player_tax_haven_capital_ids(k))

@@ -50,6 +50,18 @@ def partie_neuve():
     raise unittest.SkipTest("Aucune carte exploitable dans cartes_sauvegardees/.")
 
 
+def conditions_remplies(state):
+    """Les conditions de victoire remplies a cet instant : (condition, joueur).
+
+    Depuis les paliers de victoire, remplir une condition ne met plus fin a
+    la partie : elle ferme un palier et rapporte un point a son auteur.
+    """
+    return {
+        (condition, joueur)
+        for condition, joueur, _raison in regles.find_satisfied_victory_conditions(state)
+    }
+
+
 class BaseMerveille(unittest.TestCase):
     def setUp(self):
         self.state = partie_neuve()
@@ -337,9 +349,11 @@ class TestSermentDOrvane(BaseMerveille):
         # Sans le serment, ni l'un ni l'autre n'atteint les 3/4.
         self.assertLess(sum(1 for t in self.state.territories if t.owner == self.joueur), seuil)
         self.assertLess(sum(1 for t in self.state.territories if t.owner == allie), seuil)
-        gagnant, raison = regles.evaluate_winner(self.state)
-        self.assertEqual(gagnant, self.joueur)
-        self.assertIn("allie definitif", raison)
+        conditions = regles.find_satisfied_victory_conditions(self.state)
+        territoriale = [c for c in conditions if c[0] == "territoires"]
+        self.assertTrue(territoriale)
+        self.assertEqual(territoriale[0][1], self.joueur)
+        self.assertIn("allie definitif", territoriale[0][2])
 
     def test_la_culture_de_l_allie_compte_pour_le_patron(self):
         self.poser("orvane_oath")
@@ -408,10 +422,12 @@ class TestSermentDOrvane(BaseMerveille):
             terr.owner = allie
         # Le patron garde le Serment : sans lui, l'alliance se dissout.
         serment.owner = self.joueur
-        # Tout le reste est a l'allie : c'est le patron qui remporte la partie.
-        gagnant, raison = regles.evaluate_winner(self.state)
-        self.assertEqual(gagnant, self.joueur)
-        self.assertIn("allie definitif", raison)
+        # Tout le reste est a l'allie : les paliers vont au patron.
+        auteurs = {
+            joueur for _c, joueur, _r in regles.find_satisfied_victory_conditions(self.state)
+        }
+        self.assertIn(self.joueur, auteurs)
+        self.assertNotIn(allie, auteurs)
 
     def test_le_serment_survit_a_la_sauvegarde(self):
         self.poser("orvane_oath")

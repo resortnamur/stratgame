@@ -58,6 +58,18 @@ def partie_neuve(la_plus_grande=False):
     )
 
 
+def conditions_remplies(state):
+    """Les conditions de victoire remplies a cet instant : (condition, joueur).
+
+    Depuis les paliers de victoire, remplir une condition ne met plus fin a
+    la partie : elle ferme un palier et rapporte un point a son auteur.
+    """
+    return {
+        (condition, joueur)
+        for condition, joueur, _raison in regles.find_satisfied_victory_conditions(state)
+    }
+
+
 class TestRuine(unittest.TestCase):
     """Un centre culturel detruit laisse une ruine indestructible."""
 
@@ -232,28 +244,31 @@ class TestVictoireCulturelle(unittest.TestCase):
             regles.add_ruin(self.state, tid)
         self.assertEqual(regles.calculate_player_culture(self.state, joueur), points)
 
-    def test_le_plancher_empeche_la_victoire_face_a_des_rivaux_a_zero(self):
+    def test_le_plancher_empeche_le_palier_face_a_des_rivaux_a_zero(self):
         meneur = self.joueurs[0]
         self._poser_culture(meneur, regles.CULTURE_VICTORY_MIN_POINTS - regles.RUIN_CULTURE)
         for rival in self.joueurs[1:]:
             self.assertEqual(regles.calculate_player_culture(self.state, rival), 0)
-        self.assertIsNone(regles.evaluate_winner(self.state)[0])
+        self.assertNotIn(("culture", meneur), conditions_remplies(self.state))
 
-    def test_le_plancher_atteint_face_a_des_rivaux_a_zero_fait_gagner(self):
+    def test_le_plancher_atteint_face_a_des_rivaux_a_zero_ferme_le_palier(self):
         meneur = self.joueurs[0]
         self._poser_culture(meneur, regles.CULTURE_VICTORY_MIN_POINTS)
-        gagnant, raison = regles.evaluate_winner(self.state)
-        self.assertEqual(gagnant, meneur)
-        self.assertIn("culture", raison)
+        self.assertIn(("culture", meneur), conditions_remplies(self.state))
+        paliers = regles.register_victory_milestones(self.state)
+        self.assertTrue(any(p["condition"] == "culture" for p in paliers))
+        # Le palier est ferme : le refranchir ne rapporte plus rien.
+        points = regles.get_victory_points(self.state, meneur)
+        self.assertEqual(regles.register_victory_milestones(self.state), [])
+        self.assertEqual(regles.get_victory_points(self.state, meneur), points)
 
     def test_un_rival_a_dix_points_exige_deux_cents_points(self):
         meneur, rival = self.joueurs[0], self.joueurs[1]
         self._poser_culture(rival, 10)
         self._poser_culture(meneur, 195)
-        self.assertIsNone(regles.evaluate_winner(self.state)[0])
+        self.assertNotIn(("culture", meneur), conditions_remplies(self.state))
         self._poser_culture(meneur, 200)
-        gagnant, _raison = regles.evaluate_winner(self.state)
-        self.assertEqual(gagnant, meneur)
+        self.assertIn(("culture", meneur), conditions_remplies(self.state))
 
     def test_une_ia_se_contente_du_facteur_dix(self):
         meneur, rival = self.joueurs[0], self.joueurs[1]
@@ -261,8 +276,11 @@ class TestVictoireCulturelle(unittest.TestCase):
         self.state.human_controlled_players.discard(meneur)
         self._poser_culture(rival, 10)
         self._poser_culture(meneur, 100)
-        gagnant, raison = regles.evaluate_winner(self.state)
-        self.assertEqual(gagnant, meneur)
+        self.assertIn(("culture", meneur), conditions_remplies(self.state))
+        raison = next(
+            r for condition, _j, r in regles.find_satisfied_victory_conditions(self.state)
+            if condition == "culture"
+        )
         self.assertIn("10 fois", raison)
 
 

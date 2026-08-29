@@ -62,6 +62,7 @@ EXPECTED_GAME_KEYS = {
     "religion_last_spread_turns", "religion_holy_sites",
     "religious_influence", "player_science", "culture_expansion_milestones",
     "wonder_territories", "eternal_ally_player", "eternal_ally_patron",
+    "victory_milestones",
     "last_stand_bonus_players",
     "last_stand_bonus_territory", "tax_haven_turn_start_territory_counts",
     "active_alliances", "active_ai_alliances", "active_offensive_alliances",

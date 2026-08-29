@@ -200,6 +200,15 @@ class GraphicalGame:
     SECOND_WONDER_RELIGION_ID = 6
     WONDER_RELIGION_IDS = (5, 6)
     LATE_WONDER_FIRST_TURN = 42
+    VICTORY_CONDITION_LABELS = {
+        "lieux_sacres": "lieux sacres",
+        "religion": "religion",
+        "culture": "culture",
+        "science": "science",
+        "conquete": "conquete totale",
+        "territoires": "territoires (3/4)",
+        "dores": "territoires dores",
+    }
     LATE_WONDER_COST = 500
     AI_LATE_WONDER_COST = 300
     WONDER_DEFINITIONS = {
@@ -358,6 +367,8 @@ class GraphicalGame:
         # Le joueur lie au Serment d'Orvane, s'il y en a un.
         self.eternal_ally_player: Optional[int] = None
         self.eternal_ally_patron: Optional[int] = None
+        # Les paliers de victoire franchis, dans l'ordre.
+        self.victory_milestones: list[dict] = []
         self.pending_wonder_type: Optional[str] = None
         # "Une merveille par tour" : memoire de session, jamais sauvegardee.
         self.wonder_construction_turns: dict[int, int] = {}
@@ -1330,6 +1341,9 @@ class GraphicalGame:
                 None if getattr(self, "eternal_ally_patron", None) is None
                 else int(self.eternal_ally_patron)
             ),
+            "victory_milestones": [
+                dict(palier) for palier in getattr(self, "victory_milestones", [])
+            ],
             "last_stand_bonus_players": list(self.last_stand_bonus_players),
             "last_stand_bonus_territory": {
                 str(k): sorted(int(tid) for tid in self.get_player_tax_haven_capital_ids(k))
@@ -1598,6 +1612,10 @@ class GraphicalGame:
         self.eternal_ally_player = None if allie is None else int(allie)
         patron_allie = payload.get("eternal_ally_patron")
         self.eternal_ally_patron = None if patron_allie is None else int(patron_allie)
+        self.victory_milestones = [
+            palier for palier in payload.get("victory_milestones", [])
+            if isinstance(palier, dict)
+        ]
         self.wonder_construction_turns = {}
         self.pending_wonder_type = None
         # Le statut paradis fiscal depend du proprietaire des capitales.
@@ -5259,6 +5277,7 @@ class GraphicalGame:
         self.pending_wonder_type = None
         self.eternal_ally_player = None
         self.eternal_ally_patron = None
+        self.victory_milestones = []
         self.last_stand_bonus_players = set()
         self.last_stand_bonus_territory = {}
         self.tax_haven_turn_start_territory_counts = {}
@@ -8504,6 +8523,7 @@ class GraphicalGame:
         recent = self.recent_major_events[-8:] if self.recent_major_events else ["Aucun evenement majeur enregistre"]
         return [
             ("Synthese", self.get_geopolitical_status_lines(), False),
+            ("Paliers de victoire", self.get_victory_milestone_lines(), False),
             ("Course a la victoire", self.get_victory_threat_lines(), False),
             ("Alliances", self.get_geopolitical_alliance_lines(), False),
             ("Evenements a venir", self.get_next_fixed_geopolitical_events(), False),
@@ -8936,7 +8956,11 @@ class GraphicalGame:
         golden = sum(1 for tid in self.golden_territory_ids if 0 <= tid < total and self.territories[tid].owner == player)
         holy = self.get_controlled_holy_site_count(player)
         required_holy_sites = self.get_required_holy_site_count_for_victory()
+        paliers = list(getattr(self, "victory_milestones", []))
+        total_conditions = len(moteur_regles.VICTORY_CONDITIONS)
         lines = [
+            f"Points de victoire: {moteur_regles.get_victory_points(self, player)} "
+            f"({len(paliers)}/{total_conditions} paliers franchis dans la partie)",
             f"Controle territorial: {territories}/{threshold} requis pour les 3/4 (manque {max(0, threshold - territories)})",
             f"Territoires dores: {golden}/4 (manque {max(0, 4 - golden)})",
         ]
@@ -8967,6 +8991,12 @@ class GraphicalGame:
                 f"Victoire {label}: {value}/{required} points "
                 f"({ratio}x le meilleur rival, qui est a {best_rival}, et {minimum} points minimum)"
             )
+        fermees = [
+            self.VICTORY_CONDITION_LABELS.get(palier.get("condition"), palier.get("condition"))
+            for palier in paliers
+        ]
+        if fermees:
+            lines.append("Paliers deja fermes: " + ", ".join(fermees))
         religion_id = moteur_regles.get_player_national_religion_id(self, player)
         if religion_id is None:
             lines.append("Religion nationale: aucune; elle nait avec votre premier temple")
@@ -8978,6 +9008,46 @@ class GraphicalGame:
                 f"territoires sous influence (manque {max(0, required_influence - influence)})"
             )
         return lines
+
+    def get_victory_milestone_lines(self) -> list[str]:
+        """Les paliers de victoire franchis et le decompte des points.
+
+        Chaque condition de victoire ne se franchit qu'une fois : elle vaut
+        un point a son auteur puis se ferme. La partie s'acheve quand il n'en
+        reste plus aucune, et c'est le total des points qui departage.
+        """
+        paliers = list(getattr(self, "victory_milestones", []))
+        total = len(moteur_regles.VICTORY_CONDITIONS)
+        lignes = []
+        if not paliers:
+            lignes.append(f"Aucun palier franchi : les {total} conditions sont ouvertes")
+        else:
+            lignes.append(f"{len(paliers)}/{total} paliers franchis, {total - len(paliers)} encore ouverts")
+            for palier in paliers:
+                libelle = self.VICTORY_CONDITION_LABELS.get(
+                    palier.get("condition"), palier.get("condition"),
+                )
+                lignes.append(
+                    f"Tour {palier.get('tour')}: J{int(palier.get('joueur', 0)) + 1} - {libelle}"
+                )
+        points = moteur_regles.get_victory_point_table(self)
+        if points:
+            classement = ", ".join(
+                f"J{joueur + 1}: {total_points}"
+                for joueur, total_points in sorted(
+                    points.items(), key=lambda item: (-item[1], item[0]),
+                )
+            )
+            lignes.append(f"Points de victoire: {classement}")
+        else:
+            lignes.append("Points de victoire: aucun joueur n'en a encore marque")
+        restantes = moteur_regles.get_remaining_victory_conditions(self)
+        if restantes:
+            lignes.append(
+                "Conditions encore ouvertes: "
+                + ", ".join(self.VICTORY_CONDITION_LABELS.get(c, c) for c in restantes)
+            )
+        return lignes
 
     def get_victory_threat_lines(self, exclude_player: Optional[int] = None) -> list[str]:
         """La course a la victoire : qui approche, et par quel moyen.

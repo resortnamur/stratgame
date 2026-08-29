@@ -44,6 +44,18 @@ def partie_neuve(num_players=4, ai_player_count=0):
     )
 
 
+def conditions_remplies(state):
+    """Les conditions de victoire remplies a cet instant : (condition, joueur).
+
+    Depuis les paliers de victoire, remplir une condition ne met plus fin a
+    la partie : elle ferme un palier et rapporte un point a son auteur.
+    """
+    return {
+        (condition, joueur)
+        for condition, joueur, _raison in regles.find_satisfied_victory_conditions(state)
+    }
+
+
 def fonder_religion(state, joueur, religion_id=0):
     """Installe une religion nationale sans passer par l'achat d'un temple."""
     state.religion_founders[joueur] = religion_id
@@ -226,16 +238,18 @@ class TestVictoireReligieuse(unittest.TestCase):
             math.ceil(self.total * 0.75),
         )
 
-    def test_neuf_dixiemes_font_gagner_un_humain(self):
+    def test_neuf_dixiemes_franchissent_le_palier_pour_un_humain(self):
         joueur = 0
         religion = fonder_religion(self.state, joueur)
         requis = regles.get_required_influence_count_for_religion_victory(self.state, joueur)
         self._repandre(religion, requis - 1)
-        self.assertIsNone(regles.evaluate_winner(self.state)[0])
+        self.assertNotIn(("religion", joueur), conditions_remplies(self.state))
         self._repandre(religion, requis)
-        gagnant, raison = regles.evaluate_winner(self.state)
-        self.assertEqual(gagnant, joueur)
-        self.assertIn("9/10", raison)
+        self.assertIn(("religion", joueur), conditions_remplies(self.state))
+        paliers = regles.register_victory_milestones(self.state)
+        self.assertTrue(any(p["condition"] == "religion" for p in paliers))
+        self.assertIn("9/10", next(p["raison"] for p in paliers if p["condition"] == "religion"))
+        self.assertGreaterEqual(regles.get_victory_points(self.state, joueur), 1)
 
     def test_trois_quarts_suffisent_a_une_ia(self):
         ia = 1
@@ -244,28 +258,30 @@ class TestVictoireReligieuse(unittest.TestCase):
         religion = fonder_religion(self.state, ia, religion_id=1)
         requis = regles.get_required_influence_count_for_religion_victory(self.state, ia)
         self._repandre(religion, requis)
-        gagnant, raison = regles.evaluate_winner(self.state)
-        self.assertEqual(gagnant, ia)
+        self.assertIn(("religion", ia), conditions_remplies(self.state))
+        raison = next(
+            r for condition, joueur, r in regles.find_satisfied_victory_conditions(self.state)
+            if condition == "religion"
+        )
         self.assertIn("3/4", raison)
 
     def test_la_religion_de_la_merveille_ne_fait_pas_gagner(self):
         self._repandre(regles.WONDER_RELIGION_ID, self.total)
-        # Personne ne fonde Elyrion : aucun fondateur, donc aucune victoire
-        # religieuse (la victoire territoriale, elle, garde ses regles).
+        # Personne ne fonde Elyrion : aucun fondateur, donc aucun palier
+        # religieux (la condition territoriale, elle, garde ses regles).
         for joueur, religion_id in list(self.state.religion_founders.items()):
             self.assertNotEqual(religion_id, regles.WONDER_RELIGION_ID)
-        gagnant, raison = regles.evaluate_winner(self.state)
-        self.assertNotIn("Elyrion", raison)
+        raisons = [r for _c, _j, r in regles.find_satisfied_victory_conditions(self.state)]
+        self.assertFalse(any("Elyrion" in raison for raison in raisons))
 
-    def test_un_fondateur_elimine_ne_gagne_pas(self):
+    def test_un_fondateur_elimine_ne_franchit_pas_le_palier(self):
         joueur = 0
         religion = fonder_religion(self.state, joueur)
         for terr in self.state.territories:
             if terr.owner == joueur:
                 terr.owner = 1
         self._repandre(religion, self.total)
-        gagnant, _raison = regles.evaluate_winner(self.state)
-        self.assertNotEqual(gagnant, joueur)
+        self.assertNotIn(("religion", joueur), conditions_remplies(self.state))
 
 
 class TestMissionParLActionEnLigne(unittest.TestCase):

@@ -62,6 +62,7 @@ ALLIANCE_LIST_KEYS = {
 # comparaison masquerait une vraie divergence de mise en place ou d'achat.
 CLES_ABSENTES_DE_L_ORIGINAL = (
     "ruin_territory_ids", "eternal_ally_player", "eternal_ally_patron",
+    "victory_milestones",
 )
 # Meme chose dans les instantanes de replay, ou la cle porte un autre nom.
 CLES_D_INSTANTANE_ABSENTES_DE_L_ORIGINAL = ("ruins",)

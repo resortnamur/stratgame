@@ -377,6 +377,7 @@ class SessionPartie:
                     "dores": len(set(state.golden_territory_ids) & possessions),
                     "nation": self._bilan_nation(joueur, possessions),
                     "religion": self._bilan_religion(joueur),
+                    "points_victoire": regles.get_victory_points(state, joueur),
                     "culture": self._bilan_domination(
                         joueur, regles.calculate_player_culture,
                         regles.CULTURE_VICTORY_RATIO, regles.AI_CULTURE_VICTORY_RATIO,
@@ -395,6 +396,9 @@ class SessionPartie:
                 "nb_dores": len(state.golden_territory_ids),
                 # Qui approche d'une victoire, par quelque moyen que ce soit.
                 "menaces": regles.get_victory_threats(state),
+                # Les paliers deja franchis : chacun ferme une condition.
+                "paliers": [dict(palier) for palier in state.victory_milestones],
+                "nb_conditions": len(regles.VICTORY_CONDITIONS),
             }
 
     def _bilan_domination(

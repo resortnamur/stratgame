@@ -50,6 +50,18 @@ def partie_neuve():
     raise unittest.SkipTest("Aucune carte exploitable dans cartes_sauvegardees/.")
 
 
+def conditions_remplies(state):
+    """Les conditions de victoire remplies a cet instant : (condition, joueur).
+
+    Depuis les paliers de victoire, remplir une condition ne met plus fin a
+    la partie : elle ferme un palier et rapporte un point a son auteur.
+    """
+    return {
+        (condition, joueur)
+        for condition, joueur, _raison in regles.find_satisfied_victory_conditions(state)
+    }
+
+
 class BaseMissile(unittest.TestCase):
     def setUp(self):
         self.state = partie_neuve()
@@ -314,23 +326,20 @@ class TestVictoireScientifique(unittest.TestCase):
     def test_le_plancher_est_necessaire(self):
         meneur = self.joueurs[0]
         self.state.player_science[meneur] = regles.SCIENCE_VICTORY_MIN_POINTS - 1
-        self.assertIsNone(regles.evaluate_winner(self.state)[0])
+        self.assertNotIn(("science", meneur), conditions_remplies(self.state))
 
     def test_le_plancher_suffit_face_a_des_rivaux_a_zero(self):
         meneur = self.joueurs[0]
         self.state.player_science[meneur] = regles.SCIENCE_VICTORY_MIN_POINTS
-        gagnant, raison = regles.evaluate_winner(self.state)
-        self.assertEqual(gagnant, meneur)
-        self.assertIn("science", raison)
+        self.assertIn(("science", meneur), conditions_remplies(self.state))
 
     def test_vingt_fois_le_meilleur_rival_pour_un_humain(self):
         meneur, rival = self.joueurs[0], self.joueurs[1]
         self.state.player_science[rival] = 30
         self.state.player_science[meneur] = 599
-        self.assertIsNone(regles.evaluate_winner(self.state)[0])
+        self.assertNotIn(("science", meneur), conditions_remplies(self.state))
         self.state.player_science[meneur] = 600
-        gagnant, _raison = regles.evaluate_winner(self.state)
-        self.assertEqual(gagnant, meneur)
+        self.assertIn(("science", meneur), conditions_remplies(self.state))
 
     def test_dix_fois_suffisent_a_une_ia(self):
         meneur, rival = self.joueurs[0], self.joueurs[1]
@@ -338,8 +347,11 @@ class TestVictoireScientifique(unittest.TestCase):
         self.state.human_controlled_players.discard(meneur)
         self.state.player_science[rival] = 30
         self.state.player_science[meneur] = 300
-        gagnant, raison = regles.evaluate_winner(self.state)
-        self.assertEqual(gagnant, meneur)
+        self.assertIn(("science", meneur), conditions_remplies(self.state))
+        raison = next(
+            r for condition, _j, r in regles.find_satisfied_victory_conditions(self.state)
+            if condition == "science"
+        )
         self.assertIn("10 fois", raison)
 
 

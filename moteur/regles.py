@@ -1558,11 +1558,270 @@ def find_domination_candidate(
     return None
 
 
-def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
-    """Miroir de ``check_winner`` (x45:11144), qui retourne aussi la raison.
+# ----------------------------------------------------------------------
+# Paliers de victoire
+# ----------------------------------------------------------------------
 
-    x45 stocke la raison dans ``last_victory_reason`` ; ici elle est renvoyee
-    pour que l'appelant en dispose sans etat annexe.
+# Les sept conditions de victoire, devenues des paliers : chacune ne se
+# franchit qu'une fois dans la partie, donne un point de victoire a son
+# auteur, puis se ferme definitivement.
+VICTORY_CONDITIONS = (
+    "lieux_sacres",
+    "religion",
+    "culture",
+    "science",
+    "conquete",
+    "territoires",
+    "dores",
+)
+
+
+def get_crossed_victory_conditions(state: GameState) -> Set[str]:
+    return {
+        str(palier.get("condition"))
+        for palier in getattr(state, "victory_milestones", [])
+        if str(palier.get("condition")) in VICTORY_CONDITIONS
+    }
+
+
+def get_remaining_victory_conditions(state: GameState) -> List[str]:
+    crossed = get_crossed_victory_conditions(state)
+    return [condition for condition in VICTORY_CONDITIONS if condition not in crossed]
+
+
+def get_victory_points(state: GameState, player: int) -> int:
+    return sum(
+        1 for palier in getattr(state, "victory_milestones", [])
+        if palier.get("joueur") == player
+    )
+
+
+def get_victory_point_table(state: GameState) -> Dict[int, int]:
+    """Les points de victoire de chacun, par ordre de joueur."""
+    table: Dict[int, int] = {}
+    for palier in getattr(state, "victory_milestones", []):
+        joueur = palier.get("joueur")
+        if isinstance(joueur, int) and joueur >= 0:
+            table[joueur] = table.get(joueur, 0) + 1
+    return table
+
+
+def get_bloc_owning_everything(state: GameState) -> Optional[int]:
+    """Le joueur dont le bloc tient toute la carte, s'il existe."""
+    owners = {terr.owner for terr in state.territories if terr.owner >= 0}
+    if len(owners) != 1 or any(terr.owner < 0 for terr in state.territories):
+        # Un seul proprietaire visible ne suffit pas : l'ONU compte aussi.
+        eternal_ally = get_eternal_ally(state)
+        for owner in sorted(owners):
+            if owner == eternal_ally:
+                continue
+            bloc = get_victory_bloc(state, owner)
+            if all(terr.owner in bloc for terr in state.territories):
+                return owner
+        return None
+    return next(iter(owners))
+
+
+def find_satisfied_victory_conditions(state: GameState) -> List[Tuple[str, int, str]]:
+    """Toutes les conditions de victoire remplies a cet instant.
+
+    Retourne ``(condition, joueur, raison)``. Tout se compte par bloc : le
+    Serment d'Orvane fond l'allie definitif dans son patron, et l'allie ne
+    concourt pas pour son propre compte.
+    """
+    owners = {t.owner for t in state.territories if t.owner >= 0}
+    if not owners:
+        return []
+
+    satisfied: List[Tuple[str, int, str]] = []
+    eternal_ally = get_eternal_ally(state)
+    candidates = {owner for owner in owners if owner != eternal_ally}
+    ally_note = (
+        f" (avec son allie definitif J{eternal_ally + 1})"
+        if eternal_ally is not None else ""
+    )
+
+    def bloc_note(bloc: Tuple[int, ...]) -> str:
+        return ally_note if len(bloc) > 1 else ""
+
+    required_holy_sites = get_required_holy_site_count_for_victory(state)
+    if is_holy_site_victory_active(state):
+        for owner in sorted(candidates):
+            bloc = get_victory_bloc(state, owner)
+            holy_count = sum(get_controlled_holy_site_count(state, member) for member in bloc)
+            if holy_count >= required_holy_sites:
+                satisfied.append((
+                    "lieux_sacres", owner,
+                    f"controle les {required_holy_sites} lieux sacres" + bloc_note(bloc),
+                ))
+                break
+
+    map_size = len(state.territories)
+    for founder, religion_id in sorted(state.religion_founders.items()):
+        if is_wonder_religion(religion_id) or founder not in owners:
+            continue
+        required_influence = get_required_influence_count_for_religion_victory(state, founder)
+        if required_influence <= 0:
+            continue
+        influence_count = get_religion_influence_count(state, religion_id)
+        if influence_count >= required_influence:
+            part = "3/4" if is_ai_player(state, founder) else "9/10"
+            # La foi d'un allie definitif fait gagner son patron.
+            winner = get_eternal_ally_patron(state) if founder == eternal_ally else founder
+            if winner is None:
+                continue
+            satisfied.append((
+                "religion", winner,
+                f"a etendu {get_religion_name(state, religion_id)} sur {part} des territoires "
+                f"({influence_count}/{map_size})"
+                + (ally_note if winner != founder else ""),
+            ))
+            break
+
+    for condition, label, measure, ratio_human, ratio_ai, minimum in (
+        ("culture", "culture", calculate_player_culture,
+         CULTURE_VICTORY_RATIO, AI_CULTURE_VICTORY_RATIO, CULTURE_VICTORY_MIN_POINTS),
+        ("science", "science", get_player_science,
+         SCIENCE_VICTORY_RATIO, AI_SCIENCE_VICTORY_RATIO, SCIENCE_VICTORY_MIN_POINTS),
+    ):
+        def bloc_measure(st: GameState, owner: int, measure=measure) -> int:
+            return sum(measure(st, member) for member in get_victory_bloc(st, owner))
+
+        candidate = find_domination_candidate(
+            state, candidates, bloc_measure, ratio_human, ratio_ai, minimum,
+        )
+        if candidate is None:
+            continue
+        owner, value, best_rival_value, ratio = candidate
+        satisfied.append((
+            condition, owner,
+            f"ecrase la {label} de tous ses rivaux : {value} points, "
+            f"soit au moins {ratio} fois le meilleur adversaire ({best_rival_value})"
+            + bloc_note(get_victory_bloc(state, owner)),
+        ))
+
+    for owner in sorted(candidates):
+        bloc = get_victory_bloc(state, owner)
+        if all(terr.owner in bloc for terr in state.territories):
+            satisfied.append((
+                "conquete", owner,
+                "a conquis tous les territoires, sanctuaires ONU compris" + bloc_note(bloc),
+            ))
+            break
+
+    total_territories = len(state.territories)
+    threshold = math.ceil(total_territories * 0.75)
+    for owner in sorted(candidates):
+        bloc = get_victory_bloc(state, owner)
+        owned_count = sum(1 for t in state.territories if t.owner in bloc)
+        if owned_count >= threshold:
+            satisfied.append((
+                "territoires", owner,
+                f"controle au moins les 3/4 des territoires ({owned_count}/{total_territories})"
+                + bloc_note(bloc),
+            ))
+            break
+
+    if len(state.golden_territory_ids) == 4:
+        for owner in sorted(candidates):
+            bloc = get_victory_bloc(state, owner)
+            if all(
+                0 <= tid < len(state.territories) and state.territories[tid].owner in bloc
+                for tid in state.golden_territory_ids
+            ):
+                satisfied.append((
+                    "dores", owner,
+                    "controle les 4 territoires dores" + bloc_note(bloc),
+                ))
+                break
+
+    return satisfied
+
+
+def register_victory_milestones(state: GameState) -> List[dict]:
+    """Enregistre les paliers nouvellement franchis et distribue les points.
+
+    Un palier deja franchi ne se rejoue jamais : que le meme joueur ou un
+    autre remplisse a nouveau la condition ne change plus rien.
+    """
+    crossed = get_crossed_victory_conditions(state)
+    nouveaux: List[dict] = []
+    for condition, owner, reason in find_satisfied_victory_conditions(state):
+        if condition in crossed:
+            continue
+        crossed.add(condition)
+        palier = {
+            "condition": condition,
+            "joueur": int(owner),
+            "tour": int(state.turn),
+            "raison": reason,
+        }
+        state.victory_milestones.append(palier)
+        nouveaux.append(palier)
+        restants = len(VICTORY_CONDITIONS) - len(crossed)
+        suite = (
+            f"Ce palier est ferme ; il en reste {restants} a franchir."
+            if restants else "C'etait le dernier palier : la partie s'acheve."
+        )
+        record_major_event(state, (
+            f"Tour {state.turn}: PALIER DE VICTOIRE pour J{owner + 1}, il {reason}. "
+            f"Il marque un point de victoire ({get_victory_points(state, owner)} au total). "
+            + suite
+        ))
+    return nouveaux
+
+
+def get_victory_point_leader(state: GameState) -> Optional[Tuple[int, str]]:
+    """Qui l'emporte au decompte des points de victoire.
+
+    A egalite de points, le plus grand empire l'emporte ; puis, s'il le faut,
+    le premier a avoir franchi un palier. Seuls les joueurs encore en lice
+    sont comptes : un elimine ne remporte pas la partie.
+    """
+    actifs = [
+        player for player in get_active_players(state)
+        if not is_onu_player(state, player) and player != get_eternal_ally(state)
+    ]
+    if not actifs:
+        return None
+    premier_palier: Dict[int, int] = {}
+    for index, palier in enumerate(getattr(state, "victory_milestones", [])):
+        premier_palier.setdefault(palier.get("joueur"), index)
+    dernier = len(getattr(state, "victory_milestones", []))
+
+    def cle(player: int) -> Tuple[int, int, int]:
+        bloc = get_victory_bloc(state, player)
+        return (
+            sum(get_victory_points(state, member) for member in bloc),
+            sum(1 for terr in state.territories if terr.owner in bloc),
+            -premier_palier.get(player, dernier),
+        )
+
+    gagnant = max(actifs, key=cle)
+    points, territoires, _ = cle(gagnant)
+    total = len(VICTORY_CONDITIONS)
+    if points <= 0:
+        return gagnant, (
+            f"remporte la partie sans palier a son actif, avec le plus grand "
+            f"empire ({territoires} territoires)"
+        )
+    return gagnant, (
+        f"remporte la partie au decompte des paliers : {points} point(s) de "
+        f"victoire sur {total}, et {territoires} territoires"
+    )
+
+
+def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
+    """Le vainqueur de la partie, s'il y en a un, et la raison.
+
+    Les conditions de victoire sont des paliers : chacune se franchit une
+    seule fois, donne un point de victoire, puis se ferme. La partie se
+    poursuit tant qu'il reste un palier a prendre — sauf s'il ne reste plus
+    qu'un bloc sur la carte, auquel cas il n'y a plus rien a jouer. Le
+    vainqueur est celui qui compte le plus de points de victoire.
+
+    Enregistre au passage les paliers franchis : c'est le seul endroit du
+    moteur ou la question se pose, et tous les appelants en profitent.
     """
     owners = {t.owner for t in state.territories if t.owner >= 0}
     if not owners:
@@ -1596,112 +1855,18 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
         winner = max(alive_champions, key=lambda champion: (bloc_size(champion), -champion))
         return winner, f"gagne la finale apres la disparition de {eliminated_label}"
 
-    def accept_winner(owner: int, reason: str) -> Tuple[Optional[int], str]:
-        if maybe_start_final_duel(state, owner):
-            return None, reason
-        return owner, reason
+    register_victory_milestones(state)
 
-    # Le Serment d'Orvane fond un allie definitif dans son patron : toutes
-    # les reussites de l'allie sont portees au credit du patron, et l'allie
-    # ne concourt plus pour son propre compte.
-    eternal_ally = get_eternal_ally(state)
-    candidates = {owner for owner in owners if owner != eternal_ally}
-    ally_note = (
-        f" (avec son allie definitif J{eternal_ally + 1})"
-        if eternal_ally is not None else ""
-    )
+    if get_remaining_victory_conditions(state) and get_bloc_owning_everything(state) is None:
+        return None, ""
 
-    def bloc_owns(territory: Territory, bloc: Tuple[int, ...]) -> bool:
-        return territory.owner in bloc
-
-    def bloc_note(bloc: Tuple[int, ...]) -> str:
-        return ally_note if len(bloc) > 1 else ""
-
-    required_holy_sites = get_required_holy_site_count_for_victory(state)
-    if is_holy_site_victory_active(state):
-        for owner in sorted(candidates):
-            bloc = get_victory_bloc(state, owner)
-            holy_count = sum(get_controlled_holy_site_count(state, member) for member in bloc)
-            if holy_count >= required_holy_sites:
-                return accept_winner(
-                    owner, f"controle les {required_holy_sites} lieux sacres" + bloc_note(bloc),
-                )
-
-    map_size = len(state.territories)
-    for founder, religion_id in sorted(state.religion_founders.items()):
-        if is_wonder_religion(religion_id) or founder not in owners:
-            continue
-        required_influence = get_required_influence_count_for_religion_victory(state, founder)
-        if required_influence <= 0:
-            continue
-        influence_count = get_religion_influence_count(state, religion_id)
-        if influence_count >= required_influence:
-            part = "3/4" if is_ai_player(state, founder) else "9/10"
-            # La foi d'un allie definitif fait gagner son patron.
-            winner = get_eternal_ally_patron(state) if founder == eternal_ally else founder
-            if winner is None:
-                continue
-            return accept_winner(
-                winner,
-                f"a etendu {get_religion_name(state, religion_id)} sur {part} des territoires "
-                f"({influence_count}/{map_size})"
-                + (ally_note if winner != founder else ""),
-            )
-
-    for label, measure, ratio_human, ratio_ai, minimum in (
-        ("culture", calculate_player_culture,
-         CULTURE_VICTORY_RATIO, AI_CULTURE_VICTORY_RATIO, CULTURE_VICTORY_MIN_POINTS),
-        ("science", get_player_science,
-         SCIENCE_VICTORY_RATIO, AI_SCIENCE_VICTORY_RATIO, SCIENCE_VICTORY_MIN_POINTS),
-    ):
-        def bloc_measure(st: GameState, owner: int, measure=measure) -> int:
-            return sum(measure(st, member) for member in get_victory_bloc(st, owner))
-
-        candidate = find_domination_candidate(
-            state, candidates, bloc_measure, ratio_human, ratio_ai, minimum,
-        )
-        if candidate is None:
-            continue
-        owner, value, best_rival_value, ratio = candidate
-        return accept_winner(
-            owner,
-            f"ecrase la {label} de tous ses rivaux : {value} points, "
-            f"soit au moins {ratio} fois le meilleur adversaire ({best_rival_value})"
-            + bloc_note(get_victory_bloc(state, owner)),
-        )
-
-    for owner in sorted(candidates):
-        bloc = get_victory_bloc(state, owner)
-        if all(bloc_owns(t, bloc) for t in state.territories):
-            return accept_winner(
-                owner,
-                "a conquis tous les territoires, sanctuaires ONU compris" + bloc_note(bloc),
-            )
-
-    total_territories = len(state.territories)
-    threshold = math.ceil(total_territories * 0.75)
-    for owner in sorted(candidates):
-        bloc = get_victory_bloc(state, owner)
-        owned_count = sum(1 for t in state.territories if bloc_owns(t, bloc))
-        if owned_count >= threshold:
-            return accept_winner(
-                owner,
-                f"controle au moins les 3/4 des territoires ({owned_count}/{total_territories})"
-                + bloc_note(bloc),
-            )
-
-    if len(state.golden_territory_ids) == 4:
-        for owner in sorted(candidates):
-            bloc = get_victory_bloc(state, owner)
-            if all(
-                0 <= tid < len(state.territories) and state.territories[tid].owner in bloc
-                for tid in state.golden_territory_ids
-            ):
-                return accept_winner(
-                    owner, "controle les 4 territoires dores" + bloc_note(bloc),
-                )
-
-    return None, ""
+    leader = get_victory_point_leader(state)
+    if leader is None:
+        return None, ""
+    winner, reason = leader
+    if maybe_start_final_duel(state, winner):
+        return None, reason
+    return winner, reason
 
 
 def _victory_threat(
@@ -1756,6 +1921,8 @@ def get_victory_threats(
         return []
     owners = {terr.owner for terr in state.territories if terr.owner >= 0}
     eternal_ally = get_eternal_ally(state)
+    # Un palier deja franchi ne menace plus personne : il est ferme.
+    ouverts = set(get_remaining_victory_conditions(state))
     threats: List[dict] = []
 
     territory_threshold = math.ceil(total * 0.75)
@@ -1770,13 +1937,14 @@ def get_victory_threats(
         suffix = f" avec son allie definitif J{eternal_ally + 1}" if len(bloc) > 1 else ""
 
         owned = sum(1 for terr in state.territories if terr.owner in bloc)
-        threats.append(_victory_threat(
-            owner, bloc, "territoires", "territoriale", owned, territory_threshold,
-            territory_threshold - owned <= VICTORY_THREAT_TERRITORY_MARGIN,
-            f"{owned}/{territory_threshold} territoires (3/4 de la carte){suffix}",
-        ))
+        if "territoires" in ouverts:
+            threats.append(_victory_threat(
+                owner, bloc, "territoires", "territoriale", owned, territory_threshold,
+                territory_threshold - owned <= VICTORY_THREAT_TERRITORY_MARGIN,
+                f"{owned}/{territory_threshold} territoires (3/4 de la carte){suffix}",
+            ))
 
-        if len(golden_ids) == 4:
+        if len(golden_ids) == 4 and "dores" in ouverts:
             golden = sum(1 for tid in golden_ids if state.territories[tid].owner in bloc)
             threats.append(_victory_threat(
                 owner, bloc, "dores", "par les territoires dores", golden, 4,
@@ -1785,7 +1953,7 @@ def get_victory_threats(
                 notice=4 - golden <= 2 * VICTORY_THREAT_GOLDEN_MARGIN,
             ))
 
-        if holy_active and required_holy_sites > 0:
+        if holy_active and required_holy_sites > 0 and "lieux_sacres" in ouverts:
             holy = sum(get_controlled_holy_site_count(state, member) for member in bloc)
             threats.append(_victory_threat(
                 owner, bloc, "lieux_sacres", "par les lieux sacres", holy, required_holy_sites,
@@ -1794,7 +1962,7 @@ def get_victory_threats(
                 notice=required_holy_sites - holy <= 2 * VICTORY_THREAT_HOLY_SITE_MARGIN,
             ))
 
-        for member in bloc:
+        for member in bloc if "religion" in ouverts else ():
             religion_id = get_player_national_religion_id(state, member)
             if religion_id is None:
                 continue
@@ -1817,6 +1985,8 @@ def get_victory_threats(
             ("science", "scientifique", get_player_science,
              SCIENCE_VICTORY_RATIO, AI_SCIENCE_VICTORY_RATIO, SCIENCE_VICTORY_MIN_POINTS),
         ):
+            if kind not in ouverts:
+                continue
             value = sum(measure(state, member) for member in bloc)
             rivals = [
                 rival for rival in owners

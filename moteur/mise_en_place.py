@@ -108,6 +108,7 @@ def nouvelle_partie(
     assign_sanctuary_territories(state, rng)
     reset_economy_state(state)
     assign_initial_economic_structures(state, rng)
+    state.victory_milestones = []
     state.replay_history = []
     state.phase = "playing"
     state.turn_phase = "attack"
