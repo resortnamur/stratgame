@@ -142,6 +142,7 @@ class GraphicalGame:
     INITIAL_CAPITAL_REGIMENTS = 6
     CAPITAL_INCOME_MULTIPLIER = 10
     CHANGE_CAPITAL_COST = 300
+    MISSION_COST = 200
     NATION_MIN_TERRITORIES = 10
     NATION_MAX_TERRITORIES = 10 ** 9
     NATION_INCOME_DIVISOR = 10
@@ -551,9 +552,11 @@ class GraphicalGame:
         self.shop_panel_rect = pygame.Rect(panel_x, panel_y, panel_width, panel_height)
 
         button_width = 188
-        button_height = 31
+        # Treize lignes de boutons tiennent dans le meme panneau depuis l'ajout
+        # de la mission : boutons legerement plus plats, interligne plus serre.
+        button_height = 29
         gap_x = 16
-        gap_y = 5
+        gap_y = 4
         left_x = panel_x + 18
         right_x = left_x + button_width + gap_x
         row1_y = panel_y + 92
@@ -569,6 +572,7 @@ class GraphicalGame:
         row10_y = row9_y + button_height + gap_y
         row11_y = row10_y + button_height + gap_y
         row12_y = row11_y + button_height + gap_y
+        row13_y = row12_y + button_height + gap_y
 
         self.shop_buttons = {
             "mercenaries": pygame.Rect(left_x, row1_y, button_width, button_height),
@@ -583,28 +587,31 @@ class GraphicalGame:
             "build_airport": pygame.Rect(right_x, row5_y, button_width, button_height),
             "build_port": pygame.Rect(left_x, row6_y, button_width, button_height),
             "build_temple": pygame.Rect(right_x, row6_y, button_width, button_height),
-            "build_cultural_center": pygame.Rect(left_x, row7_y, button_width, button_height),
-            "build_university": pygame.Rect(right_x, row7_y, button_width, button_height),
-            "alliance": pygame.Rect(left_x, row8_y, button_width, button_height),
-            "offensive_alliance": pygame.Rect(right_x, row8_y, button_width, button_height),
-            "tax_haven_association": pygame.Rect(left_x, row9_y, button_width, button_height),
-            "freeze_territory": pygame.Rect(right_x, row9_y, button_width, button_height),
-            "release_sanctuary": pygame.Rect(left_x, row10_y, button_width, button_height),
-            "change_capital": pygame.Rect(right_x, row10_y, button_width, button_height),
+            # La mission suit le temple : elle n'existe que par la religion
+            # nationale que le premier temple fait naitre.
+            "mission": pygame.Rect(left_x, row7_y, button_width, button_height),
+            "build_cultural_center": pygame.Rect(right_x, row7_y, button_width, button_height),
+            "build_university": pygame.Rect(left_x, row8_y, button_width, button_height),
+            "alliance": pygame.Rect(right_x, row8_y, button_width, button_height),
+            "offensive_alliance": pygame.Rect(left_x, row9_y, button_width, button_height),
+            "tax_haven_association": pygame.Rect(right_x, row9_y, button_width, button_height),
+            "freeze_territory": pygame.Rect(left_x, row10_y, button_width, button_height),
+            "release_sanctuary": pygame.Rect(right_x, row10_y, button_width, button_height),
+            "change_capital": pygame.Rect(left_x, row11_y, button_width, button_height),
             "destroy_university": pygame.Rect(right_x, row11_y, button_width, button_height),
-            "build_wonder": pygame.Rect(left_x, row11_y, button_width, button_height),
-            "build_bridge": pygame.Rect(left_x, row12_y, button_width, button_height),
-            "destroy_bridge": pygame.Rect(right_x, row12_y, button_width, button_height),
+            "build_wonder": pygame.Rect(left_x, row12_y, button_width, button_height),
+            "build_bridge": pygame.Rect(left_x, row13_y, button_width, button_height),
+            "destroy_bridge": pygame.Rect(right_x, row13_y, button_width, button_height),
         }
         # Les controles +/- des mercenaires sont integres au bouton mercenaires :
         # le joueur voit directement "Mercenaires xN" avant de choisir le territoire.
         # Petite revolution ergonomique, donc naturellement deux rectangles minuscules.
         merc_rect = self.shop_buttons["mercenaries"]
-        self.shop_minus_rect = pygame.Rect(merc_rect.right - 54, merc_rect.y + 7, 22, 24)
-        self.shop_plus_rect = pygame.Rect(merc_rect.right - 28, merc_rect.y + 7, 22, 24)
+        self.shop_minus_rect = pygame.Rect(merc_rect.right - 54, merc_rect.y + 4, 22, 21)
+        self.shop_plus_rect = pygame.Rect(merc_rect.right - 28, merc_rect.y + 4, 22, 21)
         gift_rect = self.shop_buttons["gift_money"]
-        self.shop_gift_minus_rect = pygame.Rect(gift_rect.right - 54, gift_rect.y + 7, 22, 24)
-        self.shop_gift_plus_rect = pygame.Rect(gift_rect.right - 28, gift_rect.y + 7, 22, 24)
+        self.shop_gift_minus_rect = pygame.Rect(gift_rect.right - 54, gift_rect.y + 4, 22, 21)
+        self.shop_gift_plus_rect = pygame.Rect(gift_rect.right - 28, gift_rect.y + 4, 22, 21)
         self.finish_shopping_rect = pygame.Rect(panel_x + 18, panel_y + panel_height - 40, panel_width - 36, 30)
         self.shop_reopen_rect = pygame.Rect(self.WIDTH - 390, 52, 170, 28)
         self.shop_finish_compact_rect = pygame.Rect(self.WIDTH - 210, 52, 170, 28)
@@ -6203,6 +6210,7 @@ class GraphicalGame:
             "build_airport": "construire un aeroport",
             "build_port": "construire un port",
             "build_temple": "construire un temple",
+            "mission": "envoyer une mission",
             "build_cultural_center": "construire un centre culturel",
             "build_university": "construire une universite",
             "destroy_university": "detruire une universite",
@@ -6740,6 +6748,8 @@ class GraphicalGame:
             return 0
         if self.is_active_regular_capital(territory.id) or self.has_university(territory.id):
             return 0
+        if moteur_regles.is_protected_from_revolt_by_national_religion(self, territory.id):
+            return 0
         regiments = max(0, int(territory.regiments))
         return min(self.SEDITION_DENOMINATOR, regiments * regiments)
 
@@ -6848,6 +6858,7 @@ class GraphicalGame:
             "build_airport": self.AIRPORT_COST,
             "build_port": self.PORT_COST,
             "build_temple": self.TEMPLE_COST,
+            "mission": self.MISSION_COST,
             "build_cultural_center": self.CULTURAL_CENTER_COST,
             "build_university": self.UNIVERSITY_COST,
             "destroy_university": self.UNIVERSITY_COST,
@@ -6993,6 +7004,21 @@ class GraphicalGame:
                         f"Liberation ONU selectionnee : cliquez un territoire ONU. Prix = {self.ONU_MANIPULATION_COST_PER_REGIMENT} ecu(s) par regiment.",
                         3200,
                     )
+                elif action == "mission":
+                    religion_id = moteur_regles.get_player_national_religion_id(self, self.current_player)
+                    if religion_id is None:
+                        self.shop_action = None
+                        self.show_message(
+                            "Mission impossible : vous n'avez pas de religion nationale. Elle nait avec votre premier temple.",
+                            3200,
+                        )
+                        return
+                    self.shop_panel_collapsed = True
+                    self.show_message(
+                        f"Mission selectionnee ({self.get_religion_name(religion_id)}) : cliquez n'importe quel "
+                        f"territoire de la carte du monde, il se convertira. Prix : {self.MISSION_COST} ecus.",
+                        3600,
+                    )
                 elif action == "change_capital":
                     self.shop_panel_collapsed = True
                     self.show_message(
@@ -7101,6 +7127,7 @@ class GraphicalGame:
             "build_airport": self.execute_shop_build_airport,
             "build_port": self.execute_shop_build_port,
             "build_temple": self.execute_shop_build_temple,
+            "mission": self.execute_shop_mission,
             "build_cultural_center": self.execute_shop_build_cultural_center,
             "build_university": self.execute_shop_build_university,
             "destroy_university": self.execute_shop_destroy_university,
@@ -7234,6 +7261,10 @@ class GraphicalGame:
         result = moteur_achats.construire_temple(self, terr)
         duration = 5200 if getattr(self, "last_religion_foundation_message", None) else 2600
         self.show_message(result.message, duration if result.ok else 2200)
+
+    def execute_shop_mission(self, terr: Territory) -> None:
+        result = moteur_achats.envoyer_mission(self, terr)
+        self.show_message(result.message, 4200 if result.ok else 2600)
 
     def execute_shop_build_cultural_center(self, terr: Territory) -> None:
         result = moteur_achats.construire_centre_culturel(self, terr)
@@ -8813,7 +8844,7 @@ class GraphicalGame:
         if player in getattr(self, "nation_players", set()):
             lines.append("Le statut de nation annule toutefois toute sedition")
         else:
-            lines.append("Une capitale active, une universite ou le statut de nation annule ce risque sur le territoire concerne")
+            lines.append("Une capitale active, une universite, la religion nationale du proprietaire ou le statut de nation annule ce risque sur le territoire concerne")
         return lines
 
     def get_empire_victory_lines(self, player: int) -> list[str]:
@@ -8832,6 +8863,16 @@ class GraphicalGame:
         else:
             lines.append(
                 f"Lieux sacres: {holy}/{required_holy_sites}; victoire inactive tant que les {required_holy_sites} religions requises ne sont pas fondees"
+            )
+        religion_id = moteur_regles.get_player_national_religion_id(self, player)
+        if religion_id is None:
+            lines.append("Religion nationale: aucune; elle nait avec votre premier temple")
+        else:
+            influence = moteur_regles.get_religion_influence_count(self, religion_id)
+            required_influence = moteur_regles.get_required_influence_count_for_religion_victory(self, player)
+            lines.append(
+                f"Religion nationale {self.get_religion_name(religion_id)}: {influence}/{required_influence} "
+                f"territoires sous influence (manque {max(0, required_influence - influence)})"
             )
         return lines
 
@@ -9304,6 +9345,7 @@ class GraphicalGame:
             ("build_airport", f"Aeroport - {self.AIRPORT_COST}"),
             ("build_port", f"Port - {self.PORT_COST}"),
             ("build_temple", f"Temple - {self.TEMPLE_COST}"),
+            ("mission", f"Mission - {self.MISSION_COST}"),
             ("build_cultural_center", f"Centre culturel - {self.CULTURAL_CENTER_COST}"),
             ("build_university", f"Universite - {self.UNIVERSITY_COST}"),
             ("alliance", f"Alliance def. - {self.ALLIANCE_COST_PER_TERRITORY}/terr."),
@@ -9346,6 +9388,11 @@ class GraphicalGame:
                     and not self.has_built_wonder_this_turn(self.current_player)
                     and bool(self.get_buildable_wonder_types(self.current_player))
                 )
+            elif action == "mission":
+                # Sans religion nationale, rien a propager : bouton eteint.
+                affordable = affordable and moteur_regles.get_player_national_religion_id(
+                    self, self.current_player,
+                ) is not None
             elif action == "destroy_bridge":
                 affordable = affordable and bool(self.bridge_links)
             active = self.shop_action == action

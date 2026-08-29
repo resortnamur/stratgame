@@ -376,6 +376,38 @@ def construire_temple(state: GameState, terr: Territory) -> AchatResult:
     return _succes(f"Temple construit sur {terr.name} pour {regles.TEMPLE_COST} ecu(s).")
 
 
+def envoyer_mission(state: GameState, terr: Territory) -> AchatResult:
+    """Envoie une mission sur un territoire quelconque de la carte du monde.
+
+    Le territoire choisi se convertit a la religion nationale de l'acheteur.
+    Reserve aux religions nationales : la religion de la merveille (Elyrion)
+    n'envoie pas de missions.
+    """
+    religion_id = regles.get_player_national_religion_id(state, state.current_player)
+    if religion_id is None:
+        return _refus(
+            "Mission impossible : vous n'avez pas de religion nationale. "
+            "Elle nait avec votre premier temple."
+        )
+    religion_name = regles.get_religion_name(state, religion_id)
+    if regles.is_territory_tax_haven_immune_to_religion(state, terr.id):
+        return _refus(f"Mission impossible : {terr.name} est un paradis fiscal, impermeable a toute religion.")
+    if state.religious_influence.get(terr.id) == religion_id:
+        return _refus(f"{terr.name} est deja sous l'influence de {religion_name}.")
+    if not spend_player_money(state, state.current_player, regles.MISSION_COST):
+        return _refus(f"Pas assez d'ecus pour envoyer une mission : {regles.MISSION_COST} requis.")
+    previous_religion_id = state.religious_influence.get(terr.id)
+    state.religious_influence[terr.id] = religion_id
+    if previous_religion_id is None:
+        conversion_note = ""
+    else:
+        conversion_note = f" {regles.get_religion_name(state, previous_religion_id)} y perd son influence."
+    return _succes(
+        f"Mission envoyee sur {terr.name} pour {regles.MISSION_COST} ecu(s) : "
+        f"le territoire se convertit a {religion_name}." + conversion_note
+    )
+
+
 def construire_centre_culturel(state: GameState, terr: Territory) -> AchatResult:
     if terr.owner != state.current_player:
         return _refus("Un centre culturel doit etre construit sur un territoire controle.")
@@ -524,10 +556,15 @@ def financer_revolte(state: GameState, terr: Territory, rng=random) -> AchatResu
         return _refus(f"Pas assez d'ecus pour declencher cette revolte : {revolt_cost} ecu(s) necessaires.")
 
     lost_count = calculate_revolt_loss_count(len(owned))
-    territories_to_transfer = regles.choose_owned_contiguous_block(state, target_player, lost_count, rng)
+    territories_to_transfer = regles.choose_owned_contiguous_block(
+        state, target_player, lost_count, rng, exclude_religion_protected=True,
+    )
     if not territories_to_transfer:
         state.player_money[state.current_player] += revolt_cost
-        return _refus("Revolte impossible : aucune cible valide hors capitale.")
+        return _refus(
+            "Revolte impossible : aucune cible valide hors capitale et hors territoire "
+            "acquis a la religion nationale de son proprietaire."
+        )
     lost_count = len(territories_to_transfer)
     rebel_player, returning_human = regles.allocate_rebel_player(state, rng)
     for territory in territories_to_transfer:

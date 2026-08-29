@@ -373,6 +373,7 @@ class SessionPartie:
                     "mines": len(set(state.precious_mineral_mine_ids) & possessions),
                     "dores": len(set(state.golden_territory_ids) & possessions),
                     "nation": self._bilan_nation(joueur, possessions),
+                    "religion": self._bilan_religion(joueur),
                 }
             return {
                 "bilans": bilans,
@@ -380,6 +381,24 @@ class SessionPartie:
                 "seuil_trois_quarts": seuil,
                 "nb_dores": len(state.golden_territory_ids),
             }
+
+    def _bilan_religion(self, joueur: int) -> Optional[Dict[str, Any]]:
+        """La progression vers la victoire religieuse (verrou deja pris).
+
+        ``None`` tant que le joueur n'a pas fonde de religion nationale : la
+        religion de la merveille ne compte pas.
+        """
+        state = self.state
+        religion_id = regles.get_player_national_religion_id(state, joueur)
+        if religion_id is None:
+            return None
+        return {
+            "nom": regles.get_religion_name(state, religion_id),
+            "influence": regles.get_religion_influence_count(state, religion_id),
+            "requis": regles.get_required_influence_count_for_religion_victory(
+                state, joueur,
+            ),
+        }
 
     def _bilan_nation(self, joueur: int, possessions: set) -> Dict[str, Any]:
         """Les conditions de nation pour un joueur (verrou déjà pris)."""

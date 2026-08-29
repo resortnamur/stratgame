@@ -389,6 +389,7 @@ ACHATS = (
     "detruire_forteresse",    # territoire
     "usine", "aeroport", "port",  # territoire
     "temple",                 # territoire
+    "mission",                # territoire
     "centre_culturel",        # territoire
     "universite",             # territoire
     "detruire_universite",    # territoire
@@ -689,6 +690,8 @@ def _apply_purchase(
         return outcome(achats.construire_industrie(state, terr, structure_type))
     if achat == "temple":
         return outcome(achats.construire_temple(state, terr))
+    if achat == "mission":
+        return outcome(achats.envoyer_mission(state, terr))
     if achat == "centre_culturel":
         return outcome(achats.construire_centre_culturel(state, terr))
     if achat == "universite":

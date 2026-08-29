@@ -98,6 +98,9 @@ NATION_INCOME_DIVISOR = 10
 PRECIOUS_MINERAL_MINE_INCOME = 100
 RELIGIOUS_INCOME_BONUS_PER_TERRITORY = 2
 RELIGIOUS_REINFORCEMENT_TERRITORIES_PER_BONUS = 3
+# Victoire religieuse : part de la carte que la religion nationale doit couvrir.
+NATIONAL_RELIGION_VICTORY_RATIO = 0.9
+AI_NATIONAL_RELIGION_VICTORY_RATIO = 0.75
 MAX_REINFORCEMENTS_PER_TURN = 10
 MAX_REINFORCEMENT_ELIGIBLE_REGIMENTS = 120
 MAX_REINFORCEMENT_ELIGIBLE_REGIMENTS_WITH_BONUS_5 = 200
@@ -194,6 +197,8 @@ UNIVERSITY_COST = 200
 TEMPLE_COST = 300
 WONDER_COST = 300
 CHANGE_CAPITAL_COST = 300
+# Une mission convertit un territoire quelconque a la religion nationale.
+MISSION_COST = 200
 CORRUPTION_COST_PER_REGIMENT = 200
 REDUCED_CORRUPTION_COST_PER_REGIMENT = 40
 CORRUPTION_FORTRESS_SURCHARGE = 400
@@ -1020,6 +1025,33 @@ def get_national_religion_influenced_territory_count(state: GameState, player: i
     )
 
 
+def get_player_national_religion_id(state: GameState, player: int) -> Optional[int]:
+    """La religion nationale fondee par ce joueur, s'il en a une.
+
+    La religion de la merveille (Elyrion) n'est jamais une religion nationale :
+    elle n'ouvre ni l'immunite aux revoltes, ni les missions, ni la victoire
+    religieuse.
+    """
+    if player < 0:
+        return None
+    religion_id = state.religion_founders.get(player)
+    if religion_id is None or religion_id == WONDER_RELIGION_ID:
+        return None
+    return religion_id
+
+
+def get_religion_influence_count(state: GameState, religion_id: int) -> int:
+    """Le nombre de territoires de la carte sous l'influence de cette religion.
+
+    Peu importe qui les possede : c'est l'extension de la foi qui compte.
+    """
+    territory_count = len(state.territories)
+    return sum(
+        1 for tid, rid in state.religious_influence.items()
+        if rid == religion_id and 0 <= tid < territory_count
+    )
+
+
 def get_religious_income_bonus(state: GameState, player: int) -> int:
     influenced_count = get_national_religion_influenced_territory_count(state, player)
     return influenced_count * RELIGIOUS_INCOME_BONUS_PER_TERRITORY
@@ -1044,6 +1076,21 @@ def get_required_holy_site_count_for_victory(state: GameState) -> int:
     if "elyrion_sanctuary" in state.wonder_territories:
         return 6
     return 5
+
+
+def get_required_influence_count_for_religion_victory(state: GameState, player: int) -> int:
+    """Combien de territoires sous influence nationale pour gagner la partie.
+
+    Neuf dixiemes de la carte pour un joueur humain, trois quarts pour une IA.
+    """
+    total = len(state.territories)
+    if total <= 0:
+        return 0
+    ratio = (
+        AI_NATIONAL_RELIGION_VICTORY_RATIO if is_ai_player(state, player)
+        else NATIONAL_RELIGION_VICTORY_RATIO
+    )
+    return math.ceil(total * ratio)
 
 
 def is_holy_site_victory_active(state: GameState) -> bool:
@@ -1401,6 +1448,22 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
             holy_count = get_controlled_holy_site_count(state, owner)
             if holy_count >= required_holy_sites:
                 return accept_winner(owner, f"controle les {required_holy_sites} lieux sacres")
+
+    map_size = len(state.territories)
+    for founder, religion_id in sorted(state.religion_founders.items()):
+        if religion_id == WONDER_RELIGION_ID or founder not in owners:
+            continue
+        required_influence = get_required_influence_count_for_religion_victory(state, founder)
+        if required_influence <= 0:
+            continue
+        influence_count = get_religion_influence_count(state, religion_id)
+        if influence_count >= required_influence:
+            part = "3/4" if is_ai_player(state, founder) else "9/10"
+            return accept_winner(
+                founder,
+                f"a etendu {get_religion_name(state, religion_id)} sur {part} des territoires "
+                f"({influence_count}/{map_size})",
+            )
 
     for owner in sorted(owners):
         if all(t.owner == owner for t in state.territories):
@@ -2241,9 +2304,26 @@ def is_protected_from_revolt(state: GameState, territory_id: int) -> bool:
     return is_simple_mode(state) and territory_id in state.fortress_territory_ids
 
 
+def is_protected_from_revolt_by_national_religion(state: GameState, territory_id: int) -> bool:
+    """Ce territoire est-il tenu par la foi de son proprietaire ?
+
+    Avantage des religions nationales : un territoire sous l'influence de la
+    religion nationale fondee par celui qui le possede ne se revolte jamais.
+    Ni revolte, ni revolution, ni trahison, ni sedition. La religion de la
+    merveille (Elyrion) ne protege pas.
+    """
+    if not (0 <= territory_id < len(state.territories)):
+        return False
+    religion_id = get_player_national_religion_id(state, state.territories[territory_id].owner)
+    if religion_id is None:
+        return False
+    return state.religious_influence.get(territory_id) == religion_id
+
+
 def choose_owned_contiguous_block(
     state: GameState, player: int, count: int, rng=random,
     exclude_fortresses: bool = False,
+    exclude_religion_protected: bool = False,
 ) -> List[Territory]:
     """Choisit si possible un bloc contigu de territoires appartenant au joueur.
 
@@ -2251,11 +2331,18 @@ def choose_owned_contiguous_block(
     ``exclude_fortresses`` ecarte en plus les territoires fortifies : les
     appelants le passent pour les revoltes et les trahisons, ou la version
     simplifiee protege les forteresses (``is_protected_from_revolt``).
+    ``exclude_religion_protected`` ecarte les territoires acquis a la religion
+    nationale de leur proprietaire : revoltes, revolutions et trahisons le
+    passent, le chaos mondial non.
     """
     owned_ids = [
         terr.id for terr in state.territories
         if terr.owner == player and not is_active_regular_capital(state, terr.id)
         and not (exclude_fortresses and is_protected_from_revolt(state, terr.id))
+        and not (
+            exclude_religion_protected
+            and is_protected_from_revolt_by_national_religion(state, terr.id)
+        )
     ]
     if count <= 0 or not owned_ids:
         return []
@@ -2428,6 +2515,7 @@ def trigger_sanctuary_annexation_event(state: GameState, human_player: int, rng=
     # forteresses y echappent comme aux evenements d'empire.
     territories_to_transfer = choose_owned_contiguous_block(
         state, human_player, lost_count, rng, exclude_fortresses=True,
+        exclude_religion_protected=True,
     )
     if not territories_to_transfer:
         hors = "hors capitale et forteresse" if is_simple_mode(state) else "hors capitale"
@@ -4429,6 +4517,8 @@ def calculate_sedition_chance_points(state: GameState, territory: Territory) -> 
         return 0
     if is_active_regular_capital(state, territory.id) or has_university(state, territory.id):
         return 0
+    if is_protected_from_revolt_by_national_religion(state, territory.id):
+        return 0
     regiments = max(0, int(territory.regiments))
     return min(SEDITION_DENOMINATOR, regiments * regiments)
 
@@ -4564,7 +4654,9 @@ def maybe_trigger_empire_event(state: GameState, rng=random) -> List[str]:
                 skipped_players.append(player)
                 continue
 
-            territories_to_split = choose_owned_contiguous_block(state, player, lost_count, rng)
+            territories_to_split = choose_owned_contiguous_block(
+                state, player, lost_count, rng, exclude_religion_protected=True,
+            )
             if not territories_to_split:
                 skipped_players.append(player)
                 continue
@@ -4658,6 +4750,7 @@ def maybe_trigger_empire_event(state: GameState, rng=random) -> List[str]:
     # Version simplifiee : les forteresses ne se revoltent ni ne trahissent.
     territories_to_transfer = choose_owned_contiguous_block(
         state, target_player, lost_count, rng, exclude_fortresses=True,
+        exclude_religion_protected=True,
     )
     if not territories_to_transfer:
         hors = "hors capitale et forteresse" if is_simple_mode(state) else "hors capitale"

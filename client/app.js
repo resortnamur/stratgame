@@ -141,6 +141,9 @@ const CATALOGUE_ACHATS = [
   { id: "aeroport", libelle: "Aéroport — 100", cibles: ["mien"], cout: 100 },
   { id: "port", libelle: "Port — 100", cibles: ["mien"], cout: 100 },
   { id: "temple", libelle: "Temple — 300", cibles: ["mien"], cout: 300 },
+  // La mission convertit n'importe quel territoire de la carte à la religion
+  // nationale de l'acheteur : la cible est donc "tout".
+  { id: "mission", libelle: "Mission — 200", cibles: ["tout"], cout: 200 },
   { id: "centre_culturel", libelle: "Centre culturel — 200", cibles: ["mien"], cout: 200 },
   { id: "universite", libelle: "Université — 200", cibles: ["mien"], cout: 200 },
   { id: "detruire_universite", libelle: "Détruire université — 200", cibles: ["tout"], cout: 200 },
@@ -968,6 +971,14 @@ function afficherEmpire() {
   if (Object.keys(bilan.bonus).length) {
     lignes.push("Bonus de renforts : " + Object.entries(bilan.bonus)
       .map(([valeur, nombre]) => `${nombre} territoire(s) ${valeur}`).join(", "));
+  }
+  // Victoire religieuse : la religion nationale doit couvrir 9/10 de la carte
+  // (3/4 pour une IA). Les territoires qu'elle touche ne se révoltent plus.
+  if (bilan.religion) {
+    const manque = Math.max(0, bilan.religion.requis - bilan.religion.influence);
+    lignes.push(`Religion nationale ${bilan.religion.nom} : `
+      + `${bilan.religion.influence}/${bilan.religion.requis} territoires sous influence `
+      + `(manque ${manque} pour la victoire religieuse)`);
   }
   if (modeSimple()) {
     zone.innerHTML = lignes.join("<br>");
