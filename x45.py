@@ -59,6 +59,10 @@ class GraphicalGame:
     SCIENCE_ONU_MANIPULATION_THRESHOLD = 50
     SCIENCE_BRIDGE_THRESHOLD = 150
     SCIENCE_TAX_HAVEN_INTEGRATION_THRESHOLD = 200
+    MISSILE_COST = 200
+    SCIENCE_MISSILE_THRESHOLD = 50
+    SCIENCE_MISSILE_RANGE_THRESHOLD = 100
+    SCIENCE_MISSILE_TOTAL_THRESHOLD = 200
     SCIENCE_ATTACK_4_DICE_THRESHOLD = 500
 
     PLAYER_COLORS = [
@@ -604,6 +608,9 @@ class GraphicalGame:
             "change_capital": pygame.Rect(left_x, row11_y, button_width, button_height),
             "destroy_university": pygame.Rect(right_x, row11_y, button_width, button_height),
             "build_wonder": pygame.Rect(left_x, row12_y, button_width, button_height),
+            # Le missile n'apparait qu'a partir de 50 points de science,
+            # comme les ponts n'apparaissent qu'a 150.
+            "missile": pygame.Rect(right_x, row12_y, button_width, button_height),
             "build_bridge": pygame.Rect(left_x, row13_y, button_width, button_height),
             "destroy_bridge": pygame.Rect(right_x, row13_y, button_width, button_height),
         }
@@ -6183,6 +6190,7 @@ class GraphicalGame:
             "destroy_fortress": "detruire une forteresse",
             "corrupt": "corrompre un territoire ennemi",
             "revolt": "declencher une revolte",
+            "missile": "tirer un missile",
             "build_factory": "construire une usine",
             "build_airport": "construire un aeroport",
             "build_port": "construire un port",
@@ -6831,6 +6839,7 @@ class GraphicalGame:
             "destroy_fortress": self.DESTROY_FORTRESS_COST,
             "corrupt": 0,
             "revolt": self.REVOLT_COST_LOW,
+            "missile": self.MISSILE_COST,
             "build_factory": self.FACTORY_COST,
             "build_airport": self.AIRPORT_COST,
             "build_port": self.PORT_COST,
@@ -6929,6 +6938,8 @@ class GraphicalGame:
         for action, rect in self.shop_buttons.items():
             if action in ("build_bridge", "destroy_bridge") and self.get_player_science(self.current_player) < self.SCIENCE_BRIDGE_THRESHOLD:
                 continue
+            if action == "missile" and self.get_player_science(self.current_player) < self.SCIENCE_MISSILE_THRESHOLD:
+                continue
             if rect.collidepoint(pos):
                 self.shop_action = action
                 if action != "give_territory":
@@ -6980,6 +6991,22 @@ class GraphicalGame:
                     self.show_message(
                         f"Liberation ONU selectionnee : cliquez un territoire ONU. Prix = {self.ONU_MANIPULATION_COST_PER_REGIMENT} ecu(s) par regiment.",
                         3200,
+                    )
+                elif action == "missile":
+                    tier = moteur_achats.get_missile_tier(self, self.current_player)
+                    if self.get_player_money(self.current_player) < self.MISSILE_COST:
+                        self.shop_action = None
+                        self.show_message(f"Missile trop cher : {self.MISSILE_COST} ecus requis.", 2200)
+                        return
+                    portee = {
+                        1: "un territoire adverse voisin d'un des votres",
+                        2: f"un territoire adverse a moins de {moteur_achats.MISSILE_RANGE_PX:.0f} pixels de vos terres",
+                        3: "n'importe quel territoire adverse de la carte, qui sera rase",
+                    }.get(tier, "")
+                    self.shop_panel_collapsed = True
+                    self.show_message(
+                        f"Missile selectionne : cliquez {portee}. Prix : {self.MISSILE_COST} ecus.",
+                        3600,
                     )
                 elif action == "mission":
                     religion_id = moteur_regles.get_player_national_religion_id(self, self.current_player)
@@ -7100,6 +7127,7 @@ class GraphicalGame:
             "destroy_fortress": self.execute_shop_destroy_fortress,
             "corrupt": self.execute_shop_corrupt_territory,
             "revolt": self.execute_shop_revolt,
+            "missile": self.execute_shop_missile,
             "build_factory": self.execute_shop_build_factory,
             "build_airport": self.execute_shop_build_airport,
             "build_port": self.execute_shop_build_port,
@@ -7220,6 +7248,10 @@ class GraphicalGame:
     def execute_shop_revolt(self, terr: Territory) -> None:
         result = moteur_achats.financer_revolte(self, terr)
         self.show_message(result.message, 4400 if result.ok else 2400)
+
+    def execute_shop_missile(self, terr: Territory) -> None:
+        result = moteur_achats.tirer_missile(self, terr, self.cell_width, self.cell_height)
+        self.show_message(result.message, 5200 if result.ok else 3000)
 
     def execute_shop_build_industrial_structure(self, terr: Territory, structure_type: str, label: str, cost: int) -> None:
         result = moteur_achats.construire_industrie(self, terr, structure_type)
@@ -8844,25 +8876,27 @@ class GraphicalGame:
             lines.append(
                 f"Lieux sacres: {holy}/{required_holy_sites}; victoire inactive tant que les {required_holy_sites} religions requises ne sont pas fondees"
             )
-        culture = self.calculate_player_culture(player)
         rivals = [
             opponent for opponent in self.get_active_players()
             if opponent != player and not self.is_onu_player(opponent)
         ]
-        best_rival_culture = max(
-            (self.calculate_player_culture(opponent) for opponent in rivals), default=0,
-        )
-        ratio = (
-            moteur_regles.AI_CULTURE_VICTORY_RATIO if self.is_ai_player(player)
-            else moteur_regles.CULTURE_VICTORY_RATIO
-        )
-        required_culture = max(
-            moteur_regles.CULTURE_VICTORY_MIN_POINTS, ratio * best_rival_culture,
-        )
-        lines.append(
-            f"Culture: {culture}/{required_culture} requis pour la victoire culturelle "
-            f"({ratio}x le meilleur rival, qui est a {best_rival_culture}, et {moteur_regles.CULTURE_VICTORY_MIN_POINTS} points minimum)"
-        )
+        # Culture et science partagent la meme regle de domination.
+        for label, measure, ratio_human, ratio_ai, minimum in (
+            ("culturelle", self.calculate_player_culture,
+             moteur_regles.CULTURE_VICTORY_RATIO, moteur_regles.AI_CULTURE_VICTORY_RATIO,
+             moteur_regles.CULTURE_VICTORY_MIN_POINTS),
+            ("scientifique", self.get_player_science,
+             moteur_regles.SCIENCE_VICTORY_RATIO, moteur_regles.AI_SCIENCE_VICTORY_RATIO,
+             moteur_regles.SCIENCE_VICTORY_MIN_POINTS),
+        ):
+            value = measure(player)
+            best_rival = max((measure(opponent) for opponent in rivals), default=0)
+            ratio = ratio_ai if self.is_ai_player(player) else ratio_human
+            required = max(minimum, ratio * best_rival)
+            lines.append(
+                f"Victoire {label}: {value}/{required} points "
+                f"({ratio}x le meilleur rival, qui est a {best_rival}, et {minimum} points minimum)"
+            )
         religion_id = moteur_regles.get_player_national_religion_id(self, player)
         if religion_id is None:
             lines.append("Religion nationale: aucune; elle nait avec votre premier temple")
@@ -9358,6 +9392,10 @@ class GraphicalGame:
             ("destroy_university", f"Detruire universite - {self.UNIVERSITY_COST}"),
             ("build_wonder", f"Merveille - {self.WONDER_COST}"),
         ]
+        if science >= self.SCIENCE_MISSILE_THRESHOLD:
+            tier = moteur_achats.get_missile_tier(self, self.current_player)
+            portee = {1: "voisin", 2: f"{moteur_achats.MISSILE_RANGE_PX:.0f}px", 3: "partout"}.get(tier, "")
+            button_specs.append(("missile", f"Missile {portee} - {self.MISSILE_COST}"))
         if (
             science >= self.SCIENCE_BRIDGE_THRESHOLD
             or self.player_controls_wonder(self.current_player, "daedalus_forge")

@@ -137,6 +137,9 @@ const CATALOGUE_ACHATS = [
   { id: "detruire_forteresse", libelle: "Détruire forteresse — 100", cibles: ["tout"], cout: 100 },
   { id: "corruption", libelle: "Corrompre — 40-200/rég.", cibles: ["ennemi"] },
   { id: "revolte", libelle: "Révolte — 200-600", cibles: ["ennemi"], cout: 200 },
+  // Le missile apparaît dès 50 points de science ; la portée et la puissance
+  // montent ensuite à 100 puis à 200 points, côté serveur.
+  { id: "missile", libelle: "Missile — 200", cibles: ["ennemi"], cout: 200, science: 50 },
   { id: "usine", libelle: "Usine — 100", cibles: ["mien"], cout: 100 },
   { id: "aeroport", libelle: "Aéroport — 100", cibles: ["mien"], cout: 100 },
   { id: "port", libelle: "Port — 100", cibles: ["mien"], cout: 100 },
@@ -973,12 +976,14 @@ function afficherEmpire() {
     lignes.push("Bonus de renforts : " + Object.entries(bilan.bonus)
       .map(([valeur, nombre]) => `${nombre} territoire(s) ${valeur}`).join(", "));
   }
-  // Victoire culturelle : écraser le meilleur rival d'un facteur 20 (10 pour
-  // une IA), avec un plancher pour que des rivaux à zéro ne suffisent pas.
-  if (bilan.culture) {
-    const c = bilan.culture;
-    lignes.push(`Culture : ${c.points}/${c.requis} requis pour la victoire culturelle `
-      + `(${c.facteur}× le meilleur rival, à ${c.meilleur_rival})`);
+  // Victoires de domination : écraser le meilleur rival d'un facteur 20
+  // (10 pour une IA), avec un plancher pour que des rivaux à zéro ne
+  // suffisent pas. Même règle pour la culture et pour la science.
+  for (const [nom, cle] of [["culturelle", "culture"], ["scientifique", "science"]]) {
+    const d = bilan[cle];
+    if (!d) continue;
+    lignes.push(`${cle[0].toUpperCase()}${cle.slice(1)} : ${d.points}/${d.requis} requis `
+      + `pour la victoire ${nom} (${d.facteur}× le meilleur rival, à ${d.meilleur_rival})`);
   }
   // Victoire religieuse : la religion nationale doit couvrir 9/10 de la carte
   // (3/4 pour une IA). Les territoires qu'elle touche ne se révoltent plus.

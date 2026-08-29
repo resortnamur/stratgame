@@ -108,6 +108,10 @@ RELIGIOUS_REINFORCEMENT_TERRITORIES_PER_BONUS = 3
 CULTURE_VICTORY_RATIO = 20
 AI_CULTURE_VICTORY_RATIO = 10
 CULTURE_VICTORY_MIN_POINTS = 100
+# Victoire scientifique : exactement la meme mecanique que la culture.
+SCIENCE_VICTORY_RATIO = 20
+AI_SCIENCE_VICTORY_RATIO = 10
+SCIENCE_VICTORY_MIN_POINTS = 100
 # Victoire religieuse : part de la carte que la religion nationale doit couvrir.
 NATIONAL_RELIGION_VICTORY_RATIO = 0.9
 AI_NATIONAL_RELIGION_VICTORY_RATIO = 0.75
@@ -1390,6 +1394,37 @@ def maybe_start_final_duel(state: GameState, winner: int) -> bool:
     raise NotImplementedError("Duel final par union humaine : mecanique abandonnee dans x45.")
 
 
+def find_domination_candidate(
+    state: GameState,
+    owners: Set[int],
+    measure,
+    ratio_human: int,
+    ratio_ai: int,
+    minimum: int,
+) -> Optional[Tuple[int, int, int, int]]:
+    """Le joueur qui ecrase tous ses rivaux sur une mesure (culture, science).
+
+    Retourne ``(joueur, sa valeur, celle du meilleur rival, rapport exige)``,
+    ou ``None``. Le rapport ne suffit pas : sans plancher, des rivaux a zero
+    donneraient la victoire des le premier tour.
+    """
+    for owner in sorted(owners):
+        value = measure(state, owner)
+        if value < minimum:
+            continue
+        rivals = [
+            rival for rival in owners
+            if rival != owner and not is_onu_player(state, rival)
+        ]
+        if not rivals:
+            continue
+        ratio = ratio_ai if is_ai_player(state, owner) else ratio_human
+        best_rival_value = max(measure(state, rival) for rival in rivals)
+        if value >= ratio * best_rival_value:
+            return owner, value, best_rival_value, ratio
+    return None
+
+
 def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
     """Miroir de ``check_winner`` (x45:11144), qui retourne aussi la raison.
 
@@ -1456,24 +1491,23 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
                 f"({influence_count}/{map_size})",
             )
 
-    for owner in sorted(owners):
-        culture = calculate_player_culture(state, owner)
-        if culture < CULTURE_VICTORY_MIN_POINTS:
+    for label, measure, ratio_human, ratio_ai, minimum in (
+        ("culture", calculate_player_culture,
+         CULTURE_VICTORY_RATIO, AI_CULTURE_VICTORY_RATIO, CULTURE_VICTORY_MIN_POINTS),
+        ("science", get_player_science,
+         SCIENCE_VICTORY_RATIO, AI_SCIENCE_VICTORY_RATIO, SCIENCE_VICTORY_MIN_POINTS),
+    ):
+        candidate = find_domination_candidate(
+            state, owners, measure, ratio_human, ratio_ai, minimum,
+        )
+        if candidate is None:
             continue
-        rivals = [
-            rival for rival in owners
-            if rival != owner and not is_onu_player(state, rival)
-        ]
-        if not rivals:
-            continue
-        ratio = AI_CULTURE_VICTORY_RATIO if is_ai_player(state, owner) else CULTURE_VICTORY_RATIO
-        best_rival_culture = max(calculate_player_culture(state, rival) for rival in rivals)
-        if culture >= ratio * best_rival_culture:
-            return accept_winner(
-                owner,
-                f"ecrase la culture de tous ses rivaux : {culture} points, "
-                f"soit au moins {ratio} fois le meilleur adversaire ({best_rival_culture})",
-            )
+        owner, value, best_rival_value, ratio = candidate
+        return accept_winner(
+            owner,
+            f"ecrase la {label} de tous ses rivaux : {value} points, "
+            f"soit au moins {ratio} fois le meilleur adversaire ({best_rival_value})",
+        )
 
     for owner in sorted(owners):
         if all(t.owner == owner for t in state.territories):
@@ -1692,6 +1726,50 @@ def remove_temple(state: GameState, territory_id: int) -> bool:
     state.temple_territory_ids.discard(territory_id)
     state.temple_capture_counts.pop(territory_id, None)
     return True
+
+
+def remove_fortress(state: GameState, territory_id: int) -> bool:
+    if territory_id not in state.fortress_territory_ids:
+        return False
+    state.fortress_territory_ids.discard(territory_id)
+    state.fortress_capture_counts.pop(territory_id, None)
+    return True
+
+
+def remove_all_cultural_centers(state: GameState, territory_id: int) -> int:
+    """Rase les centres culturels d'un territoire : il en reste une ruine."""
+    removed = len(state.cultural_center_ages.get(territory_id, []))
+    if not removed:
+        return 0
+    state.cultural_center_ages.pop(territory_id, None)
+    state.cultural_capture_counts.pop(territory_id, None)
+    add_ruin(state, territory_id)
+    return removed
+
+
+def destroy_all_amenities(state: GameState, territory_id: int) -> List[str]:
+    """Rase tous les amenagements d'un territoire et dit ce qui est tombe.
+
+    Les merveilles resistent : elles ne sont pas des amenagements. La ruine
+    aussi, puisque rien ne la detruit jamais — et un centre culturel rase
+    ici en laisse une, comme n'importe quelle destruction de centre.
+    """
+    destroyed: List[str] = []
+    if remove_fortress(state, territory_id):
+        destroyed.append("forteresse")
+    industrial_count = remove_all_industrial_structures(state, territory_id)
+    if industrial_count:
+        label = "amenagement industriel" if industrial_count == 1 else "amenagements industriels"
+        destroyed.append(f"{industrial_count} {label}")
+    if remove_temple(state, territory_id):
+        destroyed.append("temple")
+    cultural_count = remove_all_cultural_centers(state, territory_id)
+    if cultural_count:
+        plural = "" if cultural_count == 1 else "s"
+        destroyed.append(f"{cultural_count} centre{plural} culturel{plural} (reduit{plural} en ruine)")
+    if remove_university(state, territory_id):
+        destroyed.append("universite")
+    return destroyed
 
 
 def register_special_capture(state: GameState, territory_id: int) -> List[str]:
@@ -3718,6 +3796,92 @@ def get_expedition_route_distance(
             distance = math.sqrt(best_sq)
     routes[key] = distance
     return distance
+
+
+def get_territory_border_cells(state: GameState, territory_id: int) -> List[Tuple[int, int]]:
+    """Les cellules du territoire qui touchent autre chose que lui-meme.
+
+    La distance minimale entre deux territoires disjoints est toujours
+    atteinte sur leurs bords : les comparer suffit, et cela evite de
+    parcourir des interieurs entiers.
+    """
+    cache = _get_expedition_cache(state)
+    borders = cache.setdefault("borders", {})
+    if territory_id in borders:
+        return borders[territory_id]
+    cells: List[Tuple[int, int]] = []
+    if 0 <= territory_id < len(state.territories):
+        for row, col in state.territories[territory_id].cells:
+            for neighbor_row, neighbor_col in state.iter_adjacency_neighbors(row, col):
+                if state.grid_territory[neighbor_row][neighbor_col] != territory_id:
+                    cells.append((row, col))
+                    break
+        if not cells:
+            # Un territoire qui couvre toute la grille n'a pas de bord.
+            cells = [tuple(cell) for cell in state.territories[territory_id].cells]
+    borders[territory_id] = cells
+    return cells
+
+
+def get_territory_pixel_distance(
+    state: GameState,
+    territory_a: int,
+    territory_b: int,
+    cell_width: float,
+    cell_height: float,
+) -> Optional[float]:
+    """Distance a vol d'oiseau, en pixels, entre deux territoires.
+
+    De centre de cellule a centre de cellule, comme les routes maritimes,
+    et par le bord le plus court sur les cartes personnalisees (toroidales).
+    Contrairement a une route maritime, elle ne demande aucune eau commune :
+    un missile survole ce qu'il veut.
+    """
+    if not (0 <= territory_a < len(state.territories)):
+        return None
+    if not (0 <= territory_b < len(state.territories)):
+        return None
+    if territory_a == territory_b:
+        return 0.0
+    toroidal = state.map_mode == "custom"
+    cells_b = get_territory_border_cells(state, territory_b)
+    best_sq: Optional[float] = None
+    for row_a, col_a in get_territory_border_cells(state, territory_a):
+        for row_b, col_b in cells_b:
+            row_gap = abs(row_a - row_b)
+            col_gap = abs(col_a - col_b)
+            if toroidal:
+                row_gap = min(row_gap, state.rows - row_gap)
+                col_gap = min(col_gap, state.cols - col_gap)
+            dx = col_gap * cell_width
+            dy = row_gap * cell_height
+            distance_sq = dx * dx + dy * dy
+            if best_sq is None or distance_sq < best_sq:
+                best_sq = distance_sq
+    return math.sqrt(best_sq) if best_sq is not None else None
+
+
+def get_distance_to_nearest_owned_territory(
+    state: GameState,
+    territory_id: int,
+    player: int,
+    cell_width: float,
+    cell_height: float,
+) -> Optional[float]:
+    """Distance en pixels du territoire le plus proche appartenant au joueur."""
+    if is_territory_adjacent_to_player(state, territory_id, player):
+        # Voisins immediats : inutile de mesurer, c'est le minimum possible.
+        return 0.0
+    best: Optional[float] = None
+    for terr in state.territories:
+        if terr.owner != player or terr.id == territory_id:
+            continue
+        distance = get_territory_pixel_distance(
+            state, territory_id, terr.id, cell_width, cell_height,
+        )
+        if distance is not None and (best is None or distance < best):
+            best = distance
+    return best
 
 
 def get_expedition_risk_faces(distance_px: float) -> Tuple[int, ...]:

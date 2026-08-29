@@ -377,7 +377,16 @@ class SessionPartie:
                     "dores": len(set(state.golden_territory_ids) & possessions),
                     "nation": self._bilan_nation(joueur, possessions),
                     "religion": self._bilan_religion(joueur),
-                    "culture": self._bilan_culture(joueur),
+                    "culture": self._bilan_domination(
+                        joueur, regles.calculate_player_culture,
+                        regles.CULTURE_VICTORY_RATIO, regles.AI_CULTURE_VICTORY_RATIO,
+                        regles.CULTURE_VICTORY_MIN_POINTS,
+                    ),
+                    "science": self._bilan_domination(
+                        joueur, regles.get_player_science,
+                        regles.SCIENCE_VICTORY_RATIO, regles.AI_SCIENCE_VICTORY_RATIO,
+                        regles.SCIENCE_VICTORY_MIN_POINTS,
+                    ),
                 }
             return {
                 "bilans": bilans,
@@ -386,32 +395,28 @@ class SessionPartie:
                 "nb_dores": len(state.golden_territory_ids),
             }
 
-    def _bilan_culture(self, joueur: int) -> Dict[str, Any]:
-        """La progression vers la victoire culturelle (verrou deja pris).
+    def _bilan_domination(
+        self, joueur: int, mesure, facteur_humain: int, facteur_ia: int, plancher: int,
+    ) -> Dict[str, Any]:
+        """La progression vers une victoire de domination (verrou deja pris).
 
-        Il faut ecraser le meilleur rival d'un facteur 20 (10 pour une IA) et
-        depasser un plancher, sans quoi un rival a zero donnerait la victoire
-        des le premier tour.
+        Culture et science suivent la meme regle : ecraser le meilleur rival
+        d'un facteur 20 (10 pour une IA) et depasser un plancher, sans quoi
+        un rival a zero donnerait la victoire des le premier tour.
         """
         state = self.state
-        culture = regles.calculate_player_culture(state, joueur)
+        points = mesure(state, joueur)
         rivaux = [
             autre for autre in regles.get_active_players(state)
             if autre != joueur and not regles.is_onu_player(state, autre)
         ]
-        meilleur_rival = max(
-            (regles.calculate_player_culture(state, autre) for autre in rivaux),
-            default=0,
-        )
-        facteur = (
-            regles.AI_CULTURE_VICTORY_RATIO if regles.is_ai_player(state, joueur)
-            else regles.CULTURE_VICTORY_RATIO
-        )
+        meilleur_rival = max((mesure(state, autre) for autre in rivaux), default=0)
+        facteur = facteur_ia if regles.is_ai_player(state, joueur) else facteur_humain
         return {
-            "points": culture,
+            "points": points,
             "facteur": facteur,
             "meilleur_rival": meilleur_rival,
-            "requis": max(regles.CULTURE_VICTORY_MIN_POINTS, facteur * meilleur_rival),
+            "requis": max(plancher, facteur * meilleur_rival),
         }
 
     def _bilan_religion(self, joueur: int) -> Optional[Dict[str, Any]]:

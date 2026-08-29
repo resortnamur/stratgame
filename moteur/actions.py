@@ -397,6 +397,7 @@ ACHATS = (
     "capitale",               # territoire
     "corruption",             # territoire
     "revolte",                # territoire
+    "missile",                # territoire
     "pont",                   # territoire, territoire_b
     "detruire_pont",          # territoire, territoire_b
     "alliance",               # territoire (du joueur IA cible)
@@ -708,6 +709,8 @@ def _apply_purchase(
         return outcome(achats.corrompre_territoire(state, terr))
     if achat == "revolte":
         return outcome(achats.financer_revolte(state, terr, rng))
+    if achat == "missile":
+        return outcome(achats.tirer_missile(state, terr, cell_width, cell_height))
     if achat == "pont":
         other = get_int("territoire_b")
         if other is None or not (0 <= other < len(state.territories)):
