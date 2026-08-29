@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Manuel de Jeux Strat</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Mode d'emploi de Jeux Strat : l'essentiel d'abord, les details a deplier.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&family=Zilla+Slab:wght@500;600;700&display=swap">
+<style>
+  :root {
+    --fond: #eef1f7;
+    --surface: #ffffff;
+    --surface-creuse: #e6ebf3;
+    --encre: #14243c;
+    --encre-douce: #56698a;
+    --laiton: #8a5d0c;
+    --laiton-vif: #c08a1e;
+    --alerte: #9d3125;
+    --filet: #d2dae7;
+    --filet-fin: #e2e8f1;
+    --ombre: 0 1px 2px rgba(20, 36, 60, .06), 0 8px 24px -16px rgba(20, 36, 60, .3);
+
+    --pas: 1.6rem;
+    --colonne: 40rem;
+
+    --display: "Zilla Slab", Georgia, "Times New Roman", serif;
+    --texte: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    --data: "IBM Plex Mono", "Consolas", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --fond: #0b1422;
+      --surface: #16243a;
+      --surface-creuse: #101d31;
+      --encre: #e3eaf6;
+      --encre-douce: #8ca0be;
+      --laiton: #efc463;
+      --laiton-vif: #d5a33c;
+      --alerte: #f0907f;
+      --filet: #263854;
+      --filet-fin: #1e2e46;
+      --ombre: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -18px rgba(0, 0, 0, .8);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --fond: #0b1422;
+    --surface: #16243a;
+    --surface-creuse: #101d31;
+    --encre: #e3eaf6;
+    --encre-douce: #8ca0be;
+    --laiton: #efc463;
+    --laiton-vif: #d5a33c;
+    --alerte: #f0907f;
+    --filet: #263854;
+    --filet-fin: #1e2e46;
+    --ombre: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 30px -18px rgba(0, 0, 0, .8);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--fond);
+    color: var(--encre);
+    font-family: var(--texte);
+    font-size: 1.0625rem;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: var(--colonne);
+    margin: 0 auto;
+    padding: 3.5rem 1.5rem 6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 3.25rem;
+  }
+
+  /* ---------- En-tete ---------- */
+
+  .entete { display: flex; flex-direction: column; gap: .75rem; }
+
+  .surtitre {
+    font-family: var(--data);
+    font-size: .7rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--laiton);
+  }
+
+  h1 {
+    font-family: var(--display);
+    font-weight: 700;
+    font-size: clamp(2.4rem, 7vw, 3.4rem);
+    line-height: 1.04;
+    letter-spacing: -.015em;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  .chapo {
+    margin: 0;
+    font-size: 1.2rem;
+    color: var(--encre-douce);
+    max-width: 34rem;
+    text-wrap: pretty;
+  }
+
+  /* ---------- Reglage de profondeur ---------- */
+
+  .profondeur {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem .75rem;
+    padding: .9rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--filet);
+    border-radius: 4px;
+    box-shadow: var(--ombre);
+  }
+
+  .profondeur p {
+    margin: 0;
+    flex: 1 1 12rem;
+    font-size: .9rem;
+    color: var(--encre-douce);
+  }
+
+  .boutons { display: flex; gap: .35rem; }
+
+  .boutons button {
+    font-family: var(--texte);
+    font-size: .85rem;
+    font-weight: 600;
+    color: var(--encre-douce);
+    background: transparent;
+    border: 1px solid var(--filet);
+    border-radius: 3px;
+    padding: .35rem .7rem;
+    cursor: pointer;
+    transition: background .15s, color .15s, border-color .15s;
+  }
+
+  .boutons button:hover { color: var(--encre); border-color: var(--laiton-vif); }
+
+  .boutons button[aria-pressed="true"] {
+    background: var(--laiton-vif);
+    border-color: var(--laiton-vif);
+    color: #14243c;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--laiton-vif);
+    outline-offset: 2px;
+  }
+
+  /* ---------- Sections ---------- */
+
+  section { display: flex; flex-direction: column; gap: var(--pas); }
+
+  h2 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1.7rem;
+    line-height: 1.15;
+    margin: 0;
+    padding-bottom: .5rem;
+    border-bottom: 2px solid var(--laiton-vif);
+    text-wrap: balance;
+  }
+
+  h3 {
+    font-family: var(--display);
+    font-weight: 600;
+    font-size: 1.15rem;
+    margin: 0;
+    text-wrap: balance;
+  }
+
+  p { margin: 0; text-wrap: pretty; }
+
+  strong { font-weight: 600; }
+
+  em { color: var(--encre-douce); }
+
+  /* ---------- L'essentiel, en exergue ---------- */
+
+  .exergue {
+    background: var(--surface);
+    border-left: 4px solid var(--laiton-vif);
+    border-radius: 0 4px 4px 0;
+    padding: 1.4rem 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    box-shadow: var(--ombre);
+  }
+
+  .exergue p { font-size: 1.1rem; }
+
+  /* ---------- Conseils ---------- */
+
+  .conseils { display: flex; flex-direction: column; gap: 1.5rem; }
+
+  .conseil { display: flex; flex-direction: column; gap: .55rem; }
+
+  .conseil h3 { color: var(--encre); }
+
+  /* ---------- Sequence du tour ---------- */
+
+  ol.etapes {
+    list-style: none;
+    counter-reset: etape;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1.15rem;
+  }
+
+  ol.etapes > li {
+    counter-increment: etape;
+    display: grid;
+    grid-template-columns: 2rem 1fr;
+    gap: .9rem;
+    align-items: baseline;
+  }
+
+  ol.etapes > li::before {
+    content: counter(etape);
+    font-family: var(--data);
+    font-size: .85rem;
+    color: var(--laiton);
+    border-bottom: 1px solid var(--laiton-vif);
+    padding-bottom: .1rem;
+    text-align: center;
+  }
+
+  ol.etapes .titre-etape { font-weight: 600; }
+
+  /* ---------- Listes ---------- */
+
+  ul.puces {
+    margin: 0;
+    padding-left: 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: .45rem;
+  }
+
+  ul.puces li::marker { color: var(--laiton-vif); }
+
+  /* ---------- Valeurs chiffrees ---------- */
+
+  .valeur {
+    font-family: var(--data);
+    font-size: .86em;
+    font-variant-numeric: tabular-nums;
+    background: var(--surface-creuse);
+    border-radius: 2px;
+    padding: .05em .35em;
+    white-space: nowrap;
+  }
+
+  /* ---------- Tableaux ---------- */
+
+  .tableau { overflow-x: auto; }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: .93rem;
+  }
+
+  th, td {
+    text-align: left;
+    padding: .5rem .7rem;
+    border-bottom: 1px solid var(--filet-fin);
+    vertical-align: top;
+  }
+
+  th {
+    font-family: var(--data);
+    font-size: .7rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--encre-douce);
+    border-bottom: 1px solid var(--filet);
+    white-space: nowrap;
+  }
+
+  td.nombre {
+    font-family: var(--data);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* ---------- Les deux niveaux d'approfondissement ---------- */
+
+  details {
+    border-left: 2px solid var(--laiton-vif);
+    padding-left: 1.1rem;
+  }
+
+  details + details { margin-top: .9rem; }
+
+  details > summary {
+    font-family: var(--texte);
+    font-weight: 600;
+    font-size: .95rem;
+    color: var(--laiton);
+    cursor: pointer;
+    list-style: none;
+    /* En ligne, et non en flex : le soulignement du lien s'arreterait sinon
+       sous la fleche et sous l'espace qui l'en separe. */
+    display: inline;
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--laiton) 35%, transparent);
+    text-underline-offset: .2em;
+  }
+
+  details > summary::-webkit-details-marker { display: none; }
+
+  details > summary::after {
+    content: "▸";
+    font-size: .8em;
+    display: inline-block;
+    margin-left: .35em;
+    text-decoration: none;
+    transition: transform .18s ease;
+  }
+
+  details[open] > summary::after { transform: rotate(90deg); }
+
+  details > summary:hover { text-decoration-color: var(--laiton); }
+
+  details > .corps {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    padding: .9rem 0 .4rem;
+  }
+
+  /* Le troisieme niveau : plus etroit, plus pale, plus petit. */
+  details details {
+    border-left-width: 1px;
+    border-left-color: var(--filet);
+    padding-left: .95rem;
+  }
+
+  details details > summary {
+    font-weight: 400;
+    font-size: .88rem;
+    color: var(--encre-douce);
+    text-decoration-color: color-mix(in srgb, var(--encre-douce) 40%, transparent);
+  }
+
+  details details > summary:hover { color: var(--encre); }
+
+  details details > .corps { font-size: .95rem; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+
+  /* ---------- Pied ---------- */
+
+  footer {
+    border-top: 1px solid var(--filet);
+    padding-top: 1.25rem;
+    font-size: .88rem;
+    color: var(--encre-douce);
+    display: flex;
+    flex-direction: column;
+    gap: .4rem;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header class="entete">
+    <span class="surtitre">Jeux Strat</span>
+    <h1>Manuel de campagne</h1>
+    <p class="chapo">
+      L'essentiel tient en deux minutes. Le reste attend derrière des liens,
+      pour le jour où vous voudrez savoir pourquoi votre empire s'est révolté.
+    </p>
+  </header>
+
+  <div class="profondeur">
+    <p>Choisissez votre profondeur de lecture :</p>
+    <div class="boutons" role="group" aria-label="Profondeur de lecture">
+      <button type="button" data-niveau="1" aria-pressed="true">Essentiel</button>
+      <button type="button" data-niveau="2" aria-pressed="false">Approfondi</button>
+      <button type="button" data-niveau="3" aria-pressed="false">Complet</button>
+    </div>
+  </div>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>En deux minutes</h2>
+
+    <div class="exergue">
+      <p>
+        Vous commandez un empire sur une carte de territoires. Chaque tour,
+        vous <strong>attaquez</strong> aux dés, vous <strong>achetez</strong>
+        ce que vos écus permettent, vous <strong>déplacez</strong> vos
+        régiments, puis vous encaissez des <strong>renforts</strong>.
+      </p>
+      <p>
+        Gagner ne veut plus dire écraser tout le monde. Il y a
+        <strong>sept manières de gagner</strong> — sept paliers. Chacun ne se
+        franchit <strong>qu'une seule fois dans la partie</strong> et rapporte
+        <strong>un point de victoire</strong> à celui qui le prend. Quand les
+        sept sont tombés, c'est le joueur qui compte le plus de points qui
+        l'emporte.
+      </p>
+      <p>
+        Autrement dit : mieux vaut décrocher trois paliers différents que
+        d'essayer trois fois le même. Le premier arrivé ferme la porte.
+      </p>
+    </div>
+
+    <details>
+      <summary>Pourquoi des paliers plutôt qu'une victoire unique</summary>
+      <div class="corps">
+        <p>
+          Avec sept conditions de victoire, la première remplie mettait fin à
+          la partie avant que les autres n'aient servi. Les paliers laissent
+          la partie continuer : un joueur qui rafle les quatre territoires
+          dorés au tour 20 empoche son point, mais devra en trouver d'autres
+          pour rester en tête.
+        </p>
+        <p>
+          Une condition fermée l'est pour tout le monde. Reprendre les quatre
+          dorés à celui qui les a pris ne rapporte plus rien — le palier a
+          déjà été franchi.
+        </p>
+
+        <details>
+          <summary>Quand la partie s'arrête exactement</summary>
+          <div class="corps">
+            <p>
+              Deux fins possibles. Soit les <strong>sept paliers</strong> ont
+              été franchis, qui qu'en soient les auteurs. Soit un joueur
+              (avec son allié définitif, s'il en a un) tient
+              <strong>toute la carte</strong> : il n'y a plus d'adversaire,
+              donc plus rien à jouer — sans cette porte de sortie la partie ne
+              s'achèverait jamais, parce que les paliers de culture et de
+              science exigent un rival.
+            </p>
+            <p>
+              Dans les deux cas on compte les points de victoire. À égalité,
+              c'est le plus grand empire qui l'emporte ; à égalité encore, le
+              premier à avoir franchi un palier. Un joueur éliminé ne gagne
+              pas, même s'il avait accumulé des points avant de disparaître.
+            </p>
+          </div>
+        </details>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>Cinq conseils qui décident d'une partie</h2>
+
+    <div class="conseils">
+
+      <div class="conseil">
+        <h3>Visez des paliers différents, pas le plus gros empire</h3>
+        <p>
+          Le contrôle territorial n'est qu'un palier sur sept. Un joueur avec
+          un empire moyen, une religion bien étendue et une avance culturelle
+          marque trois points pendant que le conquérant en marque un.
+        </p>
+        <details>
+          <summary>Quels paliers sont les plus faciles à voler</summary>
+          <div class="corps">
+            <p>
+              Les <strong>quatre territoires dorés</strong> : ils sont fixes,
+              visibles, et ne demandent aucune économie. Un raid bien mené
+              suffit — le palier tombe même si vous les perdez le tour suivant.
+            </p>
+            <p>
+              La <strong>science</strong> et la <strong>culture</strong> se
+              prennent sans combattre, mais lentement : il faut vingt fois le
+              meilleur rival (dix fois pour une IA) et au moins
+              <span class="valeur">100 points</span>. Commencez tôt ou pas du
+              tout.
+            </p>
+            <p>
+              Les <strong>lieux sacrés</strong> demandent de rassembler ceux
+              de toutes les religions fondées : c'est le palier le plus long,
+              mais personne ne le surveille.
+            </p>
+          </div>
+        </details>
+      </div>
+
+      <div class="conseil">
+        <h3>Un temple tôt vaut mieux qu'une forteresse de plus</h3>
+        <p>
+          Votre premier temple fonde votre <strong>religion nationale</strong>.
+          Elle se répand toute seule, rapporte des écus et des renforts, et
+          surtout : un territoire à vous qu'elle a converti
+          <strong>ne se révolte jamais</strong>. Ni révolte, ni révolution, ni
+          trahison, ni sédition.
+        </p>
+        <details>
+          <summary>Ce que rapporte vraiment une religion nationale</summary>
+          <div class="corps">
+            <ul class="puces">
+              <li><span class="valeur">+2 écus</span> par tour et par territoire à vous sous son influence.</li>
+              <li>Un renfort de plus tous les <span class="valeur">3</span> territoires sous influence.</li>
+              <li>L'immunité aux révoltes sur ces mêmes territoires.</li>
+              <li>Un palier de victoire si elle couvre <span class="valeur">9/10</span> de la carte (<span class="valeur">3/4</span> pour une IA).</li>
+            </ul>
+            <details>
+              <summary>À quelle vitesse elle se répand</summary>
+              <div class="corps">
+                <p>
+                  Elle gagne les territoires voisins de ceux qu'elle occupe
+                  déjà, à un rythme qui dépend du nombre de temples que vous
+                  contrôlez : <span class="valeur">30</span> tours avec un
+                  seul temple, <span class="valeur">25</span> avec deux,
+                  <span class="valeur">20</span>, <span class="valeur">15</span>,
+                  <span class="valeur">10</span>, <span class="valeur">5</span>,
+                  et <span class="valeur">1</span> seul tour avec sept temples.
+                  Sans temple, elle ne bouge plus du tout.
+                </p>
+                <p>
+                  Une religion nationale ne recouvre jamais une autre religion
+                  déjà installée. Pour lui prendre du terrain, il faut une
+                  <strong>mission</strong> : <span class="valeur">200 écus</span>,
+                  et le territoire de votre choix — n'importe où sur la carte —
+                  bascule aussitôt. Seuls les paradis fiscaux y résistent.
+                </p>
+              </div>
+            </details>
+          </div>
+        </details>
+      </div>
+
+      <div class="conseil">
+        <h3>Surveillez l'encart « Course à la victoire »</h3>
+        <p>
+          Il liste en permanence qui approche d'un palier, par quel moyen, et
+          ce qui lui manque. Quand quelqu'un touche au but, une alerte part à
+          chaque tour dans les événements majeurs. C'est votre seul
+          avertissement avant qu'un point ne vous échappe.
+        </p>
+        <details>
+          <summary>Comment lire l'encart</summary>
+          <div class="corps">
+            <p>
+              Une menace apparaît dès <span class="valeur">65 %</span> du
+              chemin parcouru — ou, pour les petits comptes, quand il ne
+              manque plus que deux territoires dorés ou deux lieux sacrés.
+            </p>
+            <p>
+              Elle passe en <strong>rouge, avec une alerte</strong>, quand il
+              ne reste presque rien : trois territoires ou moins du seuil des
+              trois quarts, un seul doré manquant, un seul lieu sacré
+              manquant, ou <span class="valeur">90 %</span> du chemin pour la
+              culture, la science et la religion.
+            </p>
+            <p>
+              Un palier déjà fermé disparaît de la liste : il ne menace plus
+              personne.
+            </p>
+          </div>
+        </details>
+      </div>
+
+      <div class="conseil">
+        <h3>La culture vous protège des catastrophes</h3>
+        <p>
+          Tous les dix tours, un événement d'empire frappe le joueur le plus
+          étendu : révolte ou trahison, en alternance. La culture amortit,
+          puis annule complètement ces pertes.
+        </p>
+        <details>
+          <summary>Les six paliers de protection culturelle</summary>
+          <div class="corps">
+            <div class="tableau">
+              <table>
+                <thead>
+                  <tr><th>Culture</th><th>Révolte / trahison</th><th>Révolution générale</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td class="nombre">25</td><td>4 territoires perdus au plus</td><td>1/4 de l'empire</td></tr>
+                  <tr><td class="nombre">50</td><td>3 au plus</td><td>1/5</td></tr>
+                  <tr><td class="nombre">75</td><td>2 au plus</td><td>1/6</td></tr>
+                  <tr><td class="nombre">100</td><td>1 au plus</td><td>1/7</td></tr>
+                  <tr><td class="nombre">125</td><td>aucune perte</td><td>1/10</td></tr>
+                  <tr><td class="nombre">150</td><td>aucune perte</td><td>immunité totale</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Sans aucune culture, une révolution générale vous coûte
+              <strong>un tiers</strong> de votre empire.
+            </p>
+            <details>
+              <summary>D'où vient la culture</summary>
+              <div class="corps">
+                <p>
+                  Un <strong>centre culturel</strong>
+                  (<span class="valeur">200 écus</span>) produit chaque tour
+                  autant de points que le territoire a de voisins — et ce
+                  chiffre est multiplié par son ancienneté :
+                  <span class="valeur">×2</span> après 10 tours,
+                  <span class="valeur">×5</span> après 40,
+                  <span class="valeur">×10</span> après 100. Un vieux centre
+                  culturel vaut une province entière.
+                </p>
+                <p>
+                  Une <strong>ruine</strong> rapporte
+                  <span class="valeur">5 points</span> fixes, quel que soit le
+                  territoire. Les <strong>Jardins de Kaleth</strong> ajoutent
+                  <span class="valeur">50 points</span> à plat. Le
+                  <strong>Théâtre des Mille Voix</strong> double tout le
+                  reste — mais pas ces deux apports fixes.
+                </p>
+              </div>
+            </details>
+          </div>
+        </details>
+      </div>
+
+      <div class="conseil">
+        <h3>Ne laissez pas vos régiments s'entasser</h3>
+        <p>
+          Un territoire trop garni fait <strong>sédition</strong> : il passe à
+          une IA sans combat, en fin de tour. Le risque grimpe avec le carré
+          du nombre de régiments.
+        </p>
+        <details>
+          <summary>Le calcul, et comment s'en prémunir</summary>
+          <div class="corps">
+            <p>
+              La chance de sédition vaut
+              <span class="valeur">régiments² / 50 000</span> par tour. À dix
+              régiments c'est négligeable ; à cent, c'est
+              <span class="valeur">20 %</span> par tour.
+            </p>
+            <p>Quatre choses annulent complètement le risque sur un territoire :</p>
+            <ul class="puces">
+              <li>une capitale active ;</li>
+              <li>une université ;</li>
+              <li>votre religion nationale installée dessus ;</li>
+              <li>le statut de nation, qui protège tout votre empire.</li>
+            </ul>
+            <p>
+              Le panneau empire vous dit en permanence quel territoire est le
+              plus exposé.
+            </p>
+          </div>
+        </details>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>Le tour de jeu</h2>
+
+    <ol class="etapes">
+      <li>
+        <div>
+          <span class="titre-etape">Début de tour.</span> Vous encaissez vos
+          écus, vos points de science et votre culture. Les événements de la
+          carte se déclenchent.
+        </div>
+      </li>
+      <li>
+        <div>
+          <span class="titre-etape">Attaque.</span> Autant d'attaques que vous
+          voulez, sur des territoires voisins. Un territoire doit garder au
+          moins 2 régiments pour attaquer.
+        </div>
+      </li>
+      <li>
+        <div>
+          <span class="titre-etape">Boutique.</span> Vous dépensez vos écus :
+          mercenaires, bâtiments, merveilles, corruption, missiles, missions…
+        </div>
+      </li>
+      <li>
+        <div>
+          <span class="titre-etape">Déplacement.</span> Un nombre limité de
+          mouvements pour redéployer vos régiments.
+        </div>
+      </li>
+      <li>
+        <div>
+          <span class="titre-etape">Fin de tour.</span> Vos renforts tombent,
+          et la main passe au joueur suivant.
+        </div>
+      </li>
+    </ol>
+
+    <details>
+      <summary>Le combat en détail</summary>
+      <div class="corps">
+        <p>
+          Chaque passe d'attaque oppose des dés à six faces. On trie les dés
+          des deux camps et on les compare deux à deux ; <strong>l'égalité
+          profite au défenseur</strong>. Chaque comparaison perdue coûte un
+          régiment.
+        </p>
+        <div class="tableau">
+          <table>
+            <thead>
+              <tr><th>Camp</th><th>Situation</th><th>Dés</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Attaquant</td><td>2 régiments</td><td class="nombre">1</td></tr>
+              <tr><td>Attaquant</td><td>3 régiments</td><td class="nombre">2</td></tr>
+              <tr><td>Attaquant</td><td>4 régiments ou plus</td><td class="nombre">3</td></tr>
+              <tr><td>Attaquant</td><td>5 régiments et 500 de science</td><td class="nombre">4</td></tr>
+              <tr><td>Défenseur</td><td>1 régiment</td><td class="nombre">1</td></tr>
+              <tr><td>Défenseur</td><td>2 régiments ou plus</td><td class="nombre">2</td></tr>
+              <tr><td>Défenseur</td><td>forteresse et 3 régiments</td><td class="nombre">3</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          L'attaquant ne descend jamais sous un régiment : une attaque ratée
+          coûte cher mais ne vide pas le territoire de départ.
+        </p>
+
+        <details>
+          <summary>Capturer, et ce que la capture détruit</summary>
+          <div class="corps">
+            <p>
+              Un territoire tombe quand il n'a plus de régiment. Ses
+              aménagements ne disparaissent pas tout de suite : ils tiennent
+              <strong>trois captures</strong>. À la troisième, la forteresse
+              tombe, les industries tombent, l'université tombe, le temple
+              tombe — et le centre culturel devient une <strong>ruine</strong>,
+              qui, elle, ne disparaîtra jamais.
+            </p>
+            <p>
+              Une ruine rapporte <span class="valeur">20 écus</span> et
+              <span class="valeur">5 points de culture</span> par tour à qui
+              tient le territoire, mais occupe la place : on ne rebâtit pas de
+              centre culturel dessus.
+            </p>
+          </div>
+        </details>
+
+        <details>
+          <summary>Attaquer par la mer</summary>
+          <div class="corps">
+            <p>
+              Une <strong>expédition maritime</strong> vise un territoire non
+              voisin qui borde la même étendue d'eau. La traversée se joue à
+              un dé à 64 faces : plus la route est longue, plus le risque de
+              perdre 25, 50, 75 ou 100 % de la flotte est grand. Au
+              débarquement, l'attaquant est plafonné à
+              <span class="valeur">2 dés</span>.
+            </p>
+            <p>
+              Un <strong>pont</strong> (<span class="valeur">300 écus</span>,
+              150 de science) rend deux territoires voisins pour de bon : ils
+              peuvent s'attaquer normalement, et chacun gagne un voisin de
+              plus — donc du revenu et de la culture.
+            </p>
+          </div>
+        </details>
+      </div>
+    </details>
+
+    <details>
+      <summary>Déplacements et renforts</summary>
+      <div class="corps">
+        <p>
+          Vous avez <span class="valeur">5</span> déplacements par tour,
+          <span class="valeur">10</span> dès que vous tenez au moins dix
+          territoires.
+        </p>
+        <p>
+          Les renforts de fin de tour valent
+          <span class="valeur">territoires / 3</span> arrondi au supérieur,
+          plafonné à <span class="valeur">10</span>, plus les bonus. Les trois
+          premiers vont automatiquement à vos forteresses.
+        </p>
+
+        <details>
+          <summary>Tous les bonus de renfort, et le plafond militaire</summary>
+          <div class="corps">
+            <ul class="puces">
+              <li><span class="valeur">+3</span> régiments par territoire à bonus +3.</li>
+              <li><span class="valeur">+5</span> par territoire à bonus +5.</li>
+              <li>Un renfort par tranche de <span class="valeur">3</span> territoires sous votre religion nationale.</li>
+              <li>Les IA reçoivent un bonus croissant à partir du tour 33, jusqu'à +5 au tour 65.</li>
+            </ul>
+            <p>
+              Au-delà de <span class="valeur">120 régiments</span> au total,
+              vous ne recevez plus rien —
+              <span class="valeur">200</span> si vous tenez un territoire à
+              bonus +5. Il reste les mercenaires, à
+              <span class="valeur">50 écus</span> pièce.
+            </p>
+            <p>
+              Un renfort qui tombe sur une <strong>université</strong> se
+              transforme en <span class="valeur">10 écus</span> — sauf s'il ne
+              vous reste qu'un seul territoire, auquel cas vous gardez le
+              régiment.
+            </p>
+          </div>
+        </details>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>Les sept paliers</h2>
+
+    <p>
+      Chacun rapporte un point de victoire à celui qui le franchit le premier,
+      puis se ferme définitivement.
+    </p>
+
+    <div class="tableau">
+      <table>
+        <thead>
+          <tr><th>Palier</th><th>Ce qu'il faut</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Territorial</td><td>Les trois quarts de la carte</td></tr>
+          <tr><td>Conquête totale</td><td>Tous les territoires, sanctuaires ONU compris</td></tr>
+          <tr><td>Territoires dorés</td><td>Les quatre en même temps</td></tr>
+          <tr><td>Lieux sacrés</td><td>Tous les lieux sacrés des religions fondées</td></tr>
+          <tr><td>Religion</td><td>Votre religion nationale sur 9/10 de la carte</td></tr>
+          <tr><td>Culture</td><td>20 fois le meilleur rival, et 100 points au moins</td></tr>
+          <tr><td>Science</td><td>20 fois le meilleur rival, et 100 points au moins</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <details>
+      <summary>Les seuils exacts, et ce qui change pour une IA</summary>
+      <div class="corps">
+        <p>
+          Les IA jouent avec des seuils plus bas sur trois paliers : la
+          religion leur demande <span class="valeur">3/4</span> de la carte au
+          lieu de neuf dixièmes, et la culture comme la science leur demandent
+          <span class="valeur">10 fois</span> le meilleur rival au lieu de
+          vingt. Le plancher de <span class="valeur">100 points</span>, lui,
+          vaut pour tout le monde.
+        </p>
+        <p>
+          Le palier des <strong>lieux sacrés</strong> ne s'ouvre que lorsque
+          toutes les religions attendues ont été fondées : les cinq religions
+          nationales, plus une pour chaque religion conquérante née d'une
+          merveille.
+        </p>
+
+        <details>
+          <summary>Pourquoi un plancher sur la culture et la science</summary>
+          <div class="corps">
+            <p>
+              Sans lui, un adversaire à zéro point rendrait le rapport
+              trivialement atteignable : vingt fois zéro font zéro. Le
+              plancher de <span class="valeur">100 points</span> garantit
+              qu'un palier de domination se mérite, même face à des rivaux qui
+              n'ont rien construit.
+            </p>
+          </div>
+        </details>
+
+        <details>
+          <summary>Le cas de l'allié définitif</summary>
+          <div class="corps">
+            <p>
+              Le <strong>Serment d'Orvane</strong> lie un joueur à son
+              contrôleur. Tout se compte alors par bloc : territoires, dorés,
+              lieux sacrés, culture, science, religion s'additionnent, et
+              l'allié ne concourt plus pour son propre compte — ses réussites
+              sont portées au crédit de son patron.
+            </p>
+          </div>
+        </details>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>L'argent</h2>
+
+    <p>
+      Chaque territoire rapporte, chaque tour, <strong>autant d'écus qu'il a
+      de voisins</strong>. Tout le reste est un multiplicateur ou une prime
+      posée par-dessus.
+    </p>
+
+    <details>
+      <summary>Le calcul complet du revenu</summary>
+      <div class="corps">
+        <ul class="puces">
+          <li>Base : le nombre de voisins du territoire — ponts compris.</li>
+          <li>Chaque industrie (usine, aéroport, port) <strong>double</strong> cette base.</li>
+          <li>Une <strong>capitale</strong> multiplie le tout par <span class="valeur">10</span>.</li>
+          <li>La <strong>Fontaine de Crésus</strong> multiplie encore par <span class="valeur">5</span>.</li>
+        </ul>
+        <p>
+          Puis, sur le total de l'empire : <span class="valeur">×1,5</span>
+          pour un paradis fiscal qui possède les trois industries,
+          <span class="valeur">÷10</span> pour une nation — le prix de son
+          immunité.
+        </p>
+        <p>
+          Et enfin les primes fixes, que rien ne multiplie :
+          <span class="valeur">+2</span> par territoire sous votre religion,
+          <span class="valeur">+100</span> par mine de minerais précieux,
+          <span class="valeur">+20</span> par ruine,
+          <span class="valeur">+50</span> pour les Jardins de Kaleth.
+        </p>
+
+        <details>
+          <summary>Vendre, donner, corrompre</summary>
+          <div class="corps">
+            <p>
+              <strong>Vendre un territoire</strong> rapporte
+              <span class="valeur">10 écus</span> par régiment, plus
+              <span class="valeur">50</span> par aménagement ou bonus.
+            </p>
+            <p>
+              <strong>Corrompre</strong> un territoire adverse le fait changer
+              de camp sans combat, avec ses aménagements intacts. Le prix est
+              de <span class="valeur">200 écus</span> par régiment présent —
+              ou seulement <span class="valeur">40</span> si votre culture
+              atteint au moins 15 points <em>et</em> vaut au moins le triple
+              de celle du propriétaire.
+            </p>
+            <p>
+              S'y ajoutent des surcoûts : <span class="valeur">+400</span> par
+              forteresse ou par industrie, <span class="valeur">+800</span>
+              par centre culturel, <span class="valeur">+400</span> pour un
+              territoire à bonus. Les territoires dorés sont incorruptibles.
+            </p>
+          </div>
+        </details>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>La boutique</h2>
+
+    <p>
+      C'est là que se jouent la plupart des parties. Voici ce qu'on peut y
+      acheter, du plus courant au plus rare.
+    </p>
+
+    <div class="tableau">
+      <table>
+        <thead>
+          <tr><th>Achat</th><th>Prix</th><th>Effet</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Mercenaire</td><td class="nombre">50</td><td>Un régiment, tout de suite</td></tr>
+          <tr><td>Forteresse</td><td class="nombre">100</td><td>3 dés en défense dès 3 régiments</td></tr>
+          <tr><td>Usine, aéroport, port</td><td class="nombre">100</td><td>Double le revenu du territoire</td></tr>
+          <tr><td>Centre culturel</td><td class="nombre">200</td><td>De la culture, qui vieillit bien</td></tr>
+          <tr><td>Université</td><td class="nombre">200</td><td>De la science, et plus de sédition</td></tr>
+          <tr><td>Mission</td><td class="nombre">200</td><td>Convertit un territoire, n'importe où</td></tr>
+          <tr><td>Missile</td><td class="nombre">200</td><td>Anéantit la moitié d'une garnison</td></tr>
+          <tr><td>Temple</td><td class="nombre">300</td><td>Fonde et propage votre religion</td></tr>
+          <tr><td>Pont</td><td class="nombre">300</td><td>Rend deux territoires voisins</td></tr>
+          <tr><td>Merveille</td><td class="nombre">300</td><td>Un pouvoir unique sur la carte</td></tr>
+          <tr><td>Révolte</td><td class="nombre">200–600</td><td>Un quart de l'empire visé se rebelle</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <details>
+      <summary>Le missile, arme des scientifiques</summary>
+      <div class="corps">
+        <p>
+          Il apparaît en boutique à <span class="valeur">50 points</span> de
+          science, et sa portée comme sa puissance montent avec elle.
+        </p>
+        <div class="tableau">
+          <table>
+            <thead>
+              <tr><th>Science</th><th>Portée</th><th>Effet</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="nombre">50</td><td>Un territoire voisin d'un des vôtres</td><td>La moitié des régiments</td></tr>
+              <tr><td class="nombre">100</td><td>Jusqu'à 190 px de vos terres</td><td>La moitié des régiments</td></tr>
+              <tr><td class="nombre">200</td><td>N'importe où sur la carte</td><td>Tout sauf un régiment, et tous les aménagements</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Il reste toujours au moins un régiment : un missile détruit, il ne
+          conquiert pas. Le <strong>Dôme de Séléné</strong> met tous les
+          territoires de son contrôleur hors d'atteinte.
+        </p>
+
+        <details>
+          <summary>Ce que la portée intermédiaire vaut vraiment</summary>
+          <div class="corps">
+            <p>
+              Les 190 pixels correspondent à environ cinq centimètres sur un
+              écran ordinaire. En début de partie, les territoires de chacun
+              sont dispersés partout : plus rien n'est alors hors de portée, et
+              le palier des 100 points ne se distingue de celui des 200 que par
+              le rasage des aménagements.
+            </p>
+            <p>
+              Il mord en revanche dès qu'un empire se resserre : un joueur
+              acculé sur une poignée de territoires voit les deux tiers de la
+              carte lui échapper.
+            </p>
+          </div>
+        </details>
+      </div>
+    </details>
+
+    <details>
+      <summary>Les achats diplomatiques</summary>
+      <div class="corps">
+        <ul class="puces">
+          <li>
+            <strong>Alliance défensive</strong>
+            (<span class="valeur">20 écus</span> par territoire de l'IA) :
+            elle ne vous attaque plus pendant dix tours. L'attaquer vous-même
+            la rompt aussitôt.
+          </li>
+          <li>
+            <strong>Alliance offensive</strong>
+            (<span class="valeur">25 écus</span> par territoire) : l'IA
+            concentre ses attaques sur la cible que vous désignez.
+          </li>
+          <li>
+            <strong>Don de territoire ou d'argent</strong> : sans contrepartie
+            mécanique, mais très efficace entre humains.
+          </li>
+          <li>
+            <strong>Figer ou libérer un territoire ONU</strong>
+            (<span class="valeur">50 écus</span> par régiment) : réservé aux
+            paradis fiscaux, ou à partir de 50 points de science.
+          </li>
+        </ul>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>Les merveilles</h2>
+
+    <p>
+      Douze au total, une seule de chaque sur la carte, une seule construite
+      par joueur et par tour. Elles se prennent avec le territoire : conquérir
+      une merveille, c'est en hériter.
+    </p>
+
+    <details>
+      <summary>Les huit merveilles classiques</summary>
+      <div class="corps">
+        <p>
+          <span class="valeur">300 écus</span> chacune. Quatre demandent
+          <span class="valeur">100 points de science</span>
+          (<span class="valeur">50</span> pour une IA), quatre demandent
+          <span class="valeur">50 points de culture</span>
+          (<span class="valeur">25</span> pour une IA).
+        </p>
+        <div class="tableau">
+          <table>
+            <thead>
+              <tr><th>Merveille</th><th>Effet</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Sanctuaire d'Elyrion</td><td>Fonde Elyrion, religion conquérante</td></tr>
+              <tr><td>Théâtre des Mille Voix</td><td>Double votre culture</td></tr>
+              <tr><td>Observatoire d'Atlas</td><td>Double votre science</td></tr>
+              <tr><td>Palais du Pacte d'Or</td><td>Vous rend seul allié de la Cité commerçante</td></tr>
+              <tr><td>Rempart d'Ivoire</td><td>Ce territoire devient intouchable par les IA</td></tr>
+              <tr><td>Fontaine de Crésus</td><td>Multiplie par 5 l'argent du territoire</td></tr>
+              <tr><td>Capitole d'Aurélia</td><td>Statut de nation immédiat si votre capitale y est</td></tr>
+              <tr><td>Forge de Dédale</td><td>Ponts gratuits depuis ce territoire</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </details>
+
+    <details>
+      <summary>Les quatre merveilles tardives</summary>
+      <div class="corps">
+        <p>
+          Elles n'exigent ni science ni culture, mais n'apparaissent qu'à
+          partir du <strong>tour 42</strong>, et coûtent
+          <span class="valeur">500 écus</span> à un humain contre
+          <span class="valeur">300</span> à une IA.
+        </p>
+        <div class="tableau">
+          <table>
+            <thead>
+              <tr><th>Merveille</th><th>Effet</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Oracle de Solmyre</td><td>Fonde Solmyre, seconde religion conquérante</td></tr>
+              <tr><td>Jardins de Kaleth</td><td>+50 culture et +50 écus par tour</td></tr>
+              <tr><td>Dôme de Séléné</td><td>Tout votre empire à l'abri des missiles</td></tr>
+              <tr><td>Serment d'Orvane</td><td>Un allié définitif, et vos réussites s'additionnent</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <details>
+          <summary>Elyrion contre Solmyre</summary>
+          <div class="corps">
+            <p>
+              Les deux religions conquérantes recouvrent, en se répandant,
+              toutes les religions nationales sur leur passage — mais jamais
+              l'une l'autre. Chacune est l'unique rempart contre sa jumelle.
+            </p>
+            <p>
+              Elles ne sont pas des religions nationales : elles n'apportent
+              ni immunité aux révoltes, ni missions, ni palier religieux. En
+              revanche elles versent à leur contrôleur les mêmes primes de
+              revenu et de renforts, et chacune ajoute un lieu sacré de plus à
+              rassembler.
+            </p>
+          </div>
+        </details>
+
+        <details>
+          <summary>Comment fonctionne le Serment d'Orvane</summary>
+          <div class="corps">
+            <p>
+              Le prochain joueur né en cours de partie — d'une révolte, d'une
+              révolution, d'une sédition — devient l'allié définitif du
+              contrôleur de la merveille. Un seul à la fois : la place ne se
+              rouvre qu'à la mort de l'allié, au profit du prochain venu.
+            </p>
+            <p>
+              Le patron et son allié ne s'attaquent plus, et toutes leurs
+              réussites comptent pour un seul bloc. Mais le serment lie un
+              patron précis : <strong>perdre la merveille, c'est perdre son
+              allié</strong>, et le nouveau porteur devra attendre une
+              naissance.
+            </p>
+          </div>
+        </details>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>Ce qui peut vous tomber dessus</h2>
+
+    <p>
+      La carte vit sans vous. Tous les dix tours un événement d'empire frappe
+      le plus étendu, tous les quarante une révolution générale secoue tout le
+      monde, et chaque fin de tour peut voir une garnison trop grasse faire
+      sécession.
+    </p>
+
+    <details>
+      <summary>Le calendrier des catastrophes</summary>
+      <div class="corps">
+        <ul class="puces">
+          <li>
+            <strong>Tous les 10 tours</strong> — révolte ou trahison, en
+            alternance, sur le joueur le plus étendu. La révolte crée un
+            nouveau joueur IA ; la trahison offre les territoires au plus
+            faible.
+          </li>
+          <li>
+            <strong>Tous les 40 tours</strong> — révolution générale : chaque
+            empire perd une fraction de ses territoires, d'un tiers à rien du
+            tout selon sa culture.
+          </li>
+          <li>
+            <strong>Chaque fin de tour</strong> — sédition sur les territoires
+            surchargés.
+          </li>
+          <li>
+            <strong>Avant le tour 10</strong>, en difficulté chaos — un
+            bouleversement mondial peut survenir à tout moment.
+          </li>
+        </ul>
+        <p>
+          Les <strong>nations</strong> et les <strong>Cités commerçantes</strong>
+          sont immunisées contre les révoltes, les trahisons et les séditions.
+        </p>
+
+        <details>
+          <summary>Ce qui protège un territoire</summary>
+          <div class="corps">
+            <p>
+              Un territoire sous votre <strong>religion nationale</strong> ne
+              se révolte jamais, quelle que soit la cause. Une
+              <strong>capitale active</strong> n'est jamais tirée au sort. En
+              version simplifiée, les <strong>forteresses</strong> ne changent
+              jamais de camp sans combat.
+            </p>
+            <p>
+              Le reste est affaire de culture : à
+              <span class="valeur">125 points</span>, révoltes et trahisons ne
+              vous coûtent plus rien ; à <span class="valeur">150</span>, les
+              révolutions non plus.
+            </p>
+          </div>
+        </details>
+      </div>
+    </details>
+
+    <details>
+      <summary>Les ressources qui vont et viennent</summary>
+      <div class="corps">
+        <p>
+          Trois territoires à <strong>bonus +5</strong> apparaissent aux tours
+          35, 43 et 51 ; trois <strong>mines de minerais précieux</strong> aux
+          tours 37, 45 et 53. Chacune s'épuise au bout de
+          <span class="valeur">20 tours</span> et reparaît aussitôt ailleurs :
+          le compte reste constant, mais aucune position n'est acquise.
+        </p>
+        <p>
+          Des <strong>ponts</strong> peuvent aussi naître ou s'effondrer tout
+          seuls, au hasard des tours.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>Les puissances particulières</h2>
+
+    <details>
+      <summary>Devenir une nation</summary>
+      <div class="corps">
+        <p>
+          Il faut un bloc d'un seul tenant d'au moins
+          <span class="valeur">10 territoires</span>, contenant votre capitale
+          active et l'ensemble des structures : forteresse, usine, aéroport,
+          port, temple, centre culturel, université. Il faut ensuite tenir
+          cette configuration <span class="valeur">10 tours</span>.
+        </p>
+        <p>
+          Une nation est immunisée contre les révoltes, les trahisons et les
+          séditions — mais son revenu est <strong>divisé par dix</strong>. Le
+          <strong>Capitole d'Aurélia</strong> donne le statut immédiatement,
+          sans aucune autre condition, si votre capitale s'y trouve.
+        </p>
+      </div>
+    </details>
+
+    <details>
+      <summary>Cités commerçantes, paradis fiscaux, ONU</summary>
+      <div class="corps">
+        <p>
+          Les <strong>Cités commerçantes</strong> sont des IA marchandes qui
+          s'étendent par la corruption plutôt que par les armes. Elles
+          n'embarquent pas en expédition avant le tour 50.
+        </p>
+        <p>
+          Un <strong>paradis fiscal</strong> est une capitale au revenu
+          décuplé, imperméable à toute religion, et qui ouvre l'accès aux
+          manipulations de l'ONU.
+        </p>
+        <p>
+          Les <strong>sanctuaires ONU</strong> n'appartiennent à personne.
+          Les annexer déclenche une sanction — révolte punitive, trahison
+          punitive ou chaos mondial — mais ils comptent pour la conquête
+          totale.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <!-- ================================================================ -->
+  <section>
+    <h2>Lire la carte</h2>
+
+    <p>
+      Le bouton de vue fait tourner quatre affichages : les
+      <strong>forteresses seules</strong>, les
+      <strong>forteresses avec les merveilles</strong>, tous les
+      <strong>autres aménagements</strong>, et l'<strong>influence
+      religieuse</strong>.
+    </p>
+
+    <details>
+      <summary>Ce qui reste visible dans toutes les vues</summary>
+      <div class="corps">
+        <p>
+          Les statuts ne se cachent jamais : mines de minerais précieux, lieux
+          saints, capitales, paradis fiscaux, territoires dorés et bonus de
+          renforts restent affichés quelle que soit la vue. Sans eux, on
+          confondrait une capitale avec un territoire ordinaire.
+        </p>
+        <p>
+          Le petit cercle à gauche de chaque territoire compte ses
+          aménagements sur cinq : forteresse, industrie, temple, centre
+          culturel — ou sa ruine — et université.
+        </p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    <p>
+      Jeux Strat se joue en local et en ligne ; les deux versions partagent le
+      même moteur de règles, et donc les mêmes chiffres que ceux de ce manuel.
+    </p>
+    <p>
+      Un doute pendant une partie ? Le panneau empire et le panneau
+      géopolitique répondent à la plupart des questions sans quitter la carte.
+    </p>
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    var boutons = Array.prototype.slice.call(
+      document.querySelectorAll(".boutons button")
+    );
+    var tous = Array.prototype.slice.call(document.querySelectorAll("details"));
+    var profonds = tous.filter(function (d) {
+      return d.parentNode.closest("details") !== null;
+    });
+    var premiers = tous.filter(function (d) {
+      return profonds.indexOf(d) === -1;
+    });
+
+    function appliquer(niveau) {
+      premiers.forEach(function (d) { d.open = niveau >= 2; });
+      profonds.forEach(function (d) { d.open = niveau >= 3; });
+      boutons.forEach(function (b) {
+        b.setAttribute("aria-pressed", String(Number(b.dataset.niveau) === niveau));
+      });
+    }
+
+    boutons.forEach(function (b) {
+      b.addEventListener("click", function () {
+        appliquer(Number(b.dataset.niveau));
+      });
+    });
+  })();
+</script>
+</body>
+</html>

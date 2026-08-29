@@ -27,6 +27,19 @@ button {
 }
 button:hover { filter: brightness(1.15); }
 button.secondaire { background: rgb(52, 73, 94); }
+/* Un lien qui doit se fondre parmi les boutons de la barre. */
+.bouton-lien {
+  display: inline-block;
+  background: rgb(84, 153, 199);
+  color: white;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 0.9rem;
+  text-decoration: none;
+  line-height: normal;
+}
+.bouton-lien:hover { filter: brightness(1.15); }
+.bouton-lien.secondaire { background: rgb(52, 73, 94); }
 button.danger { background: rgb(192, 88, 77); }
 
 input, select {
