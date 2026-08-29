@@ -1064,21 +1064,27 @@ function afficherMenacesVictoire() {
   }
   const paliers = donnees.paliers || [];
   const total = donnees.nb_conditions || 7;
-  // Les paliers déjà franchis : chacun ferme une condition pour de bon et
-  // vaut un point de victoire à son auteur.
+  // Deux paliers rapportent leur point sans conditionner la fin de la partie :
+  // la religion et la conquête totale, qu'on peut fort bien ne jamais voir
+  // tomber. Seuls les autres décident de la fin.
+  const facultatives = donnees.conditions_facultatives || [];
+  const requisesRestantes = donnees.conditions_requises_restantes || [];
+  const bonus = (condition) => facultatives.includes(condition) ? " <em>(bonus)</em>" : "";
+  const reste = requisesRestantes.length
+    ? `La partie s'achève quand les ${requisesRestantes.length} palier(s) restant(s) seront tombés.`
+    : "Tous les paliers nécessaires sont tombés.";
   let entete = "";
   if (paliers.length) {
     const franchis = paliers.map((palier) => {
       const pion = `<span class="pion" style="background:${rgb(couleurJoueur(palier.joueur))}"></span>`;
       const moyen = LIBELLES_MENACES[palier.condition] || palier.condition;
-      return `<li class="palier">${pion}${nomDuJoueur(palier.joueur)} — <strong>${moyen}</strong>`
+      return `<li class="palier">${pion}${nomDuJoueur(palier.joueur)} — <strong>${moyen}</strong>${bonus(palier.condition)}`
         + ` <span class="tour-palier">(tour ${palier.tour})</span></li>`;
     });
-    entete = `<p class='menace-calme'>${paliers.length}/${total} paliers franchis, `
-      + `${total - paliers.length} encore ouverts.</p>`
+    entete = `<p class='menace-calme'>${paliers.length}/${total} paliers franchis. ${reste}</p>`
       + "<ul class='liste-paliers'>" + franchis.join("") + "</ul>";
   } else {
-    entete = `<p class='menace-calme'>Aucun palier franchi : les ${total} conditions sont ouvertes.</p>`;
+    entete = `<p class='menace-calme'>Aucun palier franchi : les ${total} conditions sont ouvertes. ${reste}</p>`;
   }
   const menaces = donnees.menaces || [];
   if (!menaces.length) {
@@ -1090,10 +1096,10 @@ function afficherMenacesVictoire() {
     const pion = `<span class="pion" style="background:${rgb(couleurJoueur(menace.joueur))}"></span>`;
     const moyen = LIBELLES_MENACES[menace.moyen] || menace.moyen;
     const pourcent = Math.min(100, Math.round(100 * menace.progression));
-    const reste = menace.manque > 0 ? `manque ${menace.manque}` : "seuil atteint";
+    const resteMenace = menace.manque > 0 ? `manque ${menace.manque}` : "seuil atteint";
     return `<li class="${menace.imminent ? "menace imminente" : "menace"}">`
       + `${menace.imminent ? "<strong>⚠ ALERTE</strong> " : ""}${pion}${nom}`
-      + ` — victoire <strong>${moyen}</strong> : ${menace.detail} (${pourcent} %, ${reste})`
+      + ` — victoire <strong>${moyen}</strong>${bonus(menace.moyen)} : ${menace.detail} (${pourcent} %, ${resteMenace})`
       + `<span class="jauge"><span style="width:${pourcent}%"></span></span></li>`;
   });
   zone.innerHTML = entete + "<ul class='liste-menaces'>" + lignes.join("") + "</ul>";

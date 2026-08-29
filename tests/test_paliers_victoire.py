@@ -130,8 +130,56 @@ class TestFranchissement(BasePaliers):
         self.assertEqual(regles.get_victory_points(recharge, 0), 1)
 
 
+class TestPaliersFacultatifs(BasePaliers):
+    """Deux paliers rapportent leur point sans conditionner la fin.
+
+    La religion, parce qu'une religion conquerante finit par recouvrir les
+    religions nationales et leur interdit les neuf dixiemes de la carte. La
+    conquete totale, parce qu'elle n'arrive presque jamais. Les exiger,
+    c'etait condamner la partie a ne jamais s'achever.
+    """
+
+    def test_les_deux_paliers_facultatifs(self):
+        self.assertEqual(regles.OPTIONAL_VICTORY_CONDITIONS, ("religion", "conquete"))
+        for condition in regles.OPTIONAL_VICTORY_CONDITIONS:
+            self.assertIn(condition, regles.VICTORY_CONDITIONS)
+            self.assertNotIn(condition, regles.REQUIRED_VICTORY_CONDITIONS)
+            self.assertTrue(regles.is_optional_victory_condition(condition))
+
+    def test_les_cinq_paliers_necessaires(self):
+        self.assertEqual(
+            regles.REQUIRED_VICTORY_CONDITIONS,
+            ("lieux_sacres", "culture", "science", "territoires", "dores"),
+        )
+
+    def test_fermer_les_paliers_necessaires_suffit_a_finir(self):
+        for index, condition in enumerate(regles.REQUIRED_VICTORY_CONDITIONS):
+            self.fermer(condition, 0 if index < 3 else 1, tour=index + 1)
+        # La religion et la conquete restent ouvertes, et le resteront.
+        self.assertEqual(
+            set(regles.get_remaining_victory_conditions(self.state)),
+            set(regles.OPTIONAL_VICTORY_CONDITIONS),
+        )
+        self.assertEqual(regles.get_remaining_required_victory_conditions(self.state), [])
+        gagnant, _raison = regles.evaluate_winner(self.state)
+        self.assertEqual(gagnant, 0)
+
+    def test_un_palier_facultatif_ne_retarde_pas_la_fin(self):
+        for index, condition in enumerate(regles.REQUIRED_VICTORY_CONDITIONS[:-1]):
+            self.fermer(condition, 0, tour=index + 1)
+        # Il manque un palier necessaire : la partie continue, meme si les
+        # deux facultatifs sont tombes.
+        for condition in regles.OPTIONAL_VICTORY_CONDITIONS:
+            self.fermer(condition, 1, tour=6)
+        self.assertIsNone(regles.evaluate_winner(self.state)[0])
+
+    def test_un_palier_facultatif_rapporte_bien_son_point(self):
+        self.fermer("conquete", 2, tour=4)
+        self.assertEqual(regles.get_victory_points(self.state, 2), 1)
+
+
 class TestFinDePartie(BasePaliers):
-    """La partie ne s'acheve qu'a court de paliers."""
+    """La partie ne s'acheve qu'a court de paliers necessaires."""
 
     def test_un_palier_franchi_n_arrete_pas_la_partie(self):
         self.fixer_territoires(0, self.seuil)

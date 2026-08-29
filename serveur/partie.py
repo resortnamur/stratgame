@@ -399,6 +399,11 @@ class SessionPartie:
                 # Les paliers deja franchis : chacun ferme une condition.
                 "paliers": [dict(palier) for palier in state.victory_milestones],
                 "nb_conditions": len(regles.VICTORY_CONDITIONS),
+                "nb_conditions_requises": len(regles.REQUIRED_VICTORY_CONDITIONS),
+                "conditions_facultatives": list(regles.OPTIONAL_VICTORY_CONDITIONS),
+                "conditions_requises_restantes": (
+                    regles.get_remaining_required_victory_conditions(state)
+                ),
             }
 
     def _bilan_domination(

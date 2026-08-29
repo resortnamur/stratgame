@@ -9059,18 +9059,27 @@ class GraphicalGame:
         """
         paliers = list(getattr(self, "victory_milestones", []))
         total = len(moteur_regles.VICTORY_CONDITIONS)
+        requis_restants = moteur_regles.get_remaining_required_victory_conditions(self)
         lignes = []
         if not paliers:
             lignes.append(f"Aucun palier franchi : les {total} conditions sont ouvertes")
         else:
-            lignes.append(f"{len(paliers)}/{total} paliers franchis, {total - len(paliers)} encore ouverts")
+            lignes.append(f"{len(paliers)}/{total} paliers franchis")
             for palier in paliers:
                 libelle = self.VICTORY_CONDITION_LABELS.get(
                     palier.get("condition"), palier.get("condition"),
                 )
+                bonus = " (bonus)" if moteur_regles.is_optional_victory_condition(
+                    palier.get("condition")
+                ) else ""
                 lignes.append(
-                    f"Tour {palier.get('tour')}: J{int(palier.get('joueur', 0)) + 1} - {libelle}"
+                    f"Tour {palier.get('tour')}: J{int(palier.get('joueur', 0)) + 1} - {libelle}{bonus}"
                 )
+        lignes.append(
+            f"La partie s'acheve quand les {len(requis_restants)} palier(s) restant(s) "
+            "seront tombes"
+            if requis_restants else "Tous les paliers necessaires sont tombes"
+        )
         points = moteur_regles.get_victory_point_table(self)
         if points:
             classement = ", ".join(
@@ -9086,7 +9095,11 @@ class GraphicalGame:
         if restantes:
             lignes.append(
                 "Conditions encore ouvertes: "
-                + ", ".join(self.VICTORY_CONDITION_LABELS.get(c, c) for c in restantes)
+                + ", ".join(
+                    self.VICTORY_CONDITION_LABELS.get(c, c)
+                    + (" (bonus)" if moteur_regles.is_optional_victory_condition(c) else "")
+                    for c in restantes
+                )
             )
         return lignes
 

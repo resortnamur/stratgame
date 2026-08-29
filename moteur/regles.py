@@ -1574,6 +1574,20 @@ VICTORY_CONDITIONS = (
     "territoires",
     "dores",
 )
+# Deux paliers rapportent leur point comme les autres, mais ne conditionnent
+# pas la fin de la partie : on peut fort bien ne jamais les voir tomber.
+#
+# La religion, parce qu'une religion conquerante finit par recouvrir les
+# religions nationales : passe un certain point, plus aucune ne peut esperer
+# les neuf dixiemes de la carte. La conquete totale, parce qu'elle demande la
+# carte entiere, sanctuaires ONU compris, ce qui n'arrive presque jamais.
+#
+# Les exiger, c'etait condamner la partie a ne jamais s'achever.
+OPTIONAL_VICTORY_CONDITIONS = ("religion", "conquete")
+REQUIRED_VICTORY_CONDITIONS = tuple(
+    condition for condition in VICTORY_CONDITIONS
+    if condition not in OPTIONAL_VICTORY_CONDITIONS
+)
 
 
 def get_crossed_victory_conditions(state: GameState) -> Set[str]:
@@ -1584,9 +1598,24 @@ def get_crossed_victory_conditions(state: GameState) -> Set[str]:
     }
 
 
+def is_optional_victory_condition(condition: Optional[str]) -> bool:
+    """Ce palier rapporte un point, mais n'a pas a tomber pour finir la partie."""
+    return condition in OPTIONAL_VICTORY_CONDITIONS
+
+
 def get_remaining_victory_conditions(state: GameState) -> List[str]:
+    """Tous les paliers encore ouverts, facultatifs compris."""
     crossed = get_crossed_victory_conditions(state)
     return [condition for condition in VICTORY_CONDITIONS if condition not in crossed]
+
+
+def get_remaining_required_victory_conditions(state: GameState) -> List[str]:
+    """Les paliers dont la chute mettra fin a la partie."""
+    crossed = get_crossed_victory_conditions(state)
+    return [
+        condition for condition in REQUIRED_VICTORY_CONDITIONS
+        if condition not in crossed
+    ]
 
 
 def get_victory_points(state: GameState, player: int) -> int:
@@ -1755,14 +1784,24 @@ def register_victory_milestones(state: GameState) -> List[dict]:
             "joueur": int(owner),
             "tour": int(state.turn),
             "raison": reason,
+            "facultatif": is_optional_victory_condition(condition),
         }
         state.victory_milestones.append(palier)
         nouveaux.append(palier)
-        restants = len(VICTORY_CONDITIONS) - len(crossed)
-        suite = (
-            f"Ce palier est ferme ; il en reste {restants} a franchir."
-            if restants else "C'etait le dernier palier : la partie s'acheve."
-        )
+        restants = len([
+            reste for reste in REQUIRED_VICTORY_CONDITIONS if reste not in crossed
+        ])
+        if is_optional_victory_condition(condition):
+            suite = (
+                "Palier bonus : il rapporte son point sans rien changer a la "
+                f"fin de la partie, qui attend encore {restants} palier(s)."
+            )
+        elif restants:
+            suite = f"Ce palier est ferme ; il en reste {restants} a franchir."
+        else:
+            suite = (
+                "C'etait le dernier palier necessaire : la partie s'acheve."
+            )
         record_major_event(state, (
             f"Tour {state.turn}: PALIER DE VICTOIRE pour J{owner + 1}, il {reason}. "
             f"Il marque un point de victoire ({get_victory_points(state, owner)} au total). "
@@ -1816,9 +1855,10 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
 
     Les conditions de victoire sont des paliers : chacune se franchit une
     seule fois, donne un point de victoire, puis se ferme. La partie se
-    poursuit tant qu'il reste un palier a prendre — sauf s'il ne reste plus
-    qu'un bloc sur la carte, auquel cas il n'y a plus rien a jouer. Le
-    vainqueur est celui qui compte le plus de points de victoire.
+    poursuit tant qu'il reste un palier *necessaire* a prendre — la religion
+    et la conquete totale rapportent leur point sans rien exiger — ou tant
+    qu'il reste plus d'un bloc sur la carte. Le vainqueur est celui qui
+    compte le plus de points de victoire.
 
     Enregistre au passage les paliers franchis : c'est le seul endroit du
     moteur ou la question se pose, et tous les appelants en profitent.
@@ -1857,7 +1897,10 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
 
     register_victory_milestones(state)
 
-    if get_remaining_victory_conditions(state) and get_bloc_owning_everything(state) is None:
+    if (
+        get_remaining_required_victory_conditions(state)
+        and get_bloc_owning_everything(state) is None
+    ):
         return None, ""
 
     leader = get_victory_point_leader(state)
