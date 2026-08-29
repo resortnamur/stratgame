@@ -60,7 +60,9 @@ ALLIANCE_LIST_KEYS = {
 # pas. Les tests de parite contre l'original les retirent du payload moteur,
 # mais seulement apres avoir verifie qu'elles sont vides — sinon la
 # comparaison masquerait une vraie divergence de mise en place ou d'achat.
-CLES_ABSENTES_DE_L_ORIGINAL = ("ruin_territory_ids",)
+CLES_ABSENTES_DE_L_ORIGINAL = (
+    "ruin_territory_ids", "eternal_ally_player", "eternal_ally_patron",
+)
 # Meme chose dans les instantanes de replay, ou la cle porte un autre nom.
 CLES_D_INSTANTANE_ABSENTES_DE_L_ORIGINAL = ("ruins",)
 

@@ -200,6 +200,12 @@ class GameState:
     player_science: Dict[int, int] = field(default_factory=dict)
     culture_expansion_milestones: Dict[int, int] = field(default_factory=dict)
     wonder_territories: Dict[str, int] = field(default_factory=dict)
+    # Le joueur lie au Serment d'Orvane : allie definitif de qui tient la
+    # merveille. Un seul a la fois ; a sa mort, le suivant prend sa place.
+    eternal_ally_player: Optional[int] = None
+    # A qui il a prete serment : si la merveille change de mains, le
+    # serment tombe au lieu de suivre son nouveau proprietaire.
+    eternal_ally_patron: Optional[int] = None
     # Registre "une merveille par joueur et par tour" : memoire de session
     # uniquement, volontairement absent des sauvegardes (parite du format
     # avec x45-original).
@@ -638,6 +644,10 @@ class GameState:
             str(wonder_type): int(tid)
             for wonder_type, tid in payload.get("wonder_territories", {}).items()
         }
+        allie = payload.get("eternal_ally_player")
+        self.eternal_ally_player = None if allie is None else int(allie)
+        patron = payload.get("eternal_ally_patron")
+        self.eternal_ally_patron = None if patron is None else int(patron)
         self.wonder_construction_turns = {}
 
         # Paradis fiscaux
@@ -846,6 +856,12 @@ class GameState:
                 str(wonder_type): int(tid)
                 for wonder_type, tid in self.wonder_territories.items()
             },
+            "eternal_ally_player": (
+                None if self.eternal_ally_player is None else int(self.eternal_ally_player)
+            ),
+            "eternal_ally_patron": (
+                None if self.eternal_ally_patron is None else int(self.eternal_ally_patron)
+            ),
             "last_stand_bonus_players": sorted(self.last_stand_bonus_players),
             "last_stand_bonus_territory": {
                 str(k): sorted(int(tid) for tid in self.get_player_tax_haven_capital_ids(k))

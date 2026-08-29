@@ -194,8 +194,14 @@ class GraphicalGame:
         {"name": "Pyronis", "symbol": "P!", "color": (236, 112, 99)},
         {"name": "Mareon", "symbol": "M~", "color": (84, 153, 199)},
         {"name": "Elyrion", "symbol": "E+", "color": (174, 235, 255)},
+        {"name": "Solmyre", "symbol": "S#", "color": (255, 170, 80)},
     ]
     WONDER_RELIGION_ID = 5
+    SECOND_WONDER_RELIGION_ID = 6
+    WONDER_RELIGION_IDS = (5, 6)
+    LATE_WONDER_FIRST_TURN = 42
+    LATE_WONDER_COST = 500
+    AI_LATE_WONDER_COST = 300
     WONDER_DEFINITIONS = {
         "elyrion_sanctuary": {
             "name": "Sanctuaire d'Elyrion",
@@ -238,6 +244,28 @@ class GraphicalGame:
             "name": "Forge de Dedale",
             "effect": "Ponts construits ou detruits gratuitement depuis ce territoire",
             "kind": "culture",
+        },
+        # Merveilles tardives : sans seuil de science ni de culture, mais
+        # jamais avant le tour LATE_WONDER_FIRST_TURN.
+        "solmyre_oracle": {
+            "name": "Oracle de Solmyre",
+            "effect": "Fonde Solmyre, seconde religion conquerante ; seule Elyrion lui resiste",
+            "kind": "late",
+        },
+        "kaleth_gardens": {
+            "name": "Jardins de Kaleth",
+            "effect": "Rapporte chaque tour 50 points de culture et 50 ecus a son controleur",
+            "kind": "late",
+        },
+        "selene_dome": {
+            "name": "Dome de Selene",
+            "effect": "Protege des missiles tous les territoires de son controleur",
+            "kind": "late",
+        },
+        "orvane_oath": {
+            "name": "Serment d'Orvane",
+            "effect": "Le prochain joueur ne en cours de partie devient l'allie definitif de son controleur",
+            "kind": "late",
         },
     }
     SAVE_SCHEMA_VERSION = 13
@@ -327,6 +355,9 @@ class GraphicalGame:
         self.religious_influence: dict[int, int] = {}
         self.last_religion_foundation_message: Optional[str] = None
         self.wonder_territories: dict[str, int] = {}
+        # Le joueur lie au Serment d'Orvane, s'il y en a un.
+        self.eternal_ally_player: Optional[int] = None
+        self.eternal_ally_patron: Optional[int] = None
         self.pending_wonder_type: Optional[str] = None
         # "Une merveille par tour" : memoire de session, jamais sauvegardee.
         self.wonder_construction_turns: dict[int, int] = {}
@@ -1275,6 +1306,14 @@ class GraphicalGame:
                 str(wonder_type): int(tid)
                 for wonder_type, tid in getattr(self, "wonder_territories", {}).items()
             },
+            "eternal_ally_player": (
+                None if getattr(self, "eternal_ally_player", None) is None
+                else int(self.eternal_ally_player)
+            ),
+            "eternal_ally_patron": (
+                None if getattr(self, "eternal_ally_patron", None) is None
+                else int(self.eternal_ally_patron)
+            ),
             "last_stand_bonus_players": list(self.last_stand_bonus_players),
             "last_stand_bonus_territory": {
                 str(k): sorted(int(tid) for tid in self.get_player_tax_haven_capital_ids(k))
@@ -1539,6 +1578,10 @@ class GraphicalGame:
             str(wonder_type): int(tid)
             for wonder_type, tid in payload.get("wonder_territories", {}).items()
         }
+        allie = payload.get("eternal_ally_player")
+        self.eternal_ally_player = None if allie is None else int(allie)
+        patron_allie = payload.get("eternal_ally_patron")
+        self.eternal_ally_patron = None if patron_allie is None else int(patron_allie)
         self.wonder_construction_turns = {}
         self.pending_wonder_type = None
         # Le statut paradis fiscal depend du proprietaire des capitales.
@@ -5198,6 +5241,8 @@ class GraphicalGame:
         self.wonder_territories = {}
         self.wonder_construction_turns = {}
         self.pending_wonder_type = None
+        self.eternal_ally_player = None
+        self.eternal_ally_patron = None
         self.last_stand_bonus_players = set()
         self.last_stand_bonus_territory = {}
         self.tax_haven_turn_start_territory_counts = {}
@@ -5551,8 +5596,7 @@ class GraphicalGame:
             if 0 <= int(player) < self.num_players and int(religion_id) in valid_religions
         }
         used_religions = set(self.religion_founders.values())
-        if "elyrion_sanctuary" in getattr(self, "wonder_territories", {}):
-            used_religions.add(self.WONDER_RELIGION_ID)
+        used_religions.update(moteur_regles.get_founded_wonder_religion_ids(self))
         self.religion_foundation_turns = {
             int(religion_id): max(1, int(turn))
             for religion_id, turn in getattr(self, "religion_foundation_turns", {}).items()
@@ -5585,6 +5629,9 @@ class GraphicalGame:
         return moteur_regles.found_religion_if_possible(self, player, territory_id)
 
     def apply_initial_religious_influence(self, religion_id: int, holy_site_id: int) -> None:
+        moteur_regles.apply_initial_religious_influence(self, religion_id, holy_site_id)
+
+    def _apply_initial_religious_influence_legacy(self, religion_id: int, holy_site_id: int) -> None:
         candidates = [holy_site_id]
         if 0 <= holy_site_id < len(self.territories):
             candidates.extend(self.territories[holy_site_id].neighbors)
@@ -5608,12 +5655,7 @@ class GraphicalGame:
         )
 
     def get_religion_founder(self, religion_id: int) -> Optional[int]:
-        if religion_id == self.WONDER_RELIGION_ID:
-            return self.get_wonder_controller("elyrion_sanctuary")
-        for player, founded_religion_id in getattr(self, "religion_founders", {}).items():
-            if founded_religion_id == religion_id:
-                return player
-        return None
+        return moteur_regles.get_religion_founder(self, religion_id)
 
     def get_religion_spread_interval(self, religion_id: int) -> Optional[int]:
         founder = self.get_religion_founder(religion_id)
@@ -5630,8 +5672,9 @@ class GraphicalGame:
         founded_religion_id = getattr(self, "religion_founders", {}).get(player)
         if founded_religion_id is not None:
             religion_ids.add(founded_religion_id)
-        if self.player_controls_wonder(player, "elyrion_sanctuary"):
-            religion_ids.add(self.WONDER_RELIGION_ID)
+        for religion_id, wonder_type in moteur_regles.WONDER_RELIGION_SOURCES.items():
+            if self.player_controls_wonder(player, wonder_type):
+                religion_ids.add(religion_id)
         if not religion_ids:
             return 0
         return sum(
@@ -5665,9 +5708,7 @@ class GraphicalGame:
         )
 
     def get_required_holy_site_count_for_victory(self) -> int:
-        if "elyrion_sanctuary" in getattr(self, "wonder_territories", {}):
-            return 6
-        return 5
+        return moteur_regles.get_required_holy_site_count_for_victory(self)
 
     def is_holy_site_victory_active(self) -> bool:
         required = self.get_required_holy_site_count_for_victory()
@@ -7040,11 +7081,20 @@ class GraphicalGame:
                             2600,
                         )
                         return
-                    if self.get_player_money(self.current_player) < self.WONDER_COST:
+                    # Le prix depend de la merveille : les tardives sont plus
+                    # cheres, et plus cheres encore pour un humain.
+                    cheapest_cost = min(
+                        (
+                            moteur_regles.get_wonder_cost(self, self.current_player, wonder_type)
+                            for wonder_type in self.get_buildable_wonder_types(self.current_player)
+                        ),
+                        default=self.WONDER_COST,
+                    )
+                    if self.get_player_money(self.current_player) < cheapest_cost:
                         self.shop_action = None
                         self.pending_wonder_type = None
                         self.show_message(
-                            f"Merveille trop chere : {self.WONDER_COST} ecus requis.",
+                            f"Merveille trop chere : {cheapest_cost} ecus requis.",
                             2200,
                         )
                         return
@@ -7065,7 +7115,10 @@ class GraphicalGame:
                     prompt_lines = ["Choisissez la merveille a construire :"]
                     for index, wonder_type in enumerate(available, start=1):
                         definition = self.WONDER_DEFINITIONS[wonder_type]
-                        prompt_lines.append(f"{index} - {definition['name']} : {definition['effect']}")
+                        prix = moteur_regles.get_wonder_cost(self, self.current_player, wonder_type)
+                        prompt_lines.append(
+                            f"{index} - {definition['name']} ({prix} ecus) : {definition['effect']}"
+                        )
                     selection = self.ask_int("\n".join(prompt_lines), 1, len(available), allow_cancel=True)
                     if selection is None:
                         self.shop_action = None
@@ -7075,7 +7128,8 @@ class GraphicalGame:
                     self.pending_wonder_type = available[selection - 1]
                     self.shop_panel_collapsed = True
                     self.show_message(
-                        f"{self.get_wonder_name(self.pending_wonder_type)} selectionnee. Cliquez un territoire que vous controlez. Prix : {self.WONDER_COST} ecus.",
+                        f"{self.get_wonder_name(self.pending_wonder_type)} selectionnee. Cliquez un territoire que vous controlez. "
+                        f"Prix : {moteur_regles.get_wonder_cost(self, self.current_player, self.pending_wonder_type)} ecus.",
                         3600,
                     )
                 elif action in ("build_bridge", "destroy_bridge"):
@@ -8382,8 +8436,9 @@ class GraphicalGame:
             founded_religion_id = getattr(self, "religion_founders", {}).get(player)
             if founded_religion_id is not None:
                 religion_ids.append(founded_religion_id)
-            if self.player_controls_wonder(player, "elyrion_sanctuary"):
-                religion_ids.append(self.WONDER_RELIGION_ID)
+            for wonder_religion_id, wonder_type in moteur_regles.WONDER_RELIGION_SOURCES.items():
+                if self.player_controls_wonder(player, wonder_type):
+                    religion_ids.append(wonder_religion_id)
             religion_names = "/".join(self.get_religion_name(religion_id) for religion_id in religion_ids)
             religion_summary = (
                 f"{religion_names} ({self.get_national_religion_influenced_territory_count(player)})"
@@ -8763,13 +8818,14 @@ class GraphicalGame:
         founded_religion_id = getattr(self, "religion_founders", {}).get(player)
         if founded_religion_id is not None:
             religion_ids.append(founded_religion_id)
-        if self.player_controls_wonder(player, "elyrion_sanctuary"):
-            religion_ids.append(self.WONDER_RELIGION_ID)
+        for wonder_religion_id, wonder_type in moteur_regles.WONDER_RELIGION_SOURCES.items():
+            if self.player_controls_wonder(player, wonder_type):
+                religion_ids.append(wonder_religion_id)
         temple_count = self.get_player_temple_count(player)
         if not religion_ids:
             used_regular_religions = {
                 religion_id for religion_id in getattr(self, "religion_founders", {}).values()
-                if religion_id < self.WONDER_RELIGION_ID
+                if not moteur_regles.is_wonder_religion(religion_id)
             }
             available = max(0, self.WONDER_RELIGION_ID - len(used_regular_religions))
             return [
@@ -9390,7 +9446,7 @@ class GraphicalGame:
             ("release_sanctuary", f"Liberer ONU - {self.ONU_MANIPULATION_COST_PER_REGIMENT}/reg."),
             ("change_capital", f"Changer capitale - {self.CHANGE_CAPITAL_COST}"),
             ("destroy_university", f"Detruire universite - {self.UNIVERSITY_COST}"),
-            ("build_wonder", f"Merveille - {self.WONDER_COST}"),
+            ("build_wonder", f"Merveille - {self.WONDER_COST}/{self.LATE_WONDER_COST}"),
         ]
         if science >= self.SCIENCE_MISSILE_THRESHOLD:
             tier = moteur_achats.get_missile_tier(self, self.current_player)
@@ -11633,9 +11689,12 @@ class GraphicalGame:
                     special_icon_types.append("fortress")
                 if terr.id in self.precious_mineral_mine_ids:
                     special_icon_types.append("precious_mine")
-                wonder_type = self.get_wonder_type_at_territory(terr.id)
-                if wonder_type is not None:
-                    special_icon_types.append(f"wonder:{wonder_type}")
+                # Les merveilles sont devenues nombreuses : elles n'encombrent
+                # plus la vue par defaut et n'apparaissent qu'en « icones : tout ».
+                if self.show_all_map_icons:
+                    wonder_type = self.get_wonder_type_at_territory(terr.id)
+                    if wonder_type is not None:
+                        special_icon_types.append(f"wonder:{wonder_type}")
 
                 # Les lieux sacres restent visibles dans la vue par defaut
                 # (forteresses), ainsi que dans la vue affichant toutes les icones.
@@ -11647,7 +11706,7 @@ class GraphicalGame:
                     ),
                     None,
                 )
-                if holy_site_religion_id is not None and holy_site_religion_id != self.WONDER_RELIGION_ID:
+                if holy_site_religion_id is not None and holy_site_religion_id not in self.WONDER_RELIGION_IDS:
                     special_icon_types.append(f"holy_site:{holy_site_religion_id}")
 
                 # Le mode "icones : forteresses" ne masque que les amenagements

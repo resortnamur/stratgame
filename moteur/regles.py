@@ -47,8 +47,17 @@ RELIGIONS = [
     {"name": "Pyronis", "symbol": "P!", "color": (236, 112, 99)},
     {"name": "Mareon", "symbol": "M~", "color": (84, 153, 199)},
     {"name": "Elyrion", "symbol": "E+", "color": (174, 235, 255)},
+    {"name": "Solmyre", "symbol": "S#", "color": (255, 170, 80)},
 ]
 WONDER_RELIGION_ID = 5
+SECOND_WONDER_RELIGION_ID = 6
+# Les deux religions conquerantes recouvrent toutes les autres, mais
+# jamais l'une l'autre : chacune est le seul rempart contre sa jumelle.
+WONDER_RELIGION_IDS = (WONDER_RELIGION_ID, SECOND_WONDER_RELIGION_ID)
+WONDER_RELIGION_SOURCES = {
+    WONDER_RELIGION_ID: "elyrion_sanctuary",
+    SECOND_WONDER_RELIGION_ID: "solmyre_oracle",
+}
 WONDER_DEFINITIONS = {
     "elyrion_sanctuary": {
         "name": "Sanctuaire d'Elyrion",
@@ -92,6 +101,29 @@ WONDER_DEFINITIONS = {
         "name": "Forge de Dedale",
         "effect": "Ponts construits ou detruits gratuitement depuis ce territoire",
         "kind": "culture",
+    },
+    # Merveilles tardives : ni science ni culture requises, mais elles
+    # n'apparaissent qu'au tour LATE_WONDER_FIRST_TURN, et leur prix
+    # depend de qui les batit (cf. get_wonder_cost).
+    "solmyre_oracle": {
+        "name": "Oracle de Solmyre",
+        "effect": "Fonde Solmyre, seconde religion conquerante ; seule Elyrion lui resiste",
+        "kind": "late",
+    },
+    "kaleth_gardens": {
+        "name": "Jardins de Kaleth",
+        "effect": "Rapporte chaque tour 50 points de culture et 50 ecus a son controleur",
+        "kind": "late",
+    },
+    "selene_dome": {
+        "name": "Dome de Selene",
+        "effect": "Protege des missiles tous les territoires de son controleur",
+        "kind": "late",
+    },
+    "orvane_oath": {
+        "name": "Serment d'Orvane",
+        "effect": "Le prochain joueur ne en cours de partie devient l'allie definitif de son controleur",
+        "kind": "late",
     },
 }
 
@@ -201,6 +233,13 @@ SCIENCE_WONDER_THRESHOLD = 100
 AI_SCIENCE_WONDER_THRESHOLD = 50
 CULTURE_WONDER_THRESHOLD = 50
 AI_CULTURE_WONDER_THRESHOLD = 25
+# Merveilles tardives : ouvertes a tous, mais seulement a partir de ce
+# tour, et payantes selon la nature du batisseur.
+LATE_WONDER_FIRST_TURN = 42
+LATE_WONDER_COST = 500
+AI_LATE_WONDER_COST = 300
+TOURISM_WONDER_CULTURE = 50
+TOURISM_WONDER_INCOME = 50
 MERCENARY_COST = 50
 FORTRESS_COST = 100
 FACTORY_COST = 100
@@ -694,8 +733,7 @@ def sanitize_religion_state(state: GameState) -> None:
         if 0 <= int(player) < state.num_players and int(religion_id) in valid_religions
     }
     used_religions = set(state.religion_founders.values())
-    if "elyrion_sanctuary" in state.wonder_territories:
-        used_religions.add(WONDER_RELIGION_ID)
+    used_religions.update(get_founded_wonder_religion_ids(state))
     state.religion_foundation_turns = {
         int(religion_id): max(1, int(turn))
         for religion_id, turn in state.religion_foundation_turns.items()
@@ -902,6 +940,10 @@ def sanitize_economy_state(state: GameState) -> None:
         and int(tid) in valid_ids
     }
     refresh_destroyed_commercial_cities(state)
+    ally = getattr(state, "eternal_ally_player", None)
+    if ally is not None and not (0 <= ally < state.num_players):
+        state.eternal_ally_player = None
+        state.eternal_ally_patron = None
     refresh_last_stand_bonus_state(state)
     enforce_commercial_city_wonder_exclusivity(state)
     for player in range(state.num_players):
@@ -1005,8 +1047,9 @@ def get_national_religion_influenced_territory_count(state: GameState, player: i
     founded_religion_id = state.religion_founders.get(player)
     if founded_religion_id is not None:
         religion_ids.add(founded_religion_id)
-    if player_controls_wonder(state, player, "elyrion_sanctuary"):
-        religion_ids.add(WONDER_RELIGION_ID)
+    for religion_id, wonder_type in WONDER_RELIGION_SOURCES.items():
+        if player_controls_wonder(state, player, wonder_type):
+            religion_ids.add(religion_id)
     if not religion_ids:
         return 0
     return sum(
@@ -1027,7 +1070,7 @@ def get_player_national_religion_id(state: GameState, player: int) -> Optional[i
     if player < 0:
         return None
     religion_id = state.religion_founders.get(player)
-    if religion_id is None or religion_id == WONDER_RELIGION_ID:
+    if religion_id is None or is_wonder_religion(religion_id):
         return None
     return religion_id
 
@@ -1065,9 +1108,8 @@ def get_controlled_holy_site_count(state: GameState, player: int) -> int:
 
 
 def get_required_holy_site_count_for_victory(state: GameState) -> int:
-    if "elyrion_sanctuary" in state.wonder_territories:
-        return 6
-    return 5
+    """Les cinq lieux sacres nationaux, plus ceux des religions conquerantes."""
+    return WONDER_RELIGION_ID + len(get_founded_wonder_religion_ids(state))
 
 
 def get_required_influence_count_for_religion_victory(state: GameState, player: int) -> int:
@@ -1165,6 +1207,8 @@ def calculate_player_income(state: GameState, player: int) -> int:
     # Les ruines rendent un montant fixe, comme les mines : ni multiplie par
     # la capitale, ni divise par le statut de nation.
     income += get_player_ruin_count(state, player) * RUIN_INCOME
+    if player_controls_wonder(state, player, "kaleth_gardens"):
+        income += TOURISM_WONDER_INCOME
     return income
 
 
@@ -1371,6 +1415,87 @@ def move_one_regiment(state: GameState, src: Territory, dst: Territory) -> Tuple
 # Victoire
 # ----------------------------------------------------------------------
 
+def get_eternal_ally_patron(state: GameState) -> Optional[int]:
+    """Qui tient le Serment d'Orvane, et donc l'allie definitif."""
+    return get_wonder_controller(state, "orvane_oath")
+
+
+def release_stale_eternal_ally(state: GameState) -> None:
+    """Rompt le serment devenu caduc : la place se rouvre au prochain venu.
+
+    Deux facons de le rompre : l'allie disparait, ou le Serment d'Orvane
+    change de mains — qui perd la merveille perd son allie, et le nouveau
+    controleur devra attendre une naissance.
+
+    Appele au seul moment ou la question se pose, la naissance d'un joueur :
+    un allie tout juste ne n'a pas encore recu ses territoires et ne doit pas
+    passer pour mort.
+    """
+    ally = getattr(state, "eternal_ally_player", None)
+    if ally is None:
+        return
+    patron = get_eternal_ally_patron(state)
+    if (
+        not (0 <= ally < state.num_players)
+        or not any(terr.owner == ally for terr in state.territories)
+        or patron is None
+        or patron != getattr(state, "eternal_ally_patron", None)
+    ):
+        state.eternal_ally_player = None
+        state.eternal_ally_patron = None
+
+
+def get_eternal_ally(state: GameState) -> Optional[int]:
+    """L'allie definitif en vigueur.
+
+    Le serment lie un allie a un patron precis : des que le Serment d'Orvane
+    quitte les mains de celui qui l'a recu, l'alliance tombe.
+    """
+    ally = getattr(state, "eternal_ally_player", None)
+    if ally is None:
+        return None
+    patron = get_eternal_ally_patron(state)
+    if patron is None or patron == ally:
+        return None
+    if patron != getattr(state, "eternal_ally_patron", None):
+        return None
+    return ally
+
+
+def bind_eternal_ally_if_possible(state: GameState, new_player: int) -> Optional[str]:
+    """Attache au Serment d'Orvane un joueur ne en cours de partie.
+
+    Un seul allie a la fois : tant que le precedent vit, les nouveaux venus
+    restent libres. Sans controleur du Serment, personne ne prete serment.
+    """
+    patron = get_eternal_ally_patron(state)
+    if patron is None or patron == new_player:
+        return None
+    release_stale_eternal_ally(state)
+    if getattr(state, "eternal_ally_player", None) is not None:
+        return None
+    state.eternal_ally_player = new_player
+    state.eternal_ally_patron = patron
+    message = (
+        f"Tour {state.turn}: J{new_player + 1} prete le Serment d'Orvane a J{patron + 1} : "
+        "allie definitif, leurs reussites ne comptent plus que pour un."
+    )
+    record_major_event(state, message)
+    return message
+
+
+def get_victory_bloc(state: GameState, player: int) -> Tuple[int, ...]:
+    """Le joueur et, s'il tient le Serment d'Orvane, son allie definitif."""
+    ally = get_eternal_ally(state)
+    if ally is not None and player == get_eternal_ally_patron(state):
+        return (player, ally)
+    return (player,)
+
+
+def is_eternal_ally(state: GameState, player: int) -> bool:
+    return get_eternal_ally(state) == player
+
+
 def get_union_members(state: GameState, player: int) -> Set[int]:
     # Les unions sont une mecanique abandonnee : chaque joueur est seul.
     return {player} if isinstance(player, int) and player >= 0 else set()
@@ -1468,16 +1593,35 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
             return None, reason
         return owner, reason
 
+    # Le Serment d'Orvane fond un allie definitif dans son patron : toutes
+    # les reussites de l'allie sont portees au credit du patron, et l'allie
+    # ne concourt plus pour son propre compte.
+    eternal_ally = get_eternal_ally(state)
+    candidates = {owner for owner in owners if owner != eternal_ally}
+    ally_note = (
+        f" (avec son allie definitif J{eternal_ally + 1})"
+        if eternal_ally is not None else ""
+    )
+
+    def bloc_owns(territory: Territory, bloc: Tuple[int, ...]) -> bool:
+        return territory.owner in bloc
+
+    def bloc_note(bloc: Tuple[int, ...]) -> str:
+        return ally_note if len(bloc) > 1 else ""
+
     required_holy_sites = get_required_holy_site_count_for_victory(state)
     if is_holy_site_victory_active(state):
-        for owner in sorted(owners):
-            holy_count = get_controlled_holy_site_count(state, owner)
+        for owner in sorted(candidates):
+            bloc = get_victory_bloc(state, owner)
+            holy_count = sum(get_controlled_holy_site_count(state, member) for member in bloc)
             if holy_count >= required_holy_sites:
-                return accept_winner(owner, f"controle les {required_holy_sites} lieux sacres")
+                return accept_winner(
+                    owner, f"controle les {required_holy_sites} lieux sacres" + bloc_note(bloc),
+                )
 
     map_size = len(state.territories)
     for founder, religion_id in sorted(state.religion_founders.items()):
-        if religion_id == WONDER_RELIGION_ID or founder not in owners:
+        if is_wonder_religion(religion_id) or founder not in owners:
             continue
         required_influence = get_required_influence_count_for_religion_victory(state, founder)
         if required_influence <= 0:
@@ -1485,10 +1629,15 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
         influence_count = get_religion_influence_count(state, religion_id)
         if influence_count >= required_influence:
             part = "3/4" if is_ai_player(state, founder) else "9/10"
+            # La foi d'un allie definitif fait gagner son patron.
+            winner = get_eternal_ally_patron(state) if founder == eternal_ally else founder
+            if winner is None:
+                continue
             return accept_winner(
-                founder,
+                winner,
                 f"a etendu {get_religion_name(state, religion_id)} sur {part} des territoires "
-                f"({influence_count}/{map_size})",
+                f"({influence_count}/{map_size})"
+                + (ally_note if winner != founder else ""),
             )
 
     for label, measure, ratio_human, ratio_ai, minimum in (
@@ -1497,8 +1646,11 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
         ("science", get_player_science,
          SCIENCE_VICTORY_RATIO, AI_SCIENCE_VICTORY_RATIO, SCIENCE_VICTORY_MIN_POINTS),
     ):
+        def bloc_measure(st: GameState, owner: int, measure=measure) -> int:
+            return sum(measure(st, member) for member in get_victory_bloc(st, owner))
+
         candidate = find_domination_candidate(
-            state, owners, measure, ratio_human, ratio_ai, minimum,
+            state, candidates, bloc_measure, ratio_human, ratio_ai, minimum,
         )
         if candidate is None:
             continue
@@ -1506,30 +1658,40 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
         return accept_winner(
             owner,
             f"ecrase la {label} de tous ses rivaux : {value} points, "
-            f"soit au moins {ratio} fois le meilleur adversaire ({best_rival_value})",
+            f"soit au moins {ratio} fois le meilleur adversaire ({best_rival_value})"
+            + bloc_note(get_victory_bloc(state, owner)),
         )
 
-    for owner in sorted(owners):
-        if all(t.owner == owner for t in state.territories):
-            return accept_winner(owner, "a conquis tous les territoires, sanctuaires ONU compris")
+    for owner in sorted(candidates):
+        bloc = get_victory_bloc(state, owner)
+        if all(bloc_owns(t, bloc) for t in state.territories):
+            return accept_winner(
+                owner,
+                "a conquis tous les territoires, sanctuaires ONU compris" + bloc_note(bloc),
+            )
 
     total_territories = len(state.territories)
     threshold = math.ceil(total_territories * 0.75)
-    for owner in sorted(owners):
-        owned_count = sum(1 for t in state.territories if t.owner == owner)
+    for owner in sorted(candidates):
+        bloc = get_victory_bloc(state, owner)
+        owned_count = sum(1 for t in state.territories if bloc_owns(t, bloc))
         if owned_count >= threshold:
             return accept_winner(
                 owner,
-                f"controle au moins les 3/4 des territoires ({owned_count}/{total_territories})",
+                f"controle au moins les 3/4 des territoires ({owned_count}/{total_territories})"
+                + bloc_note(bloc),
             )
 
     if len(state.golden_territory_ids) == 4:
-        for owner in sorted(owners):
+        for owner in sorted(candidates):
+            bloc = get_victory_bloc(state, owner)
             if all(
-                0 <= tid < len(state.territories) and state.territories[tid].owner == owner
+                0 <= tid < len(state.territories) and state.territories[tid].owner in bloc
                 for tid in state.golden_territory_ids
             ):
-                return accept_winner(owner, "controle les 4 territoires dores")
+                return accept_winner(
+                    owner, "controle les 4 territoires dores" + bloc_note(bloc),
+                )
 
     return None, ""
 
@@ -1625,6 +1787,9 @@ def calculate_player_culture(state: GameState, player: int) -> int:
         culture *= 2
     if player_controls_wonder(state, player, "thousand_voices_theatre"):
         culture *= 2
+    if player_controls_wonder(state, player, "kaleth_gardens"):
+        # Apport fixe du tourisme : les doubleurs ne le multiplient pas.
+        culture += TOURISM_WONDER_CULTURE
     return culture
 
 
@@ -2006,6 +2171,14 @@ def is_ai_alliance_active(state: GameState, ai_a: int, ai_b: int) -> bool:
 
 
 def is_attack_blocked_by_alliance(state: GameState, attacker: int, defender: int) -> bool:
+    if attacker != defender and "orvane_oath" in state.wonder_territories:
+        # Un serment definitif se tient : le patron et son allie ne
+        # s'attaquent pas, dans un sens comme dans l'autre.
+        patron = get_eternal_ally_patron(state)
+        if patron is not None:
+            bloc = get_victory_bloc(state, patron)
+            if len(bloc) > 1 and attacker in bloc and defender in bloc:
+                return True
     if attacker != defender and "golden_pact_palace" in state.wonder_territories:
         attacker_is_commercial = is_commercial_city_player(state, attacker)
         defender_is_commercial = is_commercial_city_player(state, defender)
@@ -2533,6 +2706,7 @@ def allocate_rebel_player(state: GameState, rng=random) -> Tuple[int, bool]:
     state.auto_controlled_players.discard(new_player)
     assign_ai_personality_to_player(state, new_player, None, rng)
     ensure_player_economy(state, new_player)
+    bind_eternal_ally_if_possible(state, new_player)
     return new_player, False
 
 
@@ -2957,9 +3131,29 @@ def get_religion_symbol(state: GameState, religion_id: int) -> str:
     return "?"
 
 
+def is_wonder_religion(religion_id: Optional[int]) -> bool:
+    """Elyrion et Solmyre : les religions nees d'une merveille."""
+    return religion_id in WONDER_RELIGION_IDS
+
+
+def get_founded_wonder_religion_ids(state: GameState) -> List[int]:
+    """Les religions conquerantes dont la merveille fondatrice existe."""
+    return [
+        religion_id for religion_id, wonder_type in sorted(WONDER_RELIGION_SOURCES.items())
+        if wonder_type in state.wonder_territories
+    ]
+
+
+def get_wonder_religion_id_for_wonder(wonder_type: Optional[str]) -> Optional[int]:
+    for religion_id, source in WONDER_RELIGION_SOURCES.items():
+        if source == wonder_type:
+            return religion_id
+    return None
+
+
 def get_religion_founder(state: GameState, religion_id: int) -> Optional[int]:
-    if religion_id == WONDER_RELIGION_ID:
-        return get_wonder_controller(state, "elyrion_sanctuary")
+    if is_wonder_religion(religion_id):
+        return get_wonder_controller(state, WONDER_RELIGION_SOURCES[religion_id])
     for player, founded_religion_id in state.religion_founders.items():
         if founded_religion_id == religion_id:
             return player
@@ -2977,6 +3171,21 @@ def get_religion_spread_interval(state: GameState, religion_id: int) -> Optional
     return RELIGION_SPREAD_INTERVAL_BY_TEMPLE_COUNT[capped_count]
 
 
+def can_religion_replace(state: GameState, religion_id: int, territory_id: int) -> bool:
+    """Cette religion peut-elle s'imposer sur un territoire deja acquis ?
+
+    Une religion nationale ne recouvre jamais rien. Une religion conquerante
+    recouvre tout, sauf l'autre religion conquerante : Elyrion et Solmyre
+    sont l'unique rempart l'une contre l'autre.
+    """
+    if not is_wonder_religion(religion_id):
+        return False
+    installed = state.religious_influence.get(territory_id)
+    if installed is None or installed == religion_id:
+        return False
+    return not is_wonder_religion(installed)
+
+
 def apply_initial_religious_influence(state: GameState, religion_id: int, holy_site_id: int) -> None:
     candidates = [holy_site_id]
     if 0 <= holy_site_id < len(state.territories):
@@ -2986,7 +3195,11 @@ def apply_initial_religious_influence(state: GameState, religion_id: int, holy_s
             continue
         if is_territory_tax_haven_immune_to_religion(state, tid):
             continue
-        if religion_id != WONDER_RELIGION_ID and tid != holy_site_id and tid in state.religious_influence:
+        if (
+            tid != holy_site_id
+            and tid in state.religious_influence
+            and not can_religion_replace(state, religion_id, tid)
+        ):
             continue
         state.religious_influence[tid] = religion_id
 
@@ -3034,18 +3247,17 @@ def expand_religious_influences_if_due(state: GameState) -> List[str]:
             if not (0 <= tid < len(state.territories)):
                 continue
             for neighbor_id in state.territories[tid].neighbors:
-                can_replace_existing_religion = (
-                    religion_id == WONDER_RELIGION_ID
-                    and state.religious_influence.get(neighbor_id) != religion_id
-                )
+                if not (0 <= neighbor_id < len(state.territories)):
+                    continue
+                if is_territory_tax_haven_immune_to_religion(state, neighbor_id):
+                    continue
                 if (
-                    0 <= neighbor_id < len(state.territories)
-                    and (neighbor_id not in state.religious_influence or can_replace_existing_religion)
-                    and not is_territory_tax_haven_immune_to_religion(state, neighbor_id)
+                    neighbor_id not in state.religious_influence
+                    or can_religion_replace(state, religion_id, neighbor_id)
                 ):
                     expansion_ids.add(neighbor_id)
         for tid in sorted(expansion_ids):
-            if tid not in state.religious_influence or religion_id == WONDER_RELIGION_ID:
+            if tid not in state.religious_influence or can_religion_replace(state, religion_id, tid):
                 state.religious_influence[tid] = religion_id
         state.religion_last_spread_turns[religion_id] = state.turn
         if expansion_ids:
@@ -3169,6 +3381,27 @@ def is_cultural_wonder_type(wonder_type: Optional[str]) -> bool:
     return bool(definition) and definition.get("kind") == "culture"
 
 
+def is_late_wonder_type(wonder_type: Optional[str]) -> bool:
+    """Merveille tardive : aucun seuil de science ni de culture, mais un tour."""
+    definition = WONDER_DEFINITIONS.get(wonder_type or "")
+    return bool(definition) and definition.get("kind") == "late"
+
+
+def can_player_build_late_wonder(state: GameState, player: int) -> bool:
+    return state.turn >= LATE_WONDER_FIRST_TURN
+
+
+def get_wonder_cost(state: GameState, player: int, wonder_type: Optional[str]) -> int:
+    """Le prix d'une merveille pour ce joueur.
+
+    Les merveilles tardives coutent plus cher a un humain qu'a une IA ; les
+    autres gardent leur prix unique.
+    """
+    if not is_late_wonder_type(wonder_type):
+        return WONDER_COST
+    return AI_LATE_WONDER_COST if is_ai_player(state, player) else LATE_WONDER_COST
+
+
 def get_wonder_culture_threshold(state: GameState, player: int) -> int:
     if is_ai_player(state, player):
         return AI_CULTURE_WONDER_THRESHOLD
@@ -3189,6 +3422,8 @@ def has_built_wonder_this_turn(state: GameState, player: int) -> bool:
 
 
 def can_player_build_wonder_type(state: GameState, player: int, wonder_type: str) -> bool:
+    if is_late_wonder_type(wonder_type):
+        return can_player_build_late_wonder(state, player)
     if is_cultural_wonder_type(wonder_type):
         return can_player_build_cultural_wonder(state, player)
     return can_player_build_wonder(state, player)
@@ -3225,12 +3460,12 @@ def build_wonder(state: GameState, territory_id: int, wonder_type: str, record_e
     if not hasattr(state, "wonder_construction_turns"):
         state.wonder_construction_turns = {}
     state.wonder_construction_turns[territory.owner] = state.turn
-    if wonder_type == "elyrion_sanctuary":
-        religion_id = WONDER_RELIGION_ID
-        state.religion_foundation_turns[religion_id] = state.turn
-        state.religion_last_spread_turns[religion_id] = state.turn
-        state.religion_holy_sites[religion_id] = territory_id
-        apply_initial_religious_influence(state, religion_id, territory_id)
+    wonder_religion_id = get_wonder_religion_id_for_wonder(wonder_type)
+    if wonder_religion_id is not None:
+        state.religion_foundation_turns[wonder_religion_id] = state.turn
+        state.religion_last_spread_turns[wonder_religion_id] = state.turn
+        state.religion_holy_sites[wonder_religion_id] = territory_id
+        apply_initial_religious_influence(state, wonder_religion_id, territory_id)
     elif wonder_type == "golden_pact_palace":
         enforce_commercial_city_wonder_exclusivity(state)
     if record_event:
@@ -4734,6 +4969,7 @@ def get_random_ai_recipient_for_sedition(state: GameState, previous_owner: int, 
     state.base_ai_players.add(new_player)
     assign_ai_personality_to_player(state, new_player, None, rng)
     ensure_player_economy(state, new_player)
+    bind_eternal_ally_if_possible(state, new_player)
     return new_player
 
 
@@ -5445,7 +5681,10 @@ def find_ai_wonder_purchase(state: GameState, player: int, rng=random):
             -territory.id,
         ),
     )
-    return WONDER_COST, lambda terr=target, kind=wonder_type: build_wonder(state, terr.id, kind)
+    return (
+        get_wonder_cost(state, player, wonder_type),
+        lambda terr=target, kind=wonder_type: build_wonder(state, terr.id, kind),
+    )
 
 
 def find_next_regular_ai_purchase(state: GameState, player: int, rng=random):

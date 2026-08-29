@@ -33,9 +33,12 @@ const RELIGIONS = [
   { nom: "Pyronis", symbole: "P!", couleur: [236, 112, 99] },
   { nom: "Mareon", symbole: "M~", couleur: [84, 153, 199] },
   { nom: "Elyrion", symbole: "E+", couleur: [174, 235, 255] },
+  { nom: "Solmyre", symbole: "S#", couleur: [255, 170, 80] },
 ];
-// Elyrion (fondée par la merveille) n'a pas de badge de lieu saint dédié.
-const RELIGION_MERVEILLE = 5;
+// Les religions conquérantes (fondées par une merveille) n'ont pas de badge
+// de lieu saint dédié. Elles recouvrent toutes les autres — mais jamais
+// l'une l'autre : chacune est le seul rempart contre sa jumelle.
+const RELIGIONS_MERVEILLE = new Set([5, 6]);
 
 // Ressources tardives (+5 et mines) : miroir de regles.LATE_RESOURCE_LIFETIME_TURNS.
 // Elles s'épuisent après ce nombre de tours et reparaissent ailleurs.
@@ -108,12 +111,23 @@ const MERVEILLES = {
   croesus_fountain: "Fontaine de Crésus",
   aurelia_capitol: "Capitole d'Aurelia",
   daedalus_forge: "Forge de Dédale",
+  solmyre_oracle: "Oracle de Solmyre",
+  kaleth_gardens: "Jardins de Kaleth",
+  selene_dome: "Dôme de Séléné",
+  orvane_oath: "Serment d'Orvane",
 };
 
 // Merveilles débloquées par la culture (100 points) plutôt que la science.
 const MERVEILLES_CULTURELLES = new Set([
   "ivory_rampart", "croesus_fountain", "aurelia_capitol", "daedalus_forge",
 ]);
+
+// Merveilles tardives : aucun seuil de science ni de culture, mais pas avant
+// le tour 42, et plus chères pour un joueur humain (500 contre 300 pour une IA).
+const MERVEILLES_TARDIVES = new Set([
+  "solmyre_oracle", "kaleth_gardens", "selene_dome", "orvane_oath",
+]);
+const TOUR_MERVEILLES_TARDIVES = 42;
 
 const EFFETS_MERVEILLES = {
   elyrion_sanctuary: "Fonde Elyrion, religion conquérante liée au territoire",
@@ -124,7 +138,18 @@ const EFFETS_MERVEILLES = {
   croesus_fountain: "Multiplie par 5 l'argent produit par ce territoire",
   aurelia_capitol: "Donne aussitôt le statut de nation si la capitale de son propriétaire s'y trouve, sans aucune autre condition",
   daedalus_forge: "Ponts construits ou détruits gratuitement depuis ce territoire",
+  solmyre_oracle: "Fonde Solmyre, seconde religion conquérante ; seule Elyrion lui résiste",
+  kaleth_gardens: "Rapporte chaque tour 50 points de culture et 50 écus à son contrôleur",
+  selene_dome: "Protège des missiles tous les territoires de son contrôleur",
+  orvane_oath: "Le prochain joueur né en cours de partie devient l'allié définitif de son contrôleur",
 };
+
+// La famille d'une merveille, pour trier le menu déroulant de la boutique.
+function familleMerveille(type) {
+  if (MERVEILLES_TARDIVES.has(type)) return "tardive";
+  if (MERVEILLES_CULTURELLES.has(type)) return "culturelle";
+  return "science";
+}
 
 const CATALOGUE_ACHATS = [
   { id: "mercenaires", libelle: "Mercenaires — 50/rég.", cibles: ["mien"], quantite: true },
@@ -150,12 +175,18 @@ const CATALOGUE_ACHATS = [
   { id: "centre_culturel", libelle: "Centre culturel — 200", cibles: ["mien"], cout: 200 },
   { id: "universite", libelle: "Université — 200", cibles: ["mien"], cout: 200 },
   { id: "detruire_universite", libelle: "Détruire université — 200", cibles: ["tout"], cout: 200 },
-  { id: "merveille", libelle: "Merveille — 300", cibles: ["mien"], merveille: true, cout: 300 },
+  { id: "merveille", libelle: "Merveille — 300", cibles: ["mien"], merveille: true,
+    famille: "science", cout: 300 },
   // Les merveilles culturelles passent par le même achat serveur ("merveille"),
   // mais l'article n'apparaît qu'à partir de 50 points de culture (le seuil
   // humain — les IA construisent dès 25, côté serveur).
   { id: "merveille_culturelle", achat: "merveille", libelle: "Merveille culturelle — 300",
-    cibles: ["mien"], merveille: true, culturelle: true, cout: 300, culture: 50 },
+    cibles: ["mien"], merveille: true, famille: "culturelle", cout: 300, culture: 50 },
+  // Merveilles tardives : ni science ni culture requises, mais pas avant le
+  // tour 42. Le prix affiché est celui d'un humain — une IA les paie 300.
+  { id: "merveille_tardive", achat: "merveille", libelle: "Merveille tardive — 500",
+    cibles: ["mien"], merveille: true, famille: "tardive", cout: 500,
+    tour: TOUR_MERVEILLES_TARDIVES },
   { id: "capitale", libelle: "Changer capitale — 300", cibles: ["mien"], cout: 300 },
   { id: "alliance", libelle: "Alliance déf. — 20/terr.", cibles: ["ennemi"] },
   { id: "alliance_offensive", libelle: "Alliance off. — 25/terr.", allie: true, cible: true },
@@ -1267,6 +1298,7 @@ function afficherBoutique() {
     const pontDeLaForge = controleForge && (article.id === "pont" || article.id === "detruire_pont");
     if (article.science && science < article.science && !pontDeLaForge) continue;
     if (article.culture && culture < article.culture) continue;
+    if (article.tour && (etat.turn || 0) < article.tour) continue;
     const bouton = document.createElement("button");
     bouton.type = "button";
     bouton.textContent = article.libelle;
@@ -1324,11 +1356,14 @@ function afficherParamsBoutique() {
   if (article.cible) ajouterChoixJoueur("achat-cible", "Contre");
   if (article.merveille) {
     const label = document.createElement("label");
-    label.textContent = article.culturelle ? "Merveille culturelle" : "Merveille";
+    label.textContent = {
+      culturelle: "Merveille culturelle",
+      tardive: "Merveille tardive",
+    }[article.famille] || "Merveille";
     const champ = document.createElement("select");
     champ.id = "achat-merveille";
     for (const [type, nom] of Object.entries(MERVEILLES)) {
-      if (MERVEILLES_CULTURELLES.has(type) !== Boolean(article.culturelle)) continue;
+      if (familleMerveille(type) !== article.famille) continue;
       if (Object.keys(client.etat.wonder_territories).includes(type)) continue;
       const option = document.createElement("option");
       option.value = type;
@@ -2262,7 +2297,7 @@ function capitaleActive(etat, tid) {
 
 function lieuSaint(etat, tid) {
   for (const [religion, siege] of Object.entries(etat.religion_holy_sites)) {
-    if (siege === tid && Number(religion) !== RELIGION_MERVEILLE) {
+    if (siege === tid && !RELIGIONS_MERVEILLE.has(Number(religion))) {
       return Number(religion);
     }
   }
@@ -2562,12 +2597,14 @@ function dessinerEtiquettes(contexte, etat, largeurCellule, hauteurCellule) {
     const badges = [];
     if (etat.fortress_territory_ids.includes(tid)) badges.push("fortress");
     if (etat.precious_mineral_mine_ids.includes(tid)) badges.push("precious_mine");
-    for (const [typeMerveille, siege] of Object.entries(etat.wonder_territories)) {
-      if (siege === tid) badges.push(`wonder:${typeMerveille}`);
-    }
     const religionSainte = lieuSaint(etat, tid);
     if (religionSainte !== null) badges.push(`holy_site:${religionSainte}`);
     if (vueComplete) {
+      // Les merveilles sont devenues nombreuses : elles n'apparaissent plus
+      // que dans la vue « toutes les icônes ».
+      for (const [typeMerveille, siege] of Object.entries(etat.wonder_territories)) {
+        if (siege === tid) badges.push(`wonder:${typeMerveille}`);
+      }
       if (etat.factory_territory_ids.includes(tid)) badges.push("factory");
       if (etat.airport_territory_ids.includes(tid)) badges.push("airport");
       if (etat.port_territory_ids.includes(tid)) badges.push("port");

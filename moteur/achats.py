@@ -454,7 +454,13 @@ def construire_merveille(state: GameState, terr: Territory, wonder_type: Optiona
         return _refus("Choisissez d'abord une merveille dans le menu des achats.")
     if regles.has_built_wonder_this_turn(state, state.current_player):
         return _refus("Une seule merveille par tour : la prochaine attendra le tour suivant.")
-    if regles.is_cultural_wonder_type(wonder_type):
+    if regles.is_late_wonder_type(wonder_type):
+        if not regles.can_player_build_late_wonder(state, state.current_player):
+            return _refus(
+                f"{regles.get_wonder_name(wonder_type)} ne se batit qu'a partir du tour "
+                f"{regles.LATE_WONDER_FIRST_TURN} (nous sommes au tour {state.turn})."
+            )
+    elif regles.is_cultural_wonder_type(wonder_type):
         if not regles.can_player_build_cultural_wonder(state, state.current_player):
             required_culture = regles.get_wonder_culture_threshold(state, state.current_player)
             return _refus(
@@ -470,14 +476,15 @@ def construire_merveille(state: GameState, terr: Territory, wonder_type: Optiona
         return _refus(f"{terr.name} accueille deja une merveille.")
     if wonder_type not in regles.get_available_wonder_types(state):
         return _refus(f"{regles.get_wonder_name(wonder_type)} a deja ete construite.")
-    if not spend_player_money(state, state.current_player, regles.WONDER_COST):
-        return _refus(f"Pas assez d'ecus : {regles.WONDER_COST} requis pour cette merveille.")
+    cost = regles.get_wonder_cost(state, state.current_player, wonder_type)
+    if not spend_player_money(state, state.current_player, cost):
+        return _refus(f"Pas assez d'ecus : {cost} requis pour cette merveille.")
     if not regles.build_wonder(state, terr.id, wonder_type):
-        state.player_money[state.current_player] += regles.WONDER_COST
+        state.player_money[state.current_player] += cost
         return _refus("Construction de la merveille impossible.")
     wonder_name = regles.get_wonder_name(wonder_type)
     wonder_effect = regles.get_wonder_effect(wonder_type)
-    return _succes(f"{wonder_name} construite sur {terr.name} pour {regles.WONDER_COST} ecus. {wonder_effect}.")
+    return _succes(f"{wonder_name} construite sur {terr.name} pour {cost} ecus. {wonder_effect}.")
 
 
 def changer_capitale(state: GameState, terr: Territory) -> AchatResult:
@@ -652,6 +659,11 @@ def tirer_missile(
         )
     if terr.owner == player:
         return _refus("Un missile se tire sur un territoire adverse, pas sur le sien.")
+    if terr.owner >= 0 and regles.player_controls_wonder(state, terr.owner, "selene_dome"):
+        return _refus(
+            f"Missile intercepte : le {regles.get_wonder_name('selene_dome')} protege "
+            f"tous les territoires de J{terr.owner + 1}."
+        )
 
     if tier == 1 and not regles.is_territory_adjacent_to_player(state, terr.id, player):
         return _refus(
