@@ -94,6 +94,12 @@ def nouvelle_partie(
     # Miroir de start_game_session apres le chargement de la carte.
     state.eliminated_human_players = set()
     state.human_controlled_players = set()
+    # Memorise le relief de la carte avant que la mise en place ne remette
+    # l'economie a zero : reset_economy_state s'en sert pour rendre a la
+    # partie les ponts que la carte dessinait.
+    state.map_bridge_links = set(state.bridge_links)
+    state.map_fragile_bridge_links = set(state.fragile_bridge_links)
+    state.map_bridge_link_points = dict(state.bridge_link_points)
     if not state.simple_mode:
         prepare_initial_commercial_cities(state, rng)
     assign_initial_ownership_and_armies(state, rng)
@@ -571,9 +577,19 @@ def reset_economy_state(state: GameState) -> None:
     state.alliance_start_turns = {}
     state.offensive_alliance_start_turns = {}
     state.ai_alliance_start_turns = {}
-    state.bridge_links = set()
-    state.fragile_bridge_links = set()
-    state.bridge_link_points = {}
+    # Les ponts ne sont pas de l'economie : ils font partie du relief, au
+    # meme titre que les liaisons terrestres. Ceux que la carte apporte
+    # restent en place, et comptent donc comme voisins ; seuls ceux batis
+    # en cours de partie disparaissent avec elle.
+    state.bridge_links = set(getattr(state, "map_bridge_links", set()))
+    state.fragile_bridge_links = set(
+        getattr(state, "map_fragile_bridge_links", set())
+    ) & state.bridge_links
+    state.bridge_link_points = {
+        key: points
+        for key, points in getattr(state, "map_bridge_link_points", {}).items()
+        if key in state.bridge_links
+    }
     state.recompute_neighbors_from_grid()
     state.nation_players = set()
     state.nation_qualification_start_turns = {}

@@ -407,6 +407,10 @@ class GraphicalGame:
         self.terre_links: List[Tuple[int, int]] = []
         self.terre_link_points: dict[Tuple[int, int], Tuple[Tuple[int, int], Tuple[int, int]]] = {}
         self.bridge_links: set[Tuple[int, int]] = set()
+        # Les ponts que la carte apporte, a rendre a chaque demarrage.
+        self.map_bridge_links: set[Tuple[int, int]] = set()
+        self.map_fragile_bridge_links: set[Tuple[int, int]] = set()
+        self.map_bridge_link_points: dict = {}
         self.fragile_bridge_links: set[Tuple[int, int]] = set()
         self.bridge_link_points: dict[Tuple[int, int], Tuple[Tuple[int, int], Tuple[int, int]]] = {}
         self.bridge_geometry_cache: dict[Tuple[int, int], Optional[Tuple[Tuple[int, int], Tuple[int, int]]]] = {}
@@ -780,6 +784,7 @@ class GraphicalGame:
         else:
             self.generate_grid_map()
 
+        self.remember_map_bridges()
         self.eliminated_human_players = set()
         self.human_controlled_players = set()
         self.prepare_initial_commercial_cities()
@@ -1129,6 +1134,17 @@ class GraphicalGame:
                 if key in self.bridge_links:
                     self.fragile_bridge_links.add(key)
         self.apply_bridge_links_to_neighbors()
+
+    def remember_map_bridges(self) -> None:
+        """Retient les ponts dessines par la carte elle-meme.
+
+        Ils font partie du relief, comme les liaisons terrestres : le
+        demarrage d'une partie remet l'economie a zero mais doit les rendre,
+        sans quoi les territoires qu'ils relient perdent un voisin.
+        """
+        self.map_bridge_links = set(getattr(self, "bridge_links", set()))
+        self.map_fragile_bridge_links = set(getattr(self, "fragile_bridge_links", set()))
+        self.map_bridge_link_points = dict(getattr(self, "bridge_link_points", {}))
 
     def rebuild_terre_continents_from_layout(self) -> None:
         continent_ids = {}
@@ -5255,9 +5271,18 @@ class GraphicalGame:
         self.pending_offensive_alliance_ai = None
         self.pending_gift_territory_id = None
         self.pending_bridge_territory_id = None
-        self.bridge_links = set()
-        self.fragile_bridge_links = set()
-        self.bridge_link_points = {}
+        # Les ponts de la carte reviennent : ils sont du relief, pas de
+        # l'economie. Seuls ceux batis en cours de partie disparaissent.
+        map_bridges = set(getattr(self, "map_bridge_links", set()))
+        self.bridge_links = set(map_bridges)
+        self.fragile_bridge_links = set(
+            getattr(self, "map_fragile_bridge_links", set())
+        ) & map_bridges
+        self.bridge_link_points = {
+            key: points
+            for key, points in getattr(self, "map_bridge_link_points", {}).items()
+            if key in map_bridges
+        }
         self.bridge_geometry_cache = {}
         self.bridge_coastal_cells_cache = {}
         self.expedition_geometry_cache = {}
