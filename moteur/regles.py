@@ -140,6 +140,14 @@ RELIGIOUS_REINFORCEMENT_TERRITORIES_PER_BONUS = 3
 CULTURE_VICTORY_RATIO = 20
 AI_CULTURE_VICTORY_RATIO = 10
 CULTURE_VICTORY_MIN_POINTS = 100
+# Menaces de victoire : ce qui vaut d'etre signale, et ce qui vaut qu'on
+# tire la sonnette d'alarme. Les petits comptes (dores, lieux sacres) se
+# jugent au nombre qui manque, les grands au chemin parcouru.
+VICTORY_THREAT_TERRITORY_MARGIN = 3
+VICTORY_THREAT_GOLDEN_MARGIN = 1
+VICTORY_THREAT_HOLY_SITE_MARGIN = 1
+VICTORY_THREAT_IMMINENT_RATIO = 0.9
+VICTORY_THREAT_NOTICE_RATIO = 0.65
 # Victoire scientifique : exactement la meme mecanique que la culture.
 SCIENCE_VICTORY_RATIO = 20
 AI_SCIENCE_VICTORY_RATIO = 10
@@ -1694,6 +1702,169 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
                 )
 
     return None, ""
+
+
+def _victory_threat(
+    player: int,
+    bloc: Tuple[int, ...],
+    kind: str,
+    label: str,
+    value: int,
+    required: int,
+    imminent: bool,
+    detail: str,
+    notice: Optional[bool] = None,
+) -> dict:
+    """Une menace, sous une forme directement transmissible au client.
+
+    ``notice`` dit si elle merite de figurer dans l'encart ; par defaut,
+    c'est le chemin parcouru qui en decide. Les conditions qui se comptent
+    sur les doigts (dores, lieux sacres) le disent autrement : le seuil de
+    65 % y tomberait au meme endroit que l'alerte, et la menace passerait
+    de l'invisibilite au cri sans transition.
+    """
+    return {
+        "signale": bool(
+            imminent if notice is None
+            else notice
+        ) or (notice is None and required > 0 and value / required >= VICTORY_THREAT_NOTICE_RATIO),
+        "joueur": int(player),
+        "bloc": [int(member) for member in bloc],
+        "moyen": kind,
+        "libelle": label,
+        "valeur": int(value),
+        "requis": int(required),
+        "manque": int(max(0, required - value)),
+        "progression": (value / required) if required > 0 else 0.0,
+        "imminent": bool(imminent),
+        "detail": detail,
+    }
+
+
+def get_victory_threats(
+    state: GameState, notice_ratio: float = VICTORY_THREAT_NOTICE_RATIO,
+) -> List[dict]:
+    """Qui approche d'une victoire, et par quel moyen.
+
+    Une entree par joueur et par condition menacee, la plus avancee d'abord.
+    Tout se compte par bloc : un Serment d'Orvane fond l'allie dans son
+    patron, et l'allie ne figure donc pas pour son propre compte.
+    ``imminent`` marque les menaces dont il ne reste presque rien.
+    """
+    total = len(state.territories)
+    if total <= 0:
+        return []
+    owners = {terr.owner for terr in state.territories if terr.owner >= 0}
+    eternal_ally = get_eternal_ally(state)
+    threats: List[dict] = []
+
+    territory_threshold = math.ceil(total * 0.75)
+    golden_ids = [tid for tid in state.golden_territory_ids if 0 <= tid < total]
+    holy_active = is_holy_site_victory_active(state)
+    required_holy_sites = get_required_holy_site_count_for_victory(state)
+
+    for owner in sorted(owners):
+        if owner == eternal_ally or is_onu_player(state, owner):
+            continue
+        bloc = get_victory_bloc(state, owner)
+        suffix = f" avec son allie definitif J{eternal_ally + 1}" if len(bloc) > 1 else ""
+
+        owned = sum(1 for terr in state.territories if terr.owner in bloc)
+        threats.append(_victory_threat(
+            owner, bloc, "territoires", "territoriale", owned, territory_threshold,
+            territory_threshold - owned <= VICTORY_THREAT_TERRITORY_MARGIN,
+            f"{owned}/{territory_threshold} territoires (3/4 de la carte){suffix}",
+        ))
+
+        if len(golden_ids) == 4:
+            golden = sum(1 for tid in golden_ids if state.territories[tid].owner in bloc)
+            threats.append(_victory_threat(
+                owner, bloc, "dores", "par les territoires dores", golden, 4,
+                4 - golden <= VICTORY_THREAT_GOLDEN_MARGIN,
+                f"{golden}/4 territoires dores{suffix}",
+                notice=4 - golden <= 2 * VICTORY_THREAT_GOLDEN_MARGIN,
+            ))
+
+        if holy_active and required_holy_sites > 0:
+            holy = sum(get_controlled_holy_site_count(state, member) for member in bloc)
+            threats.append(_victory_threat(
+                owner, bloc, "lieux_sacres", "par les lieux sacres", holy, required_holy_sites,
+                required_holy_sites - holy <= VICTORY_THREAT_HOLY_SITE_MARGIN,
+                f"{holy}/{required_holy_sites} lieux sacres{suffix}",
+                notice=required_holy_sites - holy <= 2 * VICTORY_THREAT_HOLY_SITE_MARGIN,
+            ))
+
+        for member in bloc:
+            religion_id = get_player_national_religion_id(state, member)
+            if religion_id is None:
+                continue
+            required = get_required_influence_count_for_religion_victory(state, member)
+            if required <= 0:
+                continue
+            influence = get_religion_influence_count(state, religion_id)
+            part = "3/4" if is_ai_player(state, member) else "9/10"
+            porteur = f" (par J{member + 1})" if member != owner else ""
+            threats.append(_victory_threat(
+                owner, bloc, "religion", "religieuse", influence, required,
+                influence >= VICTORY_THREAT_IMMINENT_RATIO * required,
+                f"{get_religion_name(state, religion_id)} sur {influence}/{required} "
+                f"territoires ({part} de la carte){porteur}",
+            ))
+
+        for kind, label, measure, ratio_human, ratio_ai, minimum in (
+            ("culture", "culturelle", calculate_player_culture,
+             CULTURE_VICTORY_RATIO, AI_CULTURE_VICTORY_RATIO, CULTURE_VICTORY_MIN_POINTS),
+            ("science", "scientifique", get_player_science,
+             SCIENCE_VICTORY_RATIO, AI_SCIENCE_VICTORY_RATIO, SCIENCE_VICTORY_MIN_POINTS),
+        ):
+            value = sum(measure(state, member) for member in bloc)
+            rivals = [
+                rival for rival in owners
+                if rival not in bloc and not is_onu_player(state, rival)
+            ]
+            if not rivals:
+                continue
+            best_rival = max(
+                sum(measure(state, member) for member in get_victory_bloc(state, rival))
+                for rival in rivals
+            )
+            ratio = ratio_ai if is_ai_player(state, owner) else ratio_human
+            required = max(minimum, ratio * best_rival)
+            threats.append(_victory_threat(
+                owner, bloc, kind, label, value, required,
+                value >= VICTORY_THREAT_IMMINENT_RATIO * required,
+                f"{value}/{required} points ({ratio} fois le meilleur rival, a {best_rival}){suffix}",
+            ))
+
+    retenues = [
+        threat for threat in threats
+        if threat["imminent"]
+        or threat["signale"]
+        or threat["progression"] >= notice_ratio
+    ]
+    retenues.sort(key=lambda threat: (-threat["progression"], threat["joueur"], threat["moyen"]))
+    return retenues
+
+
+def get_imminent_victory_threats(state: GameState) -> List[dict]:
+    return [threat for threat in get_victory_threats(state) if threat["imminent"]]
+
+
+def record_victory_threat_alerts(state: GameState) -> List[str]:
+    """Tire la sonnette d'alarme pour qui touche au but.
+
+    Repete a chaque nouveau tour tant que la menace dure : mieux vaut lasser
+    que laisser gagner quelqu'un dans l'indifference generale.
+    """
+    messages: List[str] = []
+    for threat in get_imminent_victory_threats(state):
+        message = (
+            f"Tour {state.turn}: ALERTE, J{threat['joueur'] + 1} touche a la victoire "
+            f"{threat['libelle']} : {threat['detail']}."
+        )
+        record_major_event(state, message)
+        messages.append(message)
+    return messages
 
 
 # ----------------------------------------------------------------------

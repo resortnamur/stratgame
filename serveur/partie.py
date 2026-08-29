@@ -393,6 +393,8 @@ class SessionPartie:
                 "total_territoires": total,
                 "seuil_trois_quarts": seuil,
                 "nb_dores": len(state.golden_territory_ids),
+                # Qui approche d'une victoire, par quelque moyen que ce soit.
+                "menaces": regles.get_victory_threats(state),
             }
 
     def _bilan_domination(

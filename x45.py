@@ -6754,20 +6754,8 @@ class GraphicalGame:
         return new_player
 
     def get_random_ai_recipient_for_sedition(self, previous_owner: int) -> int:
-        candidates = [
-            player for player in self.get_active_players()
-            if player != previous_owner and self.is_ai_player(player) and not self.is_commercial_city_player(player)
-        ]
-        if candidates:
-            return random.choice(candidates)
-
-        new_player = self.num_players
-        self.num_players += 1
-        self.base_ai_players.add(new_player)
-        self.assign_ai_personality_to_player(new_player)
-        self.ensure_player_economy(new_player)
-        self.assign_player_to_cold_war_camp(new_player)
-        return new_player
+        """Delegue au moteur : le nouveau venu prete serment s'il y a lieu."""
+        return moteur_regles.get_random_ai_recipient_for_sedition(self, previous_owner)
 
     def calculate_sedition_chance_points(self, territory: Territory) -> int:
         if territory.owner in getattr(self, "nation_players", set()) or self.is_commercial_city_player(territory.owner):
@@ -8491,6 +8479,7 @@ class GraphicalGame:
         recent = self.recent_major_events[-8:] if self.recent_major_events else ["Aucun evenement majeur enregistre"]
         return [
             ("Synthese", self.get_geopolitical_status_lines(), False),
+            ("Course a la victoire", self.get_victory_threat_lines(), False),
             ("Alliances", self.get_geopolitical_alliance_lines(), False),
             ("Evenements a venir", self.get_next_fixed_geopolitical_events(), False),
             ("Evenements recents", recent, True),
@@ -8965,46 +8954,32 @@ class GraphicalGame:
             )
         return lines
 
-    def get_empire_victory_threat_lines(self, player: int) -> list[str]:
-        total = len(self.territories)
-        if total <= 0:
-            return ["Aucun adversaire actif"]
-        threshold = math.ceil(total * 0.75)
-        required_holy_sites = self.get_required_holy_site_count_for_victory()
-        holy_victory_active = self.is_holy_site_victory_active()
-        threats = []
-        for opponent in self.get_active_players():
-            if opponent == player or self.is_onu_player(opponent):
-                continue
-            territories = self.count_player_territories(opponent)
-            golden = sum(1 for tid in self.golden_territory_ids if 0 <= tid < total and self.territories[tid].owner == opponent)
-            holy = self.get_controlled_holy_site_count(opponent)
-            danger = territories >= max(1, threshold - 3) or golden >= 3 or (holy_victory_active and holy >= required_holy_sites - 1)
-            close = territories >= math.ceil(threshold * 0.65) or golden >= 2 or (holy_victory_active and holy >= required_holy_sites - 2)
-            score = max(
-                territories / max(1, threshold),
-                golden / 4,
-                (holy / required_holy_sites) if holy_victory_active else 0,
+    def get_victory_threat_lines(self, exclude_player: Optional[int] = None) -> list[str]:
+        """La course a la victoire : qui approche, et par quel moyen.
+
+        ``exclude_player`` retire le lecteur de la liste (panneau empire, ou
+        l'on veut voir ses adversaires) ; sans lui, tout le monde y figure
+        (panneau geopolitique).
+        """
+        menaces = moteur_regles.get_victory_threats(self)
+        if exclude_player is not None:
+            menaces = [m for m in menaces if m["joueur"] != exclude_player]
+        if not menaces:
+            return ["Personne n'approche d'une victoire pour le moment"]
+        lignes = []
+        for menace in menaces[:8]:
+            marque = "ALERTE" if menace["imminent"] else "a surveiller"
+            pourcent = min(100, round(100 * menace["progression"]))
+            lignes.append(
+                f"J{menace['joueur'] + 1} - {marque} - victoire {menace['libelle']}: "
+                f"{menace['detail']} ({pourcent}%)"
             )
-            threats.append((2 if danger else 1 if close else 0, score, territories, golden, holy, opponent))
-        threats.sort(reverse=True)
-        close_threats = [item for item in threats if item[0] > 0]
-        if not close_threats:
-            if not threats:
-                return ["Aucun adversaire actif"]
-            _level, _score, territories, golden, holy, opponent = threats[0]
-            return [
-                "Aucun adversaire n'est actuellement proche d'une victoire.",
-                f"Principal rival: J{opponent + 1} ({territories}/{threshold} territoires, {golden}/4 dores, {holy}/{required_holy_sites} lieux sacres)",
-            ]
-        lines = []
-        for level, _score, territories, golden, holy, opponent in close_threats[:5]:
-            label = "DANGER IMMEDIAT" if level >= 2 else "a surveiller"
-            details = f"{territories}/{threshold} territoires, {golden}/4 dores"
-            if holy_victory_active:
-                details += f", {holy}/{required_holy_sites} lieux sacres"
-            lines.append(f"J{opponent + 1} - {label}: {details}")
-        return lines
+        if len(menaces) > 8:
+            lignes.append(f"... et {len(menaces) - 8} autre(s) menace(s)")
+        return lignes
+
+    def get_empire_victory_threat_lines(self, player: int) -> list[str]:
+        return self.get_victory_threat_lines(exclude_player=player)
 
     def get_empire_special_status_lines(self, player: int) -> list[str]:
         lines = []
@@ -9704,18 +9679,10 @@ class GraphicalGame:
     def allocate_rebel_player(self) -> tuple[int, bool]:
         """Cree toujours un nouveau joueur IA pour revolte, revolution ou chaos.
 
-        L'ancien retour prioritaire d'un joueur humain elimine est supprime.
-        Un joueur pourra ensuite etre bascule manuellement en mode humain via le bouton de controle.
+        Delegue au moteur, qui fait aussi preter serment le nouveau venu si
+        quelqu'un tient le Serment d'Orvane.
         """
-        new_player = self.num_players
-        self.num_players += 1
-        self.base_ai_players.add(new_player)
-        self.human_controlled_players.discard(new_player)
-        self.auto_controlled_players.discard(new_player)
-        self.assign_ai_personality_to_player(new_player)
-        self.ensure_player_economy(new_player)
-        self.assign_player_to_cold_war_camp(new_player)
-        return new_player, False
+        return moteur_regles.allocate_rebel_player(self)
 
     def build_global_chaos_event_message(self, prefix: Optional[str] = None) -> Optional[str]:
         message = moteur_regles.build_global_chaos_event_message(self, prefix=prefix)

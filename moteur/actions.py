@@ -76,6 +76,7 @@ class TurnAdvanceReport:
     reinforcement_report: Optional[regles.ReinforcementReport] = None
     sedition_message: Optional[str] = None
     resource_messages: List[str] = field(default_factory=list)
+    victory_alerts: List[str] = field(default_factory=list)
     religion_messages: List[str] = field(default_factory=list)
     market_message: Optional[str] = None
     empire_messages: List[str] = field(default_factory=list)
@@ -196,6 +197,7 @@ def advance_turn(
                 regles.age_universities_one_turn(state)
                 report.market_message = regles.maybe_trigger_market_event(state, rng)
             report.empire_messages = regles.maybe_trigger_empire_event(state, rng)
+            report.victory_alerts = regles.record_victory_threat_alerts(state)
             active_players = regles.get_active_players(state)
             sorted_players = sorted(active_players)
             if sorted_players:

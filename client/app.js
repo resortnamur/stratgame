@@ -1038,7 +1038,44 @@ function afficherEmpire() {
     + "<div class='conditions'>" + conditions.join("<br>") + "</div>";
 }
 
+// Les moyens de gagner, avec le mot qui va bien dans l'encart.
+const LIBELLES_MENACES = {
+  territoires: "Territoires",
+  dores: "Territoires dorés",
+  lieux_sacres: "Lieux sacrés",
+  religion: "Religion",
+  culture: "Culture",
+  science: "Science",
+};
+
+function afficherMenacesVictoire() {
+  const zone = $("menaces-victoire");
+  const donnees = client.bilans;
+  if (!donnees) {
+    zone.textContent = "Chargement…";
+    return;
+  }
+  const menaces = donnees.menaces || [];
+  if (!menaces.length) {
+    zone.innerHTML = "<p class='menace-calme'>Personne n'approche d'une victoire.</p>";
+    return;
+  }
+  const lignes = menaces.map((menace) => {
+    const nom = nomDuJoueur(menace.joueur);
+    const pion = `<span class="pion" style="background:${rgb(couleurJoueur(menace.joueur))}"></span>`;
+    const moyen = LIBELLES_MENACES[menace.moyen] || menace.moyen;
+    const pourcent = Math.min(100, Math.round(100 * menace.progression));
+    const reste = menace.manque > 0 ? `manque ${menace.manque}` : "seuil atteint";
+    return `<li class="${menace.imminent ? "menace imminente" : "menace"}">`
+      + `${menace.imminent ? "<strong>⚠ ALERTE</strong> " : ""}${pion}${nom}`
+      + ` — victoire <strong>${moyen}</strong> : ${menace.detail} (${pourcent} %, ${reste})`
+      + `<span class="jauge"><span style="width:${pourcent}%"></span></span></li>`;
+  });
+  zone.innerHTML = "<ul class='liste-menaces'>" + lignes.join("") + "</ul>";
+}
+
 function afficherSituation() {
+  afficherMenacesVictoire();
   const zone = $("tableau-situation");
   const etat = client.etat;
   const donnees = client.bilans;
