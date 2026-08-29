@@ -122,6 +122,8 @@ class GraphicalGame:
     CULTURE_WONDER_THRESHOLD = 50
     AI_CULTURE_WONDER_THRESHOLD = 25
     MAX_CULTURAL_CENTERS_PER_TERRITORY = 1
+    RUIN_INCOME = 20
+    RUIN_CULTURE = 5
     CULTURE_IMMUNITY_THRESHOLD = 25
     CULTURE_ADVANTAGE_THRESHOLD = 15
     AI_CULTURE_DETERRENCE_MIN_ADVANTAGE = 20
@@ -426,6 +428,8 @@ class GraphicalGame:
         self.industrial_capture_counts: dict[int, int] = {}
         self.cultural_center_ages: dict[int, list[int]] = {}
         self.cultural_capture_counts: dict[int, int] = {}
+        # Un centre culturel detruit laisse une ruine, que rien ne detruit.
+        self.ruin_territory_ids: set[int] = set()
         self.university_territory_ids: set[int] = set()
         self.university_capture_counts: dict[int, int] = {}
         self.university_ages: dict[int, int] = {}
@@ -1244,6 +1248,7 @@ class GraphicalGame:
             "industrial_capture_counts": {str(k): int(v) for k, v in self.industrial_capture_counts.items()},
             "cultural_center_ages": {str(k): [int(age) for age in ages] for k, ages in self.cultural_center_ages.items()},
             "cultural_capture_counts": {str(k): int(v) for k, v in self.cultural_capture_counts.items()},
+            "ruin_territory_ids": sorted(int(tid) for tid in getattr(self, "ruin_territory_ids", set())),
             "university_territory_ids": list(self.university_territory_ids),
             "university_capture_counts": {str(k): int(v) for k, v in self.university_capture_counts.items()},
             "university_ages": {str(k): int(v) for k, v in getattr(self, "university_ages", {}).items()},
@@ -1483,6 +1488,7 @@ class GraphicalGame:
         self.industry_capture_counts = {tid: self.industrial_capture_counts.get(tid, 0) for tid in self.factory_territory_ids}
         self.cultural_center_ages = {int(k): [int(age) for age in ages] for k, ages in payload.get("cultural_center_ages", {}).items()}
         self.cultural_capture_counts = {int(k): int(v) for k, v in payload.get("cultural_capture_counts", {}).items()}
+        self.ruin_territory_ids = {int(x) for x in payload.get("ruin_territory_ids", [])}
         self.university_territory_ids = set(int(x) for x in payload.get("university_territory_ids", []))
         self.university_capture_counts = {int(k): int(v) for k, v in payload.get("university_capture_counts", {}).items()}
         self.university_ages = {int(k): max(0, int(v)) for k, v in payload.get("university_ages", {}).items()}
@@ -5168,6 +5174,7 @@ class GraphicalGame:
         self.industrial_capture_counts = {}
         self.cultural_center_ages = {}
         self.cultural_capture_counts = {}
+        self.ruin_territory_ids = set()
         self.university_territory_ids = set()
         self.university_capture_counts = {}
         self.university_ages = {}
@@ -5294,6 +5301,10 @@ class GraphicalGame:
             tid: max(0, int(getattr(self, "cultural_capture_counts", {}).get(tid, 0)))
             for tid in self.cultural_center_ages
         }
+        self.ruin_territory_ids = {
+            int(tid) for tid in getattr(self, "ruin_territory_ids", set())
+            if int(tid) in valid_ids
+        }
         self.university_territory_ids = {
             tid for tid in getattr(self, "university_territory_ids", set())
             if tid in valid_ids
@@ -5332,7 +5343,6 @@ class GraphicalGame:
             and int(tid) in valid_ids
         }
         self.refresh_destroyed_commercial_cities()
-        self.enforce_commercial_city_cultural_center_limit(self.current_player)
         self.refresh_last_stand_bonus_state()
         self.enforce_commercial_city_wonder_exclusivity()
         for player in range(self.num_players):
@@ -5398,49 +5408,19 @@ class GraphicalGame:
         return moteur_regles.remove_all_industrial_structures(self, territory_id)
 
     def get_cultural_center_count(self, territory_id: int) -> int:
-        return len(self.cultural_center_ages.get(territory_id, []))
+        return moteur_regles.get_cultural_center_count(self, territory_id)
+
+    def has_ruin(self, territory_id: int) -> bool:
+        return moteur_regles.has_ruin(self, territory_id)
+
+    def get_player_ruin_count(self, player: int) -> int:
+        return moteur_regles.get_player_ruin_count(self, player)
 
     def can_add_cultural_center(self, territory_id: int) -> bool:
-        if not (0 <= territory_id < len(self.territories)):
-            return False
-        owner = self.territories[territory_id].owner
-        if self.is_commercial_city_player(owner):
-            capital_id = self.get_commercial_city_capital_id(owner)
-            if territory_id != capital_id or self.count_commercial_city_cultural_centers(owner) >= 1:
-                return False
-        return self.get_cultural_center_count(territory_id) < self.MAX_CULTURAL_CENTERS_PER_TERRITORY
+        return moteur_regles.can_add_cultural_center(self, territory_id)
 
     def add_cultural_center(self, territory_id: int, age: int = 0) -> bool:
         return moteur_regles.add_cultural_center(self, territory_id, age)
-
-    def count_commercial_city_cultural_centers(self, player: int) -> int:
-        if not self.is_commercial_city_player(player):
-            return 0
-        capital_id = self.get_commercial_city_capital_id(player)
-        return self.get_cultural_center_count(capital_id) if capital_id is not None else 0
-
-    def enforce_commercial_city_cultural_center_limit(self, player: Optional[int] = None) -> None:
-        players = [player] if player is not None else sorted(self.commercial_city_players)
-        valid_ids = set(range(len(self.territories)))
-        for cc_player in players:
-            if not self.is_commercial_city_player(cc_player):
-                continue
-            capital_id = self.get_commercial_city_capital_id(cc_player)
-            owned_with_centers = [
-                tid for tid in self.cultural_center_ages
-                if tid in valid_ids
-                and self.territories[tid].owner == cc_player
-                and self.cultural_center_ages.get(tid)
-            ]
-            if capital_id is None:
-                continue
-            for tid in owned_with_centers:
-                if tid != capital_id:
-                    self.cultural_center_ages.pop(tid, None)
-                    self.cultural_capture_counts.pop(tid, None)
-            if self.cultural_center_ages.get(capital_id):
-                self.cultural_center_ages[capital_id] = [max(self.cultural_center_ages.get(capital_id, [0]))]
-                self.cultural_capture_counts.setdefault(capital_id, 0)
 
     def can_commercial_city_gain_territory(self, player: int, territory_id: int) -> bool:
         if player not in getattr(self, "commercial_city_players", set()):
@@ -5747,11 +5727,7 @@ class GraphicalGame:
         return 1
 
     def calculate_territory_culture(self, territory: Territory) -> int:
-        ages = self.cultural_center_ages.get(territory.id, [])
-        if territory.owner == self.onu_player_id or not ages:
-            return 0
-        base = max(1, len(territory.neighbors))
-        return sum(base * self.get_cultural_center_multiplier(age) for age in ages)
+        return moteur_regles.calculate_territory_culture(self, territory)
 
     def calculate_player_culture(self, player: int) -> int:
         return moteur_regles.calculate_player_culture(self, player)
@@ -5960,6 +5936,7 @@ class GraphicalGame:
         self.industrial_capture_counts = {}
         self.cultural_center_ages = {}
         self.cultural_capture_counts = {}
+        self.ruin_territory_ids = set()
         self.university_territory_ids = set()
         self.university_capture_counts = {}
         if not self.territories:
@@ -7755,7 +7732,6 @@ class GraphicalGame:
         self.vassal_territory_created_turns.pop(territory_id, None)
         self.vassal_players.pop(territory_id, None)
         self.territories[territory_id].owner = player
-        self.enforce_commercial_city_cultural_center_limit(player)
         if previous_owner >= 0 and not any(t.owner == previous_owner for t in self.territories):
             self.mark_eliminated_player_if_human(previous_owner)
             self.refresh_eliminated_human_players()
@@ -7820,6 +7796,7 @@ class GraphicalGame:
             "airports": sorted(int(tid) for tid in self.airport_territory_ids),
             "ports": sorted(int(tid) for tid in self.port_territory_ids),
             "cultural_centers": sorted(int(tid) for tid in self.cultural_center_ages),
+            "ruins": sorted(int(tid) for tid in getattr(self, "ruin_territory_ids", set())),
             "universities": sorted(int(tid) for tid in self.university_territory_ids),
             "temples": sorted(int(tid) for tid in getattr(self, "temple_territory_ids", set())),
             "sanctuaries": sorted(int(tid) for tid in self.sanctuary_territory_ids),
@@ -7912,6 +7889,7 @@ class GraphicalGame:
         self.port_territory_ids = set(int(tid) for tid in snapshot.get("ports", []))
         cultural_ids = set(int(tid) for tid in snapshot.get("cultural_centers", []))
         self.cultural_center_ages = {tid: self.cultural_center_ages.get(tid, [0]) or [0] for tid in cultural_ids}
+        self.ruin_territory_ids = set(int(tid) for tid in snapshot.get("ruins", []))
         self.university_territory_ids = set(int(tid) for tid in snapshot.get("universities", []))
         self.temple_territory_ids = set(int(tid) for tid in snapshot.get("temples", []))
         self.sanctuary_territory_ids = set(int(tid) for tid in snapshot.get("sanctuaries", []))
@@ -7967,6 +7945,7 @@ class GraphicalGame:
             "forteresses": len(owned_ids & self.fortress_territory_ids),
             "industries": sum(self.get_industrial_structure_count(tid) for tid in owned_ids),
             "centres culturels": sum(len(self.cultural_center_ages.get(tid, [])) for tid in owned_ids),
+            "ruines": len(owned_ids & getattr(self, "ruin_territory_ids", set())),
             "universites": len(owned_ids & self.university_territory_ids),
             "temples": len(owned_ids & self.temple_territory_ids),
         }
@@ -8566,6 +8545,7 @@ class GraphicalGame:
             "airports": len(self.airport_territory_ids & owned_ids),
             "ports": len(self.port_territory_ids & owned_ids),
             "cultural_centers": sum(self.get_cultural_center_count(tid) for tid in owned_ids),
+            "ruins": len(getattr(self, "ruin_territory_ids", set()) & owned_ids),
             "universities": len(self.university_territory_ids & owned_ids),
             "temples": len(getattr(self, "temple_territory_ids", set()) & owned_ids),
             "ultra": sum(1 for tid in owned_ids if self.territories[tid].reinforcement_bonus == 3),
@@ -8864,6 +8844,25 @@ class GraphicalGame:
             lines.append(
                 f"Lieux sacres: {holy}/{required_holy_sites}; victoire inactive tant que les {required_holy_sites} religions requises ne sont pas fondees"
             )
+        culture = self.calculate_player_culture(player)
+        rivals = [
+            opponent for opponent in self.get_active_players()
+            if opponent != player and not self.is_onu_player(opponent)
+        ]
+        best_rival_culture = max(
+            (self.calculate_player_culture(opponent) for opponent in rivals), default=0,
+        )
+        ratio = (
+            moteur_regles.AI_CULTURE_VICTORY_RATIO if self.is_ai_player(player)
+            else moteur_regles.CULTURE_VICTORY_RATIO
+        )
+        required_culture = max(
+            moteur_regles.CULTURE_VICTORY_MIN_POINTS, ratio * best_rival_culture,
+        )
+        lines.append(
+            f"Culture: {culture}/{required_culture} requis pour la victoire culturelle "
+            f"({ratio}x le meilleur rival, qui est a {best_rival_culture}, et {moteur_regles.CULTURE_VICTORY_MIN_POINTS} points minimum)"
+        )
         religion_id = moteur_regles.get_player_national_religion_id(self, player)
         if religion_id is None:
             lines.append("Religion nationale: aucune; elle nait avec votre premier temple")
@@ -8981,7 +8980,9 @@ class GraphicalGame:
             f"Total des amenagements: {structures['total']}",
             f"Forteresses: {structures['fortresses']}",
             f"Usines: {structures['factories']}; aeroports: {structures['airports']}; ports: {structures['ports']}",
-            f"Centres culturels: {structures['cultural_centers']}",
+            f"Centres culturels: {structures['cultural_centers']}; "
+            f"ruines: {structures['ruins']} (+{structures['ruins'] * self.RUIN_INCOME} ecu(s), "
+            f"+{structures['ruins'] * self.RUIN_CULTURE} culture par tour)",
             f"Universites: {structures['universities']}; temples: {structures['temples']}",
             f"Territoires bonus +3: {structures['ultra']}; bonus +5: {structures['bonus_5']}; mines precieuses: {structures['precious_mines']}; territoires dores: {structures['golden']}/4",
         ]
@@ -10099,6 +10100,10 @@ class GraphicalGame:
             count = self.cultural_capture_counts.get(territory.id, 0)
             plural = "s" if cultural_count > 1 else ""
             structures.append(f"centre{plural} culturel{plural} x{cultural_count}, age {age_label} ({count}/3 captures)")
+        if self.has_ruin(territory.id):
+            structures.append(
+                f"ruine ({self.RUIN_INCOME} ecu(s) et {self.RUIN_CULTURE} points de culture par tour, indestructible)"
+            )
         if territory.id in self.university_territory_ids:
             count = self.university_capture_counts.get(territory.id, 0)
             age = self.university_ages.get(territory.id, 0)
@@ -11087,7 +11092,8 @@ class GraphicalGame:
             count += 1
         if territory_id in getattr(self, "temple_territory_ids", set()):
             count += 1
-        if territory_id in self.cultural_center_ages:
+        # Un centre culturel ou la ruine qu'il laisse occupent le meme creneau.
+        if territory_id in self.cultural_center_ages or self.has_ruin(territory_id):
             count += 1
         if territory_id in self.university_territory_ids:
             count += 1
@@ -11238,6 +11244,20 @@ class GraphicalGame:
         if count > 1:
             glyph = self.font_small.render(str(count), True, (84, 52, 94))
             self.screen.blit(glyph, glyph.get_rect(center=(badge_rect.right - 5, badge_rect.y + 7)))
+
+    def draw_ruin_badge(self, x: int, y: int) -> None:
+        """Deux colonnes brisees sur un socle : ce qui reste d'un centre culturel."""
+        badge_rect = pygame.Rect(0, 0, 28, 24)
+        badge_rect.center = (x, y)
+        pygame.draw.rect(self.screen, (176, 168, 155), badge_rect, border_radius=6)
+        pygame.draw.rect(self.screen, (84, 74, 60), badge_rect, width=2, border_radius=6)
+        stone = (84, 74, 60)
+        pygame.draw.rect(self.screen, stone, (badge_rect.x + 5, badge_rect.y + 17, 18, 3))
+        # Colonnes de hauteurs inegales, toutes rompues.
+        pygame.draw.rect(self.screen, stone, (badge_rect.x + 7, badge_rect.y + 9, 4, 8))
+        pygame.draw.rect(self.screen, stone, (badge_rect.x + 13, badge_rect.y + 12, 4, 5))
+        pygame.draw.rect(self.screen, stone, (badge_rect.x + 19, badge_rect.y + 7, 4, 10))
+        pygame.draw.line(self.screen, (176, 168, 155), (badge_rect.x + 19, badge_rect.y + 10), (badge_rect.x + 23, badge_rect.y + 9), 1)
 
     def draw_university_badge(self, x: int, y: int) -> None:
         badge_rect = pygame.Rect(0, 0, 28, 24)
@@ -11606,6 +11626,8 @@ class GraphicalGame:
                         special_icon_types.append("temple")
                     if terr.id in self.cultural_center_ages:
                         special_icon_types.append("culture")
+                    if self.has_ruin(terr.id):
+                        special_icon_types.append("ruin")
                     if terr.id in self.university_territory_ids:
                         special_icon_types.append("university")
 
@@ -11637,6 +11659,8 @@ class GraphicalGame:
                             self.draw_temple_badge(badge_x, badge_y)
                         elif icon_type == "culture":
                             self.draw_culture_badge(badge_x, badge_y, len(self.cultural_center_ages.get(terr.id, [])))
+                        elif icon_type == "ruin":
+                            self.draw_ruin_badge(badge_x, badge_y)
                         elif icon_type == "university":
                             self.draw_university_badge(badge_x, badge_y)
                         elif icon_type.startswith("holy_site:"):

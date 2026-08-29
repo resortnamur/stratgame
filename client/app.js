@@ -967,10 +967,18 @@ function afficherEmpire() {
       `${amenagements.forteresses} forteresse(s), ${amenagements.usines} usine(s), ` +
       `${amenagements.aeroports} aéroport(s), ${amenagements.ports} port(s), ` +
       `${amenagements.temples} temple(s), ${amenagements.centres_culturels} centre(s) culturel(s), ` +
-      `${amenagements.universites} université(s)`);
+      `${amenagements.universites} université(s)` +
+      (amenagements.ruines ? ` — ${amenagements.ruines} ruine(s)` : ""));
   if (Object.keys(bilan.bonus).length) {
     lignes.push("Bonus de renforts : " + Object.entries(bilan.bonus)
       .map(([valeur, nombre]) => `${nombre} territoire(s) ${valeur}`).join(", "));
+  }
+  // Victoire culturelle : écraser le meilleur rival d'un facteur 20 (10 pour
+  // une IA), avec un plancher pour que des rivaux à zéro ne suffisent pas.
+  if (bilan.culture) {
+    const c = bilan.culture;
+    lignes.push(`Culture : ${c.points}/${c.requis} requis pour la victoire culturelle `
+      + `(${c.facteur}× le meilleur rival, à ${c.meilleur_rival})`);
   }
   // Victoire religieuse : la religion nationale doit couvrir 9/10 de la carte
   // (3/4 pour une IA). Les territoires qu'elle touche ne se révoltent plus.
@@ -1441,6 +1449,7 @@ function etatDepuisInstantane(instantane) {
     university_territory_ids: instantane.universities,
     cultural_center_ages: Object.fromEntries(
       instantane.cultural_centers.map((tid) => [String(tid), [1]])),
+    ruin_territory_ids: instantane.ruins || [],
     precious_mineral_mine_ids: instantane.precious_mines,
     sanctuary_territory_ids: instantane.sanctuaries,
     submitted_territory_ids: instantane.submitted,
@@ -1979,6 +1988,7 @@ function afficherDetailTerritoire() {
   if ((etat.cultural_center_ages[String(id)] || []).length) {
     etiquettes.push("centre culturel");
   }
+  if ((etat.ruin_territory_ids || []).includes(id)) etiquettes.push("ruine");
   for (const [type, tid] of Object.entries(etat.wonder_territories)) {
     if (tid === id) etiquettes.push(`merveille (${MERVEILLES[type] || type})`);
   }
@@ -2224,7 +2234,8 @@ function comptesAmenagements(etat, tid) {
       || etat.airport_territory_ids.includes(tid)
       || etat.port_territory_ids.includes(tid)) compte += 1;
   if (etat.temple_territory_ids.includes(tid)) compte += 1;
-  if ((etat.cultural_center_ages[String(tid)] || []).length) compte += 1;
+  if ((etat.cultural_center_ages[String(tid)] || []).length
+      || (etat.ruin_territory_ids || []).includes(tid)) compte += 1;
   if (etat.university_territory_ids.includes(tid)) compte += 1;
   return compte;
 }
@@ -2391,6 +2402,13 @@ function dessinerBadge(ctx, type, x, y, etat, tid) {
     ctx.stroke();
     const nombre = (etat.cultural_center_ages[String(tid)] || []).length;
     if (nombre > 1) glypheBadge(ctx, g(23), h(7), String(nombre), "rgb(84,52,94)");
+  } else if (type === "ruin") {
+    fondBadge(ctx, x, y, 28, 24, "rgb(176,168,155)", "rgb(84,74,60)");
+    ctx.fillStyle = "rgb(84,74,60)";
+    ctx.fillRect(g(5), h(17), 18, 3);
+    ctx.fillRect(g(7), h(9), 4, 8);
+    ctx.fillRect(g(13), h(12), 4, 5);
+    ctx.fillRect(g(19), h(7), 4, 10);
   } else if (type === "capital" || type === "capital_nation") {
     if (type === "capital_nation") {
       ctx.beginPath();
@@ -2550,6 +2568,7 @@ function dessinerEtiquettes(contexte, etat, largeurCellule, hauteurCellule) {
       if (etat.port_territory_ids.includes(tid)) badges.push("port");
       if (etat.temple_territory_ids.includes(tid)) badges.push("temple");
       if ((etat.cultural_center_ages[String(tid)] || []).length) badges.push("culture");
+      if ((etat.ruin_territory_ids || []).includes(tid)) badges.push("ruin");
       if (etat.university_territory_ids.includes(tid)) badges.push("university");
     }
     const capitale = capitaleActive(etat, tid);

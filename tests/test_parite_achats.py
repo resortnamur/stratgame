@@ -32,7 +32,9 @@ from moteur import regles
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from test_parite_original import import_original_module, ORIGINAL_PATH
-from test_parite_x45 import ALLIANCE_LIST_KEYS, SET_LIKE_KEYS
+from test_parite_x45 import (
+    ALLIANCE_LIST_KEYS, SET_LIKE_KEYS, retirer_cles_hors_original,
+)
 
 SAVES_DIR = Path(__file__).resolve().parents[1] / "parties_en_cours"
 RANDOM_SEED = 20260722
@@ -118,7 +120,7 @@ class TestPariteAchats(unittest.TestCase):
     def compare_states(self, game, state, label):
         self.assertEqual(
             self.as_json(game.build_game_payload()),
-            self.as_json(state.to_payload()),
+            retirer_cles_hors_original(self, self.as_json(state.to_payload())),
             f"etat divergent apres l'achat '{label}'",
         )
 

@@ -56,6 +56,30 @@ ALLIANCE_LIST_KEYS = {
 }
 
 
+# Cles d'etat nees APRES x45-original.py : la reference figee ne les produit
+# pas. Les tests de parite contre l'original les retirent du payload moteur,
+# mais seulement apres avoir verifie qu'elles sont vides — sinon la
+# comparaison masquerait une vraie divergence de mise en place ou d'achat.
+CLES_ABSENTES_DE_L_ORIGINAL = ("ruin_territory_ids",)
+# Meme chose dans les instantanes de replay, ou la cle porte un autre nom.
+CLES_D_INSTANTANE_ABSENTES_DE_L_ORIGINAL = ("ruins",)
+
+
+def retirer_cles_hors_original(test, payload):
+    for cle in CLES_ABSENTES_DE_L_ORIGINAL:
+        valeur = payload.pop(cle, None)
+        test.assertFalse(valeur, f"'{cle}' devrait etre vide face a x45-original")
+    for instantane in payload.get("replay_history", []):
+        if not isinstance(instantane, dict):
+            continue
+        for cle in CLES_D_INSTANTANE_ABSENTES_DE_L_ORIGINAL:
+            valeur = instantane.pop(cle, None)
+            test.assertFalse(
+                valeur, f"'{cle}' devrait etre vide dans les instantanes de replay",
+            )
+    return payload
+
+
 def iter_save_files():
     return sorted(SAVES_DIR.glob("*.json"))
 

@@ -547,6 +547,7 @@ def reset_economy_state(state: GameState) -> None:
     state.industrial_capture_counts = {}
     state.cultural_center_ages = {}
     state.cultural_capture_counts = {}
+    state.ruin_territory_ids = set()
     state.university_territory_ids = set()
     state.university_capture_counts = {}
     state.university_ages = {}
@@ -630,6 +631,7 @@ def assign_initial_economic_structures(state: GameState, rng=random) -> None:
     state.industrial_capture_counts = {}
     state.cultural_center_ages = {}
     state.cultural_capture_counts = {}
+    state.ruin_territory_ids = set()
     state.university_territory_ids = set()
     state.university_capture_counts = {}
     if not state.territories:

@@ -27,7 +27,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from moteur import actions, mise_en_place
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from test_parite_x45 import ALLIANCE_LIST_KEYS, SET_LIKE_KEYS
+from test_parite_x45 import (
+    ALLIANCE_LIST_KEYS, SET_LIKE_KEYS, retirer_cles_hors_original,
+)
 
 RACINE = Path(__file__).resolve().parents[1]
 MAPS_DIR = RACINE / "cartes_sauvegardees"
@@ -173,7 +175,7 @@ class TestPariteMiseEnPlace(unittest.TestCase):
 
                     self.assertEqual(
                         self.as_json(self.game.build_game_payload()),
-                        self.as_json(state.to_payload()),
+                        retirer_cles_hors_original(self, self.as_json(state.to_payload())),
                         "etat divergent apres la mise en place",
                     )
 

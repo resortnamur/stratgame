@@ -411,6 +411,8 @@ def envoyer_mission(state: GameState, terr: Territory) -> AchatResult:
 def construire_centre_culturel(state: GameState, terr: Territory) -> AchatResult:
     if terr.owner != state.current_player:
         return _refus("Un centre culturel doit etre construit sur un territoire controle.")
+    if regles.has_ruin(state, terr.id):
+        return _refus(f"On ne rebatit pas sur les ruines de {terr.name} : la place est prise pour toujours.")
     if not regles.can_add_cultural_center(state, terr.id):
         return _refus(f"Maximum atteint : un seul centre culturel sur {terr.name}.")
     if not spend_player_money(state, state.current_player, regles.CULTURAL_CENTER_COST):
@@ -524,8 +526,6 @@ def corrompre_territoire(state: GameState, terr: Territory) -> AchatResult:
     state.submitted_territory_overlords.pop(terr.id, None)
     state.submitted_territory_created_turns.pop(terr.id, None)
     terr.owner = state.current_player
-    if current_is_commercial_city:
-        regles.enforce_commercial_city_cultural_center_limit(state)
     regles.refresh_last_stand_bonus_state(state)
     regles.enforce_last_stand_bonus_limits(state)
     elimination_note = ""

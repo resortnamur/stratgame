@@ -34,6 +34,10 @@ from .etat import GameState, MAX_REPLAY_SNAPSHOTS, Territory, sanitize_major_eve
 # ----------------------------------------------------------------------
 
 MAX_CULTURAL_CENTERS_PER_TERRITORY = 1
+# La ruine que laisse un centre culturel detruit : un rendement fixe, sans
+# rapport avec les voisins du territoire ni avec l'anciennete du batiment.
+RUIN_INCOME = 20
+RUIN_CULTURE = 5
 INITIAL_CAPITAL_REGIMENTS = 6
 
 RELIGIONS = [
@@ -98,6 +102,12 @@ NATION_INCOME_DIVISOR = 10
 PRECIOUS_MINERAL_MINE_INCOME = 100
 RELIGIOUS_INCOME_BONUS_PER_TERRITORY = 2
 RELIGIOUS_REINFORCEMENT_TERRITORIES_PER_BONUS = 3
+# Victoire culturelle : ecraser la culture de tous ses rivaux. Le rapport ne
+# suffit pas — un adversaire a zero rendrait la victoire immediate — d'ou le
+# plancher de culture a atteindre en plus.
+CULTURE_VICTORY_RATIO = 20
+AI_CULTURE_VICTORY_RATIO = 10
+CULTURE_VICTORY_MIN_POINTS = 100
 # Victoire religieuse : part de la carte que la religion nationale doit couvrir.
 NATIONAL_RELIGION_VICTORY_RATIO = 0.9
 AI_NATIONAL_RELIGION_VICTORY_RATIO = 0.75
@@ -547,6 +557,7 @@ def build_replay_snapshot(state: GameState, label: str = "") -> dict:
         "airports": sorted(int(tid) for tid in state.airport_territory_ids),
         "ports": sorted(int(tid) for tid in state.port_territory_ids),
         "cultural_centers": sorted(int(tid) for tid in state.cultural_center_ages),
+        "ruins": sorted(int(tid) for tid in state.ruin_territory_ids),
         "universities": sorted(int(tid) for tid in state.university_territory_ids),
         "temples": sorted(int(tid) for tid in state.temple_territory_ids),
         "sanctuaries": sorted(int(tid) for tid in state.sanctuary_territory_ids),
@@ -587,6 +598,7 @@ def replay_snapshot_signature(snapshot: dict) -> tuple:
         tuple(snapshot.get("airports", [])),
         tuple(snapshot.get("ports", [])),
         tuple(snapshot.get("cultural_centers", [])),
+        tuple(snapshot.get("ruins", [])),
         tuple(snapshot.get("universities", [])),
         tuple(snapshot.get("temples", [])),
         tuple(snapshot.get("sanctuaries", [])),
@@ -707,32 +719,6 @@ def sanitize_religion_state(state: GameState) -> None:
         and int(religion_id) in used_religions
         and not is_territory_tax_haven_immune_to_religion(state, int(tid))
     }
-
-
-def enforce_commercial_city_cultural_center_limit(
-    state: GameState, player: Optional[int] = None,
-) -> None:
-    players = [player] if player is not None else sorted(state.commercial_city_players)
-    valid_ids = set(range(len(state.territories)))
-    for cc_player in players:
-        if not is_commercial_city_player(state, cc_player):
-            continue
-        capital_id = get_commercial_city_capital_id(state, cc_player)
-        owned_with_centers = [
-            tid for tid in state.cultural_center_ages
-            if tid in valid_ids
-            and state.territories[tid].owner == cc_player
-            and state.cultural_center_ages.get(tid)
-        ]
-        if capital_id is None:
-            continue
-        for tid in owned_with_centers:
-            if tid != capital_id:
-                state.cultural_center_ages.pop(tid, None)
-                state.cultural_capture_counts.pop(tid, None)
-        if state.cultural_center_ages.get(capital_id):
-            state.cultural_center_ages[capital_id] = [max(state.cultural_center_ages.get(capital_id, [0]))]
-            state.cultural_capture_counts.setdefault(capital_id, 0)
 
 
 def enforce_commercial_city_wonder_exclusivity(state: GameState) -> None:
@@ -871,6 +857,9 @@ def sanitize_economy_state(state: GameState) -> None:
         tid: max(0, int(state.cultural_capture_counts.get(tid, 0)))
         for tid in state.cultural_center_ages
     }
+    state.ruin_territory_ids = {
+        int(tid) for tid in state.ruin_territory_ids if int(tid) in valid_ids
+    }
     state.university_territory_ids = {
         tid for tid in state.university_territory_ids
         if tid in valid_ids
@@ -909,7 +898,6 @@ def sanitize_economy_state(state: GameState) -> None:
         and int(tid) in valid_ids
     }
     refresh_destroyed_commercial_cities(state)
-    enforce_commercial_city_cultural_center_limit(state, state.current_player)
     refresh_last_stand_bonus_state(state)
     enforce_commercial_city_wonder_exclusivity(state)
     for player in range(state.num_players):
@@ -1170,6 +1158,9 @@ def calculate_player_income(state: GameState, player: int) -> int:
         if 0 <= tid < len(state.territories) and state.territories[tid].owner == player
     )
     income += owned_mines * PRECIOUS_MINERAL_MINE_INCOME
+    # Les ruines rendent un montant fixe, comme les mines : ni multiplie par
+    # la capitale, ni divise par le statut de nation.
+    income += get_player_ruin_count(state, player) * RUIN_INCOME
     return income
 
 
@@ -1466,6 +1457,25 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
             )
 
     for owner in sorted(owners):
+        culture = calculate_player_culture(state, owner)
+        if culture < CULTURE_VICTORY_MIN_POINTS:
+            continue
+        rivals = [
+            rival for rival in owners
+            if rival != owner and not is_onu_player(state, rival)
+        ]
+        if not rivals:
+            continue
+        ratio = AI_CULTURE_VICTORY_RATIO if is_ai_player(state, owner) else CULTURE_VICTORY_RATIO
+        best_rival_culture = max(calculate_player_culture(state, rival) for rival in rivals)
+        if culture >= ratio * best_rival_culture:
+            return accept_winner(
+                owner,
+                f"ecrase la culture de tous ses rivaux : {culture} points, "
+                f"soit au moins {ratio} fois le meilleur adversaire ({best_rival_culture})",
+            )
+
+    for owner in sorted(owners):
         if all(t.owner == owner for t in state.territories):
             return accept_winner(owner, "a conquis tous les territoires, sanctuaires ONU compris")
 
@@ -1521,6 +1531,33 @@ def get_cultural_center_count(state: GameState, territory_id: int) -> int:
     return len(state.cultural_center_ages.get(territory_id, []))
 
 
+def has_ruin(state: GameState, territory_id: int) -> bool:
+    return territory_id in state.ruin_territory_ids
+
+
+def add_ruin(state: GameState, territory_id: int) -> bool:
+    """Transforme un centre culturel detruit en ruine.
+
+    Un territoire ne porte jamais plus d'une ruine, et une ruine ne
+    disparait jamais : elle suit le territoire d'un proprietaire a l'autre.
+    """
+    if not (0 <= territory_id < len(state.territories)):
+        return False
+    if territory_id in state.ruin_territory_ids:
+        return False
+    state.ruin_territory_ids.add(territory_id)
+    return True
+
+
+def get_player_ruin_count(state: GameState, player: int) -> int:
+    if player < 0 or is_onu_player(state, player):
+        return 0
+    return sum(
+        1 for tid in state.ruin_territory_ids
+        if 0 <= tid < len(state.territories) and state.territories[tid].owner == player
+    )
+
+
 def get_cultural_center_multiplier(age: int) -> int:
     if age >= 100:
         return 10
@@ -1532,11 +1569,15 @@ def get_cultural_center_multiplier(age: int) -> int:
 
 
 def calculate_territory_culture(state: GameState, territory: Territory) -> int:
-    ages = state.cultural_center_ages.get(territory.id, [])
-    if territory.owner == state.onu_player_id or not ages:
+    if territory.owner == state.onu_player_id:
         return 0
+    ages = state.cultural_center_ages.get(territory.id, [])
     base = max(1, len(territory.neighbors))
-    return sum(base * get_cultural_center_multiplier(age) for age in ages)
+    culture = sum(base * get_cultural_center_multiplier(age) for age in ages)
+    if has_ruin(state, territory.id):
+        # La ruine rend ses points fixes : ni voisins, ni anciennete.
+        culture += RUIN_CULTURE
+    return culture
 
 
 def calculate_player_culture(state: GameState, player: int) -> int:
@@ -1682,7 +1723,12 @@ def register_special_capture(state: GameState, territory_id: int) -> List[str]:
             removed = len(state.cultural_center_ages.get(territory_id, []))
             state.cultural_center_ages.pop(territory_id, None)
             state.cultural_capture_counts.pop(territory_id, None)
-            messages.append(f"{removed} centre(s) culturel(s) de {terr_name} detruit(s) apres 3 captures.")
+            # Le centre ne disparait pas : il devient une ruine, definitive.
+            add_ruin(state, territory_id)
+            messages.append(
+                f"{removed} centre(s) culturel(s) de {terr_name} detruit(s) apres 3 captures : "
+                f"il n'en reste qu'une ruine ({RUIN_INCOME} ecu(s) et {RUIN_CULTURE} points de culture par tour)."
+            )
         else:
             state.cultural_capture_counts[territory_id] = count
             messages.append(f"Centres culturels de {terr_name}: capture {count}/3.")
@@ -2672,8 +2718,6 @@ def resolve_attack_once(
                 special_capture_messages.insert(0, f"{dst.name} redevient la capitale de J{attacker + 1}: revenu x10 restaure.")
             else:
                 special_capture_messages.insert(0, f"{dst.name} est capturee : elle perd son statut de capitale de J{original_capital_owner + 1}.")
-        if is_commercial_city_player(state, attacker):
-            enforce_commercial_city_cultural_center_limit(state, attacker)
 
         if submit_instead_of_annex:
             forced_by_limit = should_force_submit_for_nation_limit(state, attacker)
@@ -3000,21 +3044,12 @@ def add_temple(state: GameState, territory_id: int) -> bool:
     return True
 
 
-def count_commercial_city_cultural_centers(state: GameState, player: int) -> int:
-    if not is_commercial_city_player(state, player):
-        return 0
-    capital_id = get_commercial_city_capital_id(state, player)
-    return get_cultural_center_count(state, capital_id) if capital_id is not None else 0
-
-
 def can_add_cultural_center(state: GameState, territory_id: int) -> bool:
     if not (0 <= territory_id < len(state.territories)):
         return False
-    owner = state.territories[territory_id].owner
-    if is_commercial_city_player(state, owner):
-        capital_id = get_commercial_city_capital_id(state, owner)
-        if territory_id != capital_id or count_commercial_city_cultural_centers(state, owner) >= 1:
-            return False
+    if has_ruin(state, territory_id):
+        # La ruine occupe la place : on ne rebatit pas sur ses pierres.
+        return False
     return get_cultural_center_count(state, territory_id) < MAX_CULTURAL_CENTERS_PER_TERRITORY
 
 
@@ -3365,7 +3400,6 @@ def transfer_territory_to_commercial_city(state: GameState, territory_id: int, p
     state.submitted_territory_overlords.pop(territory_id, None)
     state.submitted_territory_created_turns.pop(territory_id, None)
     state.territories[territory_id].owner = player
-    enforce_commercial_city_cultural_center_limit(state, player)
     if previous_owner >= 0 and not any(t.owner == previous_owner for t in state.territories):
         mark_eliminated_player_if_human(state, previous_owner)
         refresh_eliminated_human_players(state)

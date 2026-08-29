@@ -183,6 +183,8 @@ class GameState:
     industrial_capture_counts: Dict[int, int] = field(default_factory=dict)
     cultural_center_ages: Dict[int, List[int]] = field(default_factory=dict)
     cultural_capture_counts: Dict[int, int] = field(default_factory=dict)
+    # Un centre culturel detruit laisse une ruine, que rien ne detruit jamais.
+    ruin_territory_ids: Set[int] = field(default_factory=set)
     university_territory_ids: Set[int] = field(default_factory=set)
     university_capture_counts: Dict[int, int] = field(default_factory=dict)
     university_ages: Dict[int, int] = field(default_factory=dict)
@@ -591,6 +593,7 @@ class GameState:
         self.industrial_capture_counts = {int(k): int(v) for k, v in payload.get("industrial_capture_counts", legacy_counts).items()}
         self.cultural_center_ages = {int(k): [int(age) for age in ages] for k, ages in payload.get("cultural_center_ages", {}).items()}
         self.cultural_capture_counts = {int(k): int(v) for k, v in payload.get("cultural_capture_counts", {}).items()}
+        self.ruin_territory_ids = {int(x) for x in payload.get("ruin_territory_ids", [])}
         self.university_territory_ids = {int(x) for x in payload.get("university_territory_ids", [])}
         self.university_capture_counts = {int(k): int(v) for k, v in payload.get("university_capture_counts", {}).items()}
         self.university_ages = {int(k): max(0, int(v)) for k, v in payload.get("university_ages", {}).items()}
@@ -823,6 +826,7 @@ class GameState:
             "industrial_capture_counts": {str(k): int(v) for k, v in self.industrial_capture_counts.items()},
             "cultural_center_ages": {str(k): [int(age) for age in ages] for k, ages in self.cultural_center_ages.items()},
             "cultural_capture_counts": {str(k): int(v) for k, v in self.cultural_capture_counts.items()},
+            "ruin_territory_ids": sorted(self.ruin_territory_ids),
             "university_territory_ids": sorted(self.university_territory_ids),
             "university_capture_counts": {str(k): int(v) for k, v in self.university_capture_counts.items()},
             "university_ages": {str(k): int(v) for k, v in self.university_ages.items()},
