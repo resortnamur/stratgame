@@ -1078,8 +1078,14 @@ function afficherMenacesVictoire() {
     const franchis = paliers.map((palier) => {
       const pion = `<span class="pion" style="background:${rgb(couleurJoueur(palier.joueur))}"></span>`;
       const moyen = LIBELLES_MENACES[palier.condition] || palier.condition;
+      // Chaque palier franchi coupe l'empire de son auteur en deux, sauf le
+      // dernier : la moitié la plus lointaine part à un nouveau joueur IA.
+      const scission = palier.scission
+        ? ` <span class="scission-palier">— scindé : ${palier.scission.territoires} territoire(s)`
+          + ` à ${nomDuJoueur(palier.scission.nouveau_joueur)}</span>`
+        : "";
       return `<li class="palier">${pion}${nomDuJoueur(palier.joueur)} — <strong>${moyen}</strong>${bonus(palier.condition)}`
-        + ` <span class="tour-palier">(tour ${palier.tour})</span></li>`;
+        + ` <span class="tour-palier">(tour ${palier.tour})</span>${scission}</li>`;
     });
     entete = `<p class='menace-calme'>${paliers.length}/${total} paliers franchis. ${reste}</p>`
       + "<ul class='liste-paliers'>" + franchis.join("") + "</ul>";

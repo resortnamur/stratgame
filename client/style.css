@@ -98,6 +98,7 @@ header {
   font-size: 12px;
 }
 .liste-paliers .tour-palier { color: rgb(150, 165, 185); }
+.liste-paliers .scission-palier { color: rgb(220, 150, 120); }
 
 .liste-menaces { list-style: none; margin: 0; padding: 0; }
 .liste-menaces .menace {

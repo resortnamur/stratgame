@@ -1767,11 +1767,120 @@ def find_satisfied_victory_conditions(state: GameState) -> List[Tuple[str, int, 
     return satisfied
 
 
-def register_victory_milestones(state: GameState) -> List[dict]:
+def get_split_origin_territory_id(state: GameState, player: int) -> Optional[int]:
+    """D'ou se mesure l'eloignement quand un empire se coupe en deux.
+
+    La capitale, ordinaire ou marchande. A defaut — elle peut etre tombee,
+    et la version simplifiee n'en connait aucune — le territoire le mieux
+    garni en regiments fait office de coeur d'empire.
+    """
+    capital_id = get_active_regular_capital_id_for_player(state, player)
+    if capital_id is not None:
+        return capital_id
+    if is_commercial_city_player(state, player):
+        capital_id = get_commercial_city_capital_id(state, player)
+        if (
+            capital_id is not None
+            and 0 <= capital_id < len(state.territories)
+            and state.territories[capital_id].owner == player
+        ):
+            return capital_id
+    owned = [terr for terr in state.territories if terr.owner == player]
+    if not owned:
+        return None
+    return max(owned, key=lambda terr: (terr.regiments, -terr.id)).id
+
+
+def choose_farthest_territories_from_capital(
+    state: GameState, player: int, count: int,
+) -> List[Territory]:
+    """Les ``count`` territoires du joueur les plus loin de sa capitale.
+
+    L'eloignement se compte en sauts *a l'interieur de l'empire* : une
+    province coupee du coeur par une terre etrangere ou par la mer est hors
+    d'atteinte, donc plus lointaine que tout. La capitale, a distance nulle,
+    est toujours la derniere a partir : celui qui se scinde garde son siege.
+    """
+    owned_ids = [terr.id for terr in state.territories if terr.owner == player]
+    if count <= 0 or not owned_ids:
+        return []
+
+    owned_set = set(owned_ids)
+    origin_id = get_split_origin_territory_id(state, player)
+    distances: Dict[int, int] = {}
+    if origin_id is not None and origin_id in owned_set:
+        distances[origin_id] = 0
+        frontier = [origin_id]
+        while frontier:
+            suivants: List[int] = []
+            for tid in frontier:
+                for neighbor_id in state.territories[tid].neighbors:
+                    if neighbor_id in owned_set and neighbor_id not in distances:
+                        distances[neighbor_id] = distances[tid] + 1
+                        suivants.append(neighbor_id)
+            frontier = suivants
+
+    injoignable = len(owned_ids) + 1
+    ordre = sorted(owned_ids, key=lambda tid: (-distances.get(tid, injoignable), tid))
+    return [state.territories[tid] for tid in ordre[: min(count, len(owned_ids))]]
+
+
+def split_empire_after_milestone(
+    state: GameState, player: int, rng=random,
+) -> Optional[dict]:
+    """Coupe en deux l'empire de celui qui vient de franchir un palier.
+
+    Un premier palier franchi lancait son auteur vers tous les suivants :
+    l'avance qui l'avait porte la ne faisait que grandir. Desormais elle se
+    paie. La moitie de l'empire la plus eloignee de la capitale fait
+    secession et passe a un nouveau joueur IA, qui emporte la moitie du
+    tresor — autant de perdu pour son ancien maitre — et le meme niveau de
+    science, que l'ancien maitre conserve aussi. La culture ne se partage
+    pas : elle se recompte de part et d'autre a partir des amenagements
+    restes sur les territoires de chacun.
+
+    Le point de victoire, lui, reste acquis a celui qui l'a decroche.
+
+    Retourne le detail de la scission, ou ``None`` si l'empire etait trop
+    petit pour se couper en deux.
+    """
+    owned = [terr for terr in state.territories if terr.owner == player]
+    if len(owned) < 2:
+        # Un territoire unique ne se coupe pas en deux.
+        return None
+    secession = choose_farthest_territories_from_capital(state, player, len(owned) // 2)
+    if not secession:
+        return None
+
+    new_player, _returning_human = allocate_rebel_player(state, rng)
+    for terr in secession:
+        terr.owner = new_player
+
+    money = state.player_money.get(player, 0)
+    part = money // 2
+    state.player_money[player] = money - part
+    state.player_money[new_player] = part
+    state.player_science[new_player] = state.player_science.get(player, 0)
+
+    refresh_eliminated_human_players(state)
+    return {
+        "joueur": int(player),
+        "nouveau_joueur": int(new_player),
+        "territoires": len(secession),
+        "restants": len(owned) - len(secession),
+        "argent": int(part),
+        "science": int(state.player_science[new_player]),
+    }
+
+
+def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
     """Enregistre les paliers nouvellement franchis et distribue les points.
 
     Un palier deja franchi ne se rejoue jamais : que le meme joueur ou un
     autre remplisse a nouveau la condition ne change plus rien.
+
+    Chaque palier franchi coupe en deux l'empire de son auteur, sauf celui
+    qui met fin a la partie : voir ``split_empire_after_milestone``.
     """
     crossed = get_crossed_victory_conditions(state)
     nouveaux: List[dict] = []
@@ -1807,6 +1916,21 @@ def register_victory_milestones(state: GameState) -> List[dict]:
             f"Il marque un point de victoire ({get_victory_points(state, owner)} au total). "
             + suite
         ))
+        # La partie continue : le palier se paie d'une scission. Inutile de
+        # couper en deux un empire qui vient de gagner, ni celui qui tient
+        # deja toute la carte — la partie s'acheve dans les deux cas.
+        if restants and get_bloc_owning_everything(state) is None:
+            scission = split_empire_after_milestone(state, owner, rng)
+            if scission:
+                palier["scission"] = scission
+                record_major_event(state, (
+                    f"Tour {state.turn}: SCISSION DE L'EMPIRE de J{owner + 1} apres son palier. "
+                    f"{scission['territoires']} territoire(s), la moitie la plus eloignee de sa "
+                    f"capitale, font secession et forment J{scission['nouveau_joueur'] + 1} (IA), "
+                    f"qui emporte {scission['argent']} ecu(s) et le meme niveau de science "
+                    f"({scission['science']}). J{owner + 1} garde sa capitale, "
+                    f"{scission['restants']} territoire(s) et son point de victoire."
+                ))
     return nouveaux
 
 
