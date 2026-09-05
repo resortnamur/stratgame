@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import math
 import random
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from . import regles
@@ -36,13 +36,14 @@ ONU_MANIPULATION_COST_PER_REGIMENT = 50
 SCIENCE_ONU_MANIPULATION_THRESHOLD = 50
 SCIENCE_BRIDGE_THRESHOLD = 150
 SCIENCE_TAX_HAVEN_INTEGRATION_THRESHOLD = 200
-MISSILE_COST = 200
-SCIENCE_MISSILE_THRESHOLD = 50
-SCIENCE_MISSILE_RANGE_THRESHOLD = 100
-SCIENCE_MISSILE_TOTAL_THRESHOLD = 200
-# Cinq centimetres sur un ecran standard (96 dpi), mesures comme les
-# distances des expeditions maritimes et des ponts.
-MISSILE_RANGE_PX = 190.0
+# Le missile est aussi une arme des IA : ses constantes vivent dans
+# ``regles`` (comme MISSION_COST), la boutique les relaie sous leurs noms
+# historiques.
+MISSILE_COST = regles.MISSILE_COST
+SCIENCE_MISSILE_THRESHOLD = regles.SCIENCE_MISSILE_THRESHOLD
+SCIENCE_MISSILE_RANGE_THRESHOLD = regles.SCIENCE_MISSILE_RANGE_THRESHOLD
+SCIENCE_MISSILE_TOTAL_THRESHOLD = regles.SCIENCE_MISSILE_TOTAL_THRESHOLD
+MISSILE_RANGE_PX = regles.MISSILE_RANGE_PX
 ALLIANCE_COST_PER_TERRITORY = 20
 OFFENSIVE_ALLIANCE_COST_PER_TERRITORY = 25
 
@@ -170,6 +171,7 @@ def cleanup_removed_ai_player(state: GameState, ai_player: int) -> None:
     state.commercial_city_capital_ids.pop(ai_player, None)
     state.ai_personalities.pop(ai_player, None)
     state.ai_current_behavior.pop(ai_player, None)
+    state.ai_last_missile_turns.pop(ai_player, None)
     state.player_science.pop(ai_player, None)
     state.culture_expansion_milestones.pop(ai_player, None)
     state.active_alliances = {
@@ -613,18 +615,10 @@ def pont_offert_par_la_forge(state: GameState, territory_a: int, territory_b: in
 def get_missile_tier(state: GameState, player: int) -> int:
     """La puissance du missile ouverte a ce joueur par sa science.
 
-    0 : aucun missile. 1 : sur un territoire adverse voisin. 2 : jusqu'a
-    ``MISSILE_RANGE_PX`` de ses propres terres. 3 : n'importe ou sur la
-    carte, et le territoire est rase.
+    Le palier est une regle du jeu, partagee avec la doctrine des IA :
+    cf. ``regles.get_player_missile_tier``.
     """
-    science = regles.get_player_science(state, player)
-    if science >= SCIENCE_MISSILE_TOTAL_THRESHOLD:
-        return 3
-    if science >= SCIENCE_MISSILE_RANGE_THRESHOLD:
-        return 2
-    if science >= SCIENCE_MISSILE_THRESHOLD:
-        return 1
-    return 0
+    return regles.get_player_missile_tier(state, player)
 
 
 def calculate_missile_regiment_losses(regiments: int, tier: int) -> int:
@@ -641,13 +635,35 @@ def calculate_missile_regiment_losses(regiments: int, tier: int) -> int:
     return min(survivors_max, math.ceil(regiments / 2))
 
 
-def tirer_missile(
+@dataclass
+class MissileStrike:
+    """Le detail d'un tir de missile, pour le raconter et l'animer.
+
+    ``src_id`` est le territoire du tireur le plus proche de la cible : la
+    regle ne s'en sert pas (la portee se mesure depuis toutes ses terres),
+    il ne sert qu'a donner une origine au trait qui traverse la carte.
+    """
+
+    player: int
+    dst_id: int
+    tier: int
+    regiments_before: int
+    regiments_after: int
+    losses: int
+    src_id: Optional[int] = None
+    destroyed: List[str] = field(default_factory=list)
+    message: str = ""
+
+
+def tirer_missile_detaille(
     state: GameState, terr: Territory, cell_width: float, cell_height: float,
-) -> AchatResult:
-    """Tire un missile sur un territoire adverse.
+) -> Tuple[AchatResult, Optional[MissileStrike]]:
+    """Tire un missile sur un territoire adverse, et raconte le tir.
 
     La science commande la portee et la puissance (cf. ``get_missile_tier``).
-    Le missile ne prend jamais le territoire : il ne fait que detruire.
+    Le missile ne prend jamais le territoire : il ne fait que detruire. Le
+    second element n'existe qu'en cas de tir reussi ; il porte de quoi
+    rejouer la frappe cote client.
     """
     player = state.current_player
     science = regles.get_player_science(state, player)
@@ -656,21 +672,21 @@ def tirer_missile(
         return _refus(
             f"Missile verrouille : {SCIENCE_MISSILE_THRESHOLD} points de science requis "
             f"(vous en avez {science})."
-        )
+        ), None
     if terr.owner == player:
-        return _refus("Un missile se tire sur un territoire adverse, pas sur le sien.")
+        return _refus("Un missile se tire sur un territoire adverse, pas sur le sien."), None
     if terr.owner >= 0 and regles.player_controls_wonder(state, terr.owner, "selene_dome"):
         return _refus(
             f"Missile intercepte : le {regles.get_wonder_name('selene_dome')} protege "
             f"tous les territoires de J{terr.owner + 1}."
-        )
+        ), None
 
     if tier == 1 and not regles.is_territory_adjacent_to_player(state, terr.id, player):
         return _refus(
             f"{terr.name} est hors de portee : a {SCIENCE_MISSILE_THRESHOLD} points de science, "
             f"le missile ne frappe qu'un territoire voisin d'un des votres. "
             f"Il faut {SCIENCE_MISSILE_RANGE_THRESHOLD} points pour tirer plus loin."
-        )
+        ), None
     if tier == 2:
         distance = regles.get_distance_to_nearest_owned_territory(
             state, terr.id, player, cell_width, cell_height,
@@ -680,31 +696,53 @@ def tirer_missile(
                 f"{terr.name} est hors de portee : le missile porte a "
                 f"{MISSILE_RANGE_PX:.0f} pixels de vos terres. "
                 f"Il faut {SCIENCE_MISSILE_TOTAL_THRESHOLD} points de science pour frapper partout."
-            )
+            ), None
 
     if not spend_player_money(state, player, MISSILE_COST):
-        return _refus(f"Pas assez d'ecus pour tirer un missile : {MISSILE_COST} requis.")
+        return _refus(f"Pas assez d'ecus pour tirer un missile : {MISSILE_COST} requis."), None
 
+    source = regles.get_nearest_owned_territory(
+        state, terr.id, player, cell_width, cell_height,
+    )
     regiments_before = max(0, int(terr.regiments))
     losses = calculate_missile_regiment_losses(regiments_before, tier)
     terr.regiments = regiments_before - losses
+    strike = MissileStrike(
+        player=player,
+        dst_id=terr.id,
+        tier=tier,
+        regiments_before=regiments_before,
+        regiments_after=terr.regiments,
+        losses=losses,
+        src_id=source.id if source is not None else None,
+    )
 
     if tier < 3:
-        return _succes(
+        strike.message = (
             f"Missile tire sur {terr.name} pour {MISSILE_COST} ecu(s) : "
             f"{losses} regiment(s) aneanti(s) sur {regiments_before}, il en reste {terr.regiments}."
         )
+        return _succes(strike.message), strike
 
-    destroyed = regles.destroy_all_amenities(state, terr.id)
+    strike.destroyed = regles.destroy_all_amenities(state, terr.id)
     damage_note = (
-        " Rase : " + ", ".join(destroyed) + "." if destroyed
+        " Rase : " + ", ".join(strike.destroyed) + "." if strike.destroyed
         else " Aucun amenagement a raser."
     )
-    return _succes(
+    strike.message = (
         f"Missile a pleine puissance sur {terr.name} pour {MISSILE_COST} ecu(s) : "
         f"{losses} regiment(s) aneanti(s) sur {regiments_before}, il n'en reste qu'{terr.regiments}."
         + damage_note
     )
+    return _succes(strike.message), strike
+
+
+def tirer_missile(
+    state: GameState, terr: Territory, cell_width: float, cell_height: float,
+) -> AchatResult:
+    """Tire un missile et n'en retourne que le verdict de boutique."""
+    result, _strike = tirer_missile_detaille(state, terr, cell_width, cell_height)
+    return result
 
 
 def construire_pont(

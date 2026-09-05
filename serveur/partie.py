@@ -218,7 +218,13 @@ class SessionPartie:
     # ------------------------------------------------------------------
 
     def sieges(self) -> List[Dict[str, Any]]:
-        """Un descriptif par joueur : humain/IA, actif, nom du reservataire."""
+        """Un descriptif par joueur : humain/IA, actif, nom du reservataire.
+
+        ``doctrine`` accompagne les sieges IA : c'est une donnee d'affichage
+        (le joueur doit pouvoir lire a qui il a affaire), pas un morceau
+        d'etat de partie — elle se deduit du numero de joueur et ne figure
+        donc pas dans le payload de la partie.
+        """
         actifs = set(regles.get_active_players(self.state))
         return [
             {
@@ -226,6 +232,10 @@ class SessionPartie:
                 "ia": regles.is_ai_player(self.state, player),
                 "actif": player in actifs,
                 "nom": self.reservations.get(player, {}).get("nom"),
+                "doctrine": (
+                    regles.get_ai_doctrine(self.state, player)
+                    if regles.is_ai_player(self.state, player) else None
+                ),
             }
             for player in range(self.state.num_players)
         ]

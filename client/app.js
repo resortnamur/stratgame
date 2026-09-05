@@ -92,7 +92,17 @@ const client = {
   // du débarquement — bloque les actions et s'annule si un état plus
   // récent arrive entre-temps.
   expedition: null,
+  // Tir de missile en cours de projection : {srcId, dstId, frappe, debut,
+  // couleur}. Simple surcouche dessinée par-dessus la carte — elle ne
+  // bloque rien et s'efface toute seule à la fin.
+  missile: null,
 };
+
+// Durées de l'animation d'un tir de missile, en millisecondes : le vol,
+// puis l'explosion. Le serveur laisse DELAI_MISSILE_IA_S (2 s) avant la
+// passe suivante d'un tour IA — le total tient dedans.
+const MISSILE_VOL_MS = 900;
+const MISSILE_EXPLOSION_MS = 800;
 
 // Cadence du replay : la vitesse « REPLAY RAPIDE » de x45 (150 ms/étape).
 const DELAI_REPLAY_MS = 150;
@@ -662,6 +672,19 @@ function traiterMessage(message) {
       for (const territoire of message.pas.territoires) {
         etat.territories_state[territoire.id] = territoire;
       }
+      if (message.pas.missile) {
+        // Frappe de missile : elle ouvre le tour de l'IA. La garnison
+        // touchée est déjà à jour ci-dessus ; les aménagements rasés (palier
+        // 3) n'arriveront qu'avec l'état complet de fin de tour, le message
+        // les annonce entre-temps.
+        const frappe = message.pas.missile;
+        journal(`${nomDuJoueur(message.joueur)} tire un missile sur ` +
+                `${etat.territories[frappe.dst_id].name} !`);
+        journal(frappe.message);
+        flash(frappe.message);
+        animerMissile(frappe);
+        break;
+      }
       if (message.pas.expedition) {
         // La traversée d'une expédition maritime IA : le dé à 64 faces a
         // parlé, les passes de débarquement suivent une par une.
@@ -711,6 +734,12 @@ function traiterMessage(message) {
       journalResultat(message);
       toutRafraichir();
       planifierBilans();
+      // Missile acheté en boutique (le nôtre ou celui d'un autre humain) :
+      // l'état est déjà appliqué, l'animation ne fait que le raconter.
+      if (message.resultat && message.resultat.outcome
+          && message.resultat.outcome.missile) {
+        animerMissile(message.resultat.outcome.missile);
+      }
       // Comme x45 : après le dernier déplacement autorisé, le tour se
       // termine tout seul (le joueur ne peut de toute façon plus rien faire).
       if (message.joueur === client.monSiege
@@ -825,11 +854,27 @@ const LIBELLES_PROFILS_IA = {
   variable: "variable",
 };
 
-function personnaliteIA(etat, joueur) {
+// Les doctrines : la seconde moitié du caractère d'une IA. Le profil dit
+// comment elle se bat, la doctrine où passe son argent. Elle arrive avec les
+// sièges (donnée d'affichage), pas avec l'état de la partie.
+const LIBELLES_DOCTRINES_IA = {
+  equilibre: "équilibrée",
+  artificier: "artificier",
+  batisseur: "bâtisseuse",
+  conquerant: "conquérante",
+};
+
+function personnaliteIA(etat, joueur, doctrine) {
   if (!etat) return "";
   const profil = (etat.ai_personalities || {})[String(joueur)];
   if (!profil) return "";
   let libelle = LIBELLES_PROFILS_IA[profil] || profil;
+  // Le caractère d'abord (profil · doctrine), l'humeur du tour ensuite :
+  // « variable · conquérante, ce tour : standard » se lit mieux que
+  // l'inverse, où la doctrine se retrouvait derrière une incise.
+  if (doctrine) {
+    libelle += ` · ${LIBELLES_DOCTRINES_IA[doctrine] || doctrine}`;
+  }
   if (profil === "variable") {
     const humeur = (etat.ai_current_behavior || {})[String(joueur)];
     if (humeur) {
@@ -1812,9 +1857,9 @@ function afficherSieges() {
     if (siege.ia && siege.nom) {
       // Siège humain confié à l'IA : le réservataire garde son nom.
       texte.textContent = `${siege.nom}${siege.joueur === client.monSiege ? " (toi)" : ""}` +
-        ` — IA aux commandes${personnaliteIA(etat, siege.joueur)}`;
+        ` — IA aux commandes${personnaliteIA(etat, siege.joueur, siege.doctrine)}`;
     } else if (siege.ia) {
-      texte.textContent = `IA ${siege.joueur}${personnaliteIA(etat, siege.joueur)}`;
+      texte.textContent = `IA ${siege.joueur}${personnaliteIA(etat, siege.joueur, siege.doctrine)}`;
     } else if (siege.nom) {
       texte.textContent = siege.nom + (siege.joueur === client.monSiege ? " (toi)" : "");
       if (!siege.connecte) {
@@ -2290,6 +2335,175 @@ function dessinerCarte() {
   } else {
     dessinerEtiquettes(contexte, etat, largeurCellule, hauteurCellule);
   }
+  dessinerMissile(contexte, etat, largeurCellule, hauteurCellule);
+}
+
+// Le missile en vol, puis son explosion : une surcouche par-dessus la carte
+// déjà dessinée. Rien n'est mémorisé ici — la fonction lit client.missile et
+// l'horloge, et l'animation la rappelle image par image.
+function dessinerMissile(contexte, etat, largeurCellule, hauteurCellule) {
+  const tir = client.missile;
+  if (!tir) return;
+  const cible = etat.territories[tir.dstId];
+  if (!cible) return;
+  const centre = (territoire) => {
+    const [ligne, colonne] = centreTerritoire(etat, territoire);
+    return [(colonne + 0.5) * largeurCellule, (ligne + 0.5) * hauteurCellule];
+  };
+  const [x1, y1] = centre(cible);
+  const [x0, y0] = tir.srcId !== null && etat.territories[tir.srcId]
+    ? centre(etat.territories[tir.srcId])
+    // Sans territoire de départ (portée totale depuis l'autre bout du
+    // monde), le missile tombe du ciel : il descend à la verticale.
+    : [x1, -60];
+
+  const ecoule = performance.now() - tir.debut;
+  const vol = Math.min(1, ecoule / MISSILE_VOL_MS);
+  const boum = Math.max(0, (ecoule - MISSILE_VOL_MS) / MISSILE_EXPLOSION_MS);
+  // Trajectoire bombée : la perpendiculaire au trait, creusée d'un sixième
+  // de la distance — un missile ne rampe pas au ras du sol.
+  const dx = x1 - x0, dy = y1 - y0;
+  const distance = Math.hypot(dx, dy) || 1;
+  const cx = (x0 + x1) / 2 - (dy / distance) * distance / 6;
+  const cy = (y0 + y1) / 2 + (dx / distance) * distance / 6;
+  const enT = (t) => [
+    (1 - t) * (1 - t) * x0 + 2 * (1 - t) * t * cx + t * t * x1,
+    (1 - t) * (1 - t) * y0 + 2 * (1 - t) * t * cy + t * t * y1,
+  ];
+  const cheminJusqua = (fin) => {
+    contexte.beginPath();
+    contexte.moveTo(x0, y0);
+    for (let t = 0.02; t <= fin; t += 0.02) {
+      const [x, y] = enT(t);
+      contexte.lineTo(x, y);
+    }
+    contexte.stroke();
+  };
+
+  contexte.save();
+  contexte.lineCap = "round";
+  contexte.lineJoin = "round";
+
+  if (vol < 1) {
+    // Le point de chute se signale AVANT l'impact : sans ce viseur, le
+    // joueur voit un trait passer sans savoir ce qui va être touché.
+    const battement = 0.5 + 0.5 * Math.sin(ecoule / 90);
+    const rayonViseur = 20 + 6 * battement;
+    contexte.strokeStyle = `rgba(255,90,70,${0.55 + 0.35 * battement})`;
+    contexte.lineWidth = 3;
+    contexte.beginPath();
+    contexte.arc(x1, y1, rayonViseur, 0, 2 * Math.PI);
+    contexte.stroke();
+    contexte.beginPath();
+    for (const [ax, ay] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+      contexte.moveTo(x1 + ax * (rayonViseur - 7), y1 + ay * (rayonViseur - 7));
+      contexte.lineTo(x1 + ax * (rayonViseur + 7), y1 + ay * (rayonViseur + 7));
+    }
+    contexte.stroke();
+
+    // Route complète en pointillé pâle : d'où ça vient, où ça va.
+    contexte.setLineDash([10, 9]);
+    contexte.strokeStyle = "rgba(255,215,170,0.32)";
+    contexte.lineWidth = 2;
+    cheminJusqua(1);
+    contexte.setLineDash([]);
+
+    // Traînée déjà parcourue : un liseré sombre pour la détacher de la
+    // mer comme de la terre, un cœur incandescent par-dessus.
+    contexte.strokeStyle = "rgba(30,12,0,0.75)";
+    contexte.lineWidth = 8;
+    cheminJusqua(vol);
+    contexte.strokeStyle = "rgba(255,170,60,0.95)";
+    contexte.lineWidth = 4;
+    cheminJusqua(vol);
+
+    const [tx, ty] = enT(vol);
+    const halo = contexte.createRadialGradient(tx, ty, 0, tx, ty, 26);
+    halo.addColorStop(0, "rgba(255,255,225,0.95)");
+    halo.addColorStop(0.4, "rgba(255,170,60,0.55)");
+    halo.addColorStop(1, "rgba(255,120,30,0)");
+    contexte.fillStyle = halo;
+    contexte.beginPath();
+    contexte.arc(tx, ty, 26, 0, 2 * Math.PI);
+    contexte.fill();
+    contexte.fillStyle = "rgb(255,250,225)";
+    contexte.beginPath();
+    contexte.arc(tx, ty, 7, 0, 2 * Math.PI);
+    contexte.fill();
+  } else if (boum <= 1) {
+    // Impact : un éclair blanc très bref, deux ondes de choc qui s'écartent
+    // et un cratère lumineux qui s'éteint.
+    const rayonMax = Math.max(52, Math.min(130, distance / 3));
+    if (boum < 0.18) {
+      const eclair = 1 - boum / 0.18;
+      contexte.fillStyle = `rgba(255,255,240,${0.8 * eclair})`;
+      contexte.beginPath();
+      contexte.arc(x1, y1, 34 * eclair + 10, 0, 2 * Math.PI);
+      contexte.fill();
+    }
+    for (const [depart, epaisseur] of [[0, 7], [0.22, 4], [0.44, 2]]) {
+      const avance = (boum - depart) / (1 - depart);
+      if (avance <= 0) continue;
+      contexte.strokeStyle = `rgba(255,140,50,${(1 - avance) * 0.9})`;
+      contexte.lineWidth = epaisseur;
+      contexte.beginPath();
+      contexte.arc(x1, y1, rayonMax * avance, 0, 2 * Math.PI);
+      contexte.stroke();
+    }
+    const rayonCoeur = 34 * (1 - boum) + 8;
+    const coeur = contexte.createRadialGradient(x1, y1, 0, x1, y1, rayonCoeur);
+    coeur.addColorStop(0, `rgba(255,255,235,${0.95 * (1 - boum)})`);
+    coeur.addColorStop(0.45, `rgba(255,120,40,${0.75 * (1 - boum)})`);
+    coeur.addColorStop(1, "rgba(120,20,0,0)");
+    contexte.fillStyle = coeur;
+    contexte.beginPath();
+    contexte.arc(x1, y1, rayonCoeur, 0, 2 * Math.PI);
+    contexte.fill();
+
+    // Le compte des pertes monte en s'effaçant, juste au-dessus du cratère.
+    if (tir.frappe && tir.frappe.losses > 0) {
+      contexte.globalAlpha = Math.max(0, 1 - boum);
+      contexte.font = "bold 30px system-ui, sans-serif";
+      contexte.textAlign = "center";
+      contexte.lineWidth = 6;
+      contexte.strokeStyle = "rgba(25,10,0,0.9)";
+      contexte.fillStyle = "rgb(255,225,160)";
+      const texte = `-${tir.frappe.losses}`;
+      const y = y1 - 34 - 22 * boum;
+      contexte.strokeText(texte, x1, y);
+      contexte.fillText(texte, x1, y);
+      contexte.globalAlpha = 1;
+    }
+  }
+  contexte.restore();
+}
+
+// Joue le tir puis rend la main. Un seul missile à la fois : un nouveau tir
+// remplace le précédent (l'animation en cours s'arrête d'elle-même, sa
+// boucle voyant que client.missile a changé).
+function animerMissile(frappe) {
+  if (!frappe || !client.etat) return Promise.resolve();
+  const tir = {
+    srcId: frappe.src_id === undefined ? null : frappe.src_id,
+    dstId: frappe.dst_id,
+    frappe,
+    debut: performance.now(),
+  };
+  client.missile = tir;
+  return new Promise((resoudre) => {
+    const image = () => {
+      if (client.missile !== tir) return resoudre();  // un tir plus récent
+      const fini = performance.now() - tir.debut >= MISSILE_VOL_MS + MISSILE_EXPLOSION_MS;
+      if (fini) {
+        client.missile = null;
+        dessinerCarte();
+        return resoudre();
+      }
+      dessinerCarte();
+      requestAnimationFrame(image);
+    };
+    requestAnimationFrame(image);
+  });
 }
 
 function dessinerLiens(contexte, etat, largeurCellule, hauteurCellule) {

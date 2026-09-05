@@ -70,6 +70,9 @@ Serveur vers client :
   passe d'attaque d'un tour IA, a la cadence ``DELAI_PAS_IA_S`` (la vitesse
   « IA rapide » de x45) ; ``territoires`` porte l'etat a jour des deux
   territoires touches, l'etat complet arrivant avec le ``resultat`` final.
+  Un meme ``pas`` peut porter ``expedition`` (traversee maritime) ou
+  ``missile`` (frappe ouvrant le tour, suivie d'une pause
+  ``DELAI_MISSILE_IA_S`` pour laisser jouer l'animation).
 - ``{"type": "refus", "code": "pas_votre_tour"|...}`` — a l'emetteur seul.
 - ``{"type": "question_soumission", "territoire": id, "nom": "...",
      "regiments_vaincus": n}`` — au joueur attaquant seul, pendant une
@@ -125,6 +128,11 @@ DELAI_TOUR_IA_S = 1.0
 # « IA rapide » de x45 (AI_FAST_ACTION_DELAY_MS = 260 ms).
 DELAI_PAS_IA_S = 0.26
 
+# Pause apres un tir de missile IA : le temps que le client joue sa
+# trajectoire et son explosion avant que les attaques reprennent. Sans
+# elle, la frappe passerait sous les passes d'attaque suivantes.
+DELAI_MISSILE_IA_S = 2.0
+
 
 class ConnexionClient:
     """Un client WebSocket relie a une partie (siege humain ou spectateur)."""
@@ -144,11 +152,13 @@ class SallePartie:
     """Les clients connectes a une meme partie + la diffusion."""
 
     def __init__(self, session: SessionPartie, delai_tour_ia: float = DELAI_TOUR_IA_S,
-                 delai_pas_ia: float = DELAI_PAS_IA_S) -> None:
+                 delai_pas_ia: float = DELAI_PAS_IA_S,
+                 delai_missile_ia: float = DELAI_MISSILE_IA_S) -> None:
         self.session = session
         self.connexions: list[ConnexionClient] = []
         self.delai_tour_ia = delai_tour_ia
         self.delai_pas_ia = delai_pas_ia
+        self.delai_missile_ia = delai_missile_ia
         self._tache_ia: Optional[asyncio.Task] = None
         # Question "soumettre ou annexer ?" en cours, par siege (et non par
         # connexion) : une coupure au mauvais moment — un telephone qui met
@@ -198,8 +208,14 @@ class SallePartie:
                 pas, resultat = await asyncio.to_thread(self.session.pas_tour_ia)
                 if pas is not None:
                     await self.diffuser({"type": "pas_ia", "joueur": joueur_ia, "pas": pas})
-                    if self.delai_pas_ia > 0:
-                        await asyncio.sleep(self.delai_pas_ia)
+                    # Un tir de missile s'attarde : le client a une
+                    # trajectoire et une explosion a jouer.
+                    pause = (
+                        self.delai_missile_ia if pas.get("missile")
+                        else self.delai_pas_ia
+                    )
+                    if pause > 0:
+                        await asyncio.sleep(pause)
             await self.diffuser_resultat(joueur_ia, None, resultat)
             await self.sauvegarder_auto()
             if resultat.winner is not None:

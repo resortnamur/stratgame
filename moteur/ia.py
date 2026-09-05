@@ -16,6 +16,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
+from . import achats
 from . import regles
 from .etat import GameState, Territory
 
@@ -23,8 +24,19 @@ COMMERCIAL_CITY_TERRITORY_LIMIT = 10
 
 
 def get_ai_behavior(state: GameState, player: int, rng=random) -> str:
+    """Le comportement de combat d'une IA pour ce tour.
+
+    Son profil le dicte d'ordinaire, mais deux situations passent avant.
+    Une Cite commercante est toujours agressive. Et surtout, quand un rival
+    attaquable touche a la victoire — la meme alerte que celle affichee aux
+    joueurs — l'IA passe en ``very_aggressive`` : rien ne sert d'etre
+    prudent face a quelqu'un qui gagne au tour suivant. L'etat d'urgence
+    l'emporte meme sur la retraite d'un paradis fiscal acculé.
+    """
     if regles.is_commercial_city_player(state, player):
         return "aggressive"
+    if regles.is_ai_player(state, player) and regles.is_ai_facing_victory_alert(state, player):
+        return "very_aggressive"
     if regles.is_ai_player(state, player) and player in state.last_stand_bonus_players:
         return "defensive"
     profile = regles.get_ai_personality(state, player, rng)
@@ -51,13 +63,24 @@ def is_ai_attack_blocked_by_culture(state: GameState, attacker: int, defender: i
 
 def ai_attack_score(
     state: GameState, src: Territory, dst: Territory, behavior: str, rng=random,
-) -> Optional[Tuple[Tuple[int, int, int, int, int], bool]]:
+    priority_target: Optional[int] = None,
+) -> Optional[Tuple[Tuple[int, ...], bool]]:
+    """Note une attaque possible ; ``None`` si le profil la refuse.
+
+    ``priority_target`` est le joueur que le score de menace designe comme
+    le plus dangereux (cf. ``regles.get_ai_priority_target``). Il ne rend
+    aucune attaque legale ou illegale — les garde-fous de chaque profil
+    valent toujours — mais il passe devant tous les autres criteres : a
+    attaques egalement permises, l'IA frappe le meneur.
+    """
     diff = src.regiments - dst.regiments
+    priority = 1 if priority_target is not None and dst.owner == priority_target else 0
     if behavior == "very_aggressive":
         if src.regiments < 2:
             return None
         total_attack = diff >= 2 or src.regiments >= 6
         score = (
+            priority,
             1 if total_attack else 0,
             src.regiments + max(0, -diff),
             diff,
@@ -69,6 +92,7 @@ def ai_attack_score(
             return None
         total_attack = diff >= 6 or (src.regiments >= 8 and rng.random() < 0.18)
         score = (
+            priority,
             1 if total_attack else 0,
             src.regiments,
             diff,
@@ -86,6 +110,7 @@ def ai_attack_score(
             and not regles.is_attack_blocked_by_alliance(state, state.current_player, state.territories[n].owner)
         )
         score = (
+            priority,
             1 if total_attack else 0,
             diff,
             -enemy_pressure,
@@ -97,6 +122,7 @@ def ai_attack_score(
             return None
         total_attack = diff > 10
         score = (
+            priority,
             1 if total_attack else 0,
             diff,
             src.regiments,
@@ -128,7 +154,13 @@ def find_ai_attack(state: GameState, rng=random) -> Optional[Tuple[Territory, Te
     offensive_target = get_offensive_alliance_target_for_ai(state, state.current_player)
     if offensive_target is not None:
         behavior = "very_aggressive"
-    candidates: List[Tuple[Tuple[int, int, int, int, int], Territory, Territory, bool]] = []
+    # Le contrat d'alliance offensive prime : quand un humain a paye pour
+    # designer une cible, l'IA ne va pas courir apres le meneur du moment.
+    priority_target = (
+        None if offensive_target is not None
+        else regles.get_ai_priority_target(state, state.current_player)
+    )
+    candidates: List[Tuple[Tuple[int, ...], Territory, Territory, bool]] = []
 
     for src in state.territories:
         if src.owner != state.current_player:
@@ -152,7 +184,7 @@ def find_ai_attack(state: GameState, rng=random) -> Optional[Tuple[Territory, Te
                 # Les IA ignorent les sanctuaires ONU, sauf si le territoire
                 # attaquant concentre au moins 40 regiments.
                 continue
-            scored = ai_attack_score(state, src, dst, behavior, rng)
+            scored = ai_attack_score(state, src, dst, behavior, rng, priority_target)
             if scored is None:
                 continue
             score, total_attack = scored
@@ -239,6 +271,102 @@ def iter_ai_expedition_launches(
         yield src, dst
 
 
+def is_missile_target_in_range(
+    state: GameState, terr: Territory, player: int, tier: int,
+    cell_width: float, cell_height: float,
+) -> bool:
+    """La cible est-elle a portee du missile ouvert par ce palier ?
+
+    Meme lecture que la boutique (``achats.tirer_missile``) : voisinage
+    immediat au palier 1, ``regles.MISSILE_RANGE_PX`` au palier 2, toute la
+    carte au palier 3.
+    """
+    if tier >= 3:
+        return True
+    if tier == 1:
+        return regles.is_territory_adjacent_to_player(state, terr.id, player)
+    distance = regles.get_distance_to_nearest_owned_territory(
+        state, terr.id, player, cell_width, cell_height,
+    )
+    return distance is not None and distance <= regles.MISSILE_RANGE_PX
+
+
+def find_ai_missile_target(
+    state: GameState, cell_width: float, cell_height: float, rng=random,
+) -> Optional[Territory]:
+    """Le territoire que l'IA courante doit bombarder ce tour-ci, s'il existe.
+
+    La doctrine est volontairement etroite. Le missile ne sert QUE contre
+    les joueurs humains : entre elles, les IA se battent aux regiments.
+    Il faut la science (une IA entre au palier 1 des
+    ``regles.AI_SCIENCE_MISSILE_THRESHOLD`` points), l'argent garde de cote
+    (cf. ``regles.get_ai_war_chest_target``), une partie deja installee, un
+    missile recharge et le tirage au sort. Le rechargement, la frequence et
+    la garnison minimale visee viennent de la doctrine : les quatre tirent,
+    mais avec une parcimonie graduee — l'artificier des que la rampe est
+    libre, l'equilibre un tour sur deux, le batisseur a contrecoeur, le
+    conquerant presque jamais. Sans cette graduation une partie a huit IA
+    scientifiques deviendrait un tir de barrage continu.
+
+    Parmi les cibles a portee, celle ou le tir fait le plus mal : la plus
+    grosse garnison d'abord, puis le territoire le plus riche.
+    """
+    player = state.current_player
+    if not regles.is_ai_player(state, player) or regles.is_onu_player(state, player):
+        return None
+    if regles.is_colonized_player(state, player):
+        return None
+    if regles.is_simple_mode(state):
+        return None
+    if not regles.get_ai_doctrine_setting(state, player, "fires_missiles"):
+        return None
+    if state.turn < regles.AI_MISSILE_FIRST_TURN:
+        return None
+    tier = regles.get_player_missile_tier(state, player)
+    if tier <= 0:
+        return None
+    if state.player_money.get(player, 0) < regles.MISSILE_COST:
+        return None
+    rechargement = regles.get_ai_doctrine_setting(state, player, "missile_cooldown_turns")
+    derniere = state.ai_last_missile_turns.get(player)
+    if derniere is not None and state.turn - derniere < rechargement:
+        return None
+    if rng.randint(1, regles.get_ai_doctrine_setting(state, player, "missile_denominator")) != 1:
+        return None
+    garnison_minimale = regles.get_ai_doctrine_setting(
+        state, player, "missile_min_target_regiments",
+    )
+
+    candidates: List[Territory] = []
+    for terr in state.territories:
+        if terr.owner < 0 or terr.owner == player:
+            continue
+        if not regles.is_human_player_id(state, terr.owner):
+            continue
+        if regles.is_attack_blocked_by_alliance(state, player, terr.owner):
+            continue
+        if regles.is_territory_protected_from_ai_attacks(state, terr.id):
+            continue
+        if regles.is_submitted_territory(state, terr.id):
+            continue
+        if regles.is_sanctuary_territory(state, terr.id):
+            continue
+        if regles.player_controls_wonder(state, terr.owner, "selene_dome"):
+            continue
+        if terr.regiments < garnison_minimale:
+            continue
+        if not is_missile_target_in_range(state, terr, player, tier, cell_width, cell_height):
+            continue
+        candidates.append(terr)
+    if not candidates:
+        return None
+    return max(candidates, key=lambda terr: (
+        achats.calculate_missile_regiment_losses(terr.regiments, tier),
+        regles.calculate_territory_income(state, terr),
+        -terr.id,
+    ))
+
+
 def shortest_owned_path(state: GameState, start_id: int, target_id: int, owner: int) -> Optional[List[int]]:
     if start_id == target_id:
         return [start_id]
@@ -277,6 +405,17 @@ def compute_ai_move_target(state: GameState, rng=random) -> Optional[Tuple[Terri
         if targeted_frontline:
             frontline_enemies = targeted_frontline
             behavior = "aggressive"
+    else:
+        # Meme raisonnement, mais choisi par l'IA elle-meme : si un joueur
+        # se detache, la concentration de fin de tour se masse face a lui.
+        priority_target = regles.get_ai_priority_target(state, state.current_player)
+        if priority_target is not None:
+            targeted_frontline = [
+                enemy for enemy in frontline_enemies if enemy.owner == priority_target
+            ]
+            if targeted_frontline:
+                frontline_enemies = targeted_frontline
+                behavior = "aggressive"
 
     if not frontline_enemies:
         return None

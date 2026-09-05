@@ -214,6 +214,7 @@ class AiTurnReport:
 
     skipped: bool = False  # joueur courant humain ou partie inactive
     attack_passes: int = 0
+    missile: Optional[achats.MissileStrike] = None
     winner: Optional[int] = None
     winner_reason: str = ""
     move_report: Optional[ia.AiMoveReport] = None
@@ -234,6 +235,23 @@ class AiAttackStep:
     src_id: int
     dst_id: int
     result: regles.AttackResult
+    territoires: List[dict] = field(default_factory=list)
+
+
+@dataclass
+class AiMissileStep:
+    """La frappe de missile d'un tour IA, pour la retransmission en direct.
+
+    Diffusee avant tout le reste du tour : le client anime le trait qui
+    traverse la carte, puis les attaques arrivent passe par passe. Au
+    palier 3 les amenagements rases ne sont pas dans ``territoires`` (le
+    format ne porte que la garnison) : ils apparaissent avec l'etat complet
+    diffuse en fin de tour, le message les annonce entre-temps.
+    """
+
+    src_id: Optional[int]
+    dst_id: int
+    missile: "achats.MissileStrike" = None
     territoires: List[dict] = field(default_factory=list)
 
 
@@ -279,6 +297,23 @@ def play_ai_turn_steps(
     if state.phase != "playing" or not regles.is_ai_player(state, state.current_player):
         report.skipped = True
         return report
+
+    # Doctrine missile : la frappe part avant tout le reste, pour amollir la
+    # garnison visee avant l'assaut. Elle ne vise que des humains et reste
+    # rare (cf. ia.find_ai_missile_target).
+    missile_target = ia.find_ai_missile_target(state, cell_width, cell_height, rng)
+    if missile_target is not None:
+        verdict, strike = achats.tirer_missile_detaille(
+            state, missile_target, cell_width, cell_height,
+        )
+        if verdict.ok and strike is not None:
+            state.ai_last_missile_turns[state.current_player] = state.turn
+            report.missile = strike
+            regles.record_major_event(state, f"Tour {state.turn}: {strike.message}")
+            yield AiMissileStep(
+                strike.src_id, strike.dst_id, strike,
+                [_territoire_snapshot(state.territories[strike.dst_id])],
+            )
 
     # Expeditions maritimes : chaque territoire assez garni tente sa chance
     # avant les attaques terrestres classiques (miroir exact de x45 — meme
@@ -438,6 +473,9 @@ class ActionOutcome:
     # Transport maritime de fin de tour : le resultat de la traversee et les
     # deux territoires touches (source allegee, destination renforcee).
     transport: Optional[dict] = None
+    # Tir de missile : le detail de la frappe, pour que le client la rejoue
+    # (trajectoire, degats) au lieu de n'afficher qu'une ligne de texte.
+    missile: Optional[achats.MissileStrike] = None
 
 
 def _refuse(code: str) -> ActionOutcome:
@@ -712,7 +750,12 @@ def _apply_purchase(
     if achat == "revolte":
         return outcome(achats.financer_revolte(state, terr, rng))
     if achat == "missile":
-        return outcome(achats.tirer_missile(state, terr, cell_width, cell_height))
+        verdict, strike = achats.tirer_missile_detaille(
+            state, terr, cell_width, cell_height,
+        )
+        resultat = outcome(verdict)
+        resultat.missile = strike
+        return resultat
     if achat == "pont":
         other = get_int("territoire_b")
         if other is None or not (0 <= other < len(state.territories)):

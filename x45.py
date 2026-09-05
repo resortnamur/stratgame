@@ -363,6 +363,8 @@ class GraphicalGame:
         self.ai_speed_mode = "normal"
         self.ai_personalities: dict[int, str] = {}
         self.ai_current_behavior: dict[int, str] = {}
+        # Dernier tour ou chaque IA a tire un missile (doctrine du moteur).
+        self.ai_last_missile_turns: dict[int, int] = {}
         self.commercial_city_players: set[int] = set()
         self.commercial_city_capital_ids: dict[int, int] = {}
         self.player_capital_ids: dict[int, int] = {}
@@ -1241,6 +1243,9 @@ class GraphicalGame:
             "eliminated_human_players": list(self.eliminated_human_players),
             "ai_personalities": {str(k): v for k, v in self.ai_personalities.items()},
             "ai_current_behavior": {str(k): v for k, v in self.ai_current_behavior.items()},
+            "ai_last_missile_turns": {
+                str(k): int(v) for k, v in getattr(self, "ai_last_missile_turns", {}).items()
+            },
             "commercial_city_players": list(self.commercial_city_players),
             "commercial_city_capital_ids": {str(k): int(v) for k, v in self.commercial_city_capital_ids.items()},
             "player_capital_ids": {str(k): int(v) for k, v in getattr(self, "player_capital_ids", {}).items()},
@@ -1495,6 +1500,9 @@ class GraphicalGame:
         self.eliminated_human_players = set(int(x) for x in payload.get("eliminated_human_players", []))
         self.ai_personalities = {int(k): v for k, v in payload.get("ai_personalities", {}).items()}
         self.ai_current_behavior = {int(k): v for k, v in payload.get("ai_current_behavior", {}).items()}
+        self.ai_last_missile_turns = {
+            int(k): int(v) for k, v in payload.get("ai_last_missile_turns", {}).items()
+        }
         self.commercial_city_players = set(int(x) for x in payload.get("commercial_city_players", []))
         self.commercial_city_capital_ids = {int(k): int(v) for k, v in payload.get("commercial_city_capital_ids", {}).items()}
         self.player_capital_ids = {int(k): int(v) for k, v in payload.get("player_capital_ids", {}).items()}

@@ -184,6 +184,121 @@ AI_MAINLAND_MIN_TERRITORIES = 10
 ALLIANCE_DURATION_TURNS = 10
 AI_NATION_ALLIANCE_DENOMINATOR = 20
 AI_MOBILIZATION_DENOMINATOR = 100
+# Une forteresse pour la capitale, puis une par tranche de territoires : les
+# IA fortifient leurs frontieres chaudes au lieu de s'arreter a un seul mur.
+AI_TERRITORIES_PER_FORTRESS = 5
+# Meme logique pour le savoir : les universites et les centres culturels ne
+# sont plus limites a un par bloc national. Le quota grandit avec l'empire,
+# ce qui ouvre aux IA les paliers de science (missiles, quatrieme de) et les
+# annexations culturelles jusque-la hors de leur portee.
+AI_TERRITORIES_PER_KNOWLEDGE_BUILDING = 4
+# Ces batiments supplementaires se paient sur le superflu : l'IA n'en achete
+# un que si sa caisse couvre aussi cette reserve, gardee pour les mercenaires.
+# Sans cela elle developperait son savoir en desarmant ses frontieres.
+AI_DEVELOPMENT_SURPLUS_RESERVE = 200
+MISSILE_COST = 200
+SCIENCE_MISSILE_THRESHOLD = 50
+SCIENCE_MISSILE_RANGE_THRESHOLD = 100
+SCIENCE_MISSILE_TOTAL_THRESHOLD = 200
+# Les IA ouvrent le premier palier plus tot que la boutique humaine. Leur
+# science monte lentement — elles batissent peu d'universites, et une
+# universite neuve ne rapporte qu'un point par tour : avec les 50 points de
+# la boutique, aucune IA n'etait armee avant le tour 35 et le premier tir
+# tombait vers le tour 41, apres la fin de la plupart des parties. La portee
+# (100) et la pleine puissance (200) restent au meme prix pour tout le monde.
+AI_SCIENCE_MISSILE_THRESHOLD = 30
+# Cinq centimetres sur un ecran standard (96 dpi), mesures comme les
+# distances des expeditions maritimes et des ponts.
+MISSILE_RANGE_PX = 190.0
+# Doctrine missile des IA. Le tir vise les humains et eux seuls, coute cher
+# et ne se decide pas a la legere : rien avant le tour AI_MISSILE_FIRST_TURN,
+# jamais deux tirs a moins de AI_MISSILE_COOLDOWN_TURNS d'intervalle, une
+# chance sur AI_MISSILE_DENOMINATOR quand toutes les conditions sont reunies,
+# et jamais sur une garnison de moins de AI_MISSILE_MIN_TARGET_REGIMENTS
+# regiments (200 ecus sont mieux places ailleurs). Ces quatre valeurs sont
+# celles de l'equilibre : chaque doctrine a les siennes (AI_DOCTRINE_SETTINGS).
+AI_MISSILE_FIRST_TURN = 12
+AI_MISSILE_COOLDOWN_TURNS = 3
+AI_MISSILE_DENOMINATOR = 2
+AI_MISSILE_MIN_TARGET_REGIMENTS = 5
+# Ecart minimal, sur le score de menace, pour qu'un joueur soit designe
+# comme la cible prioritaire de toutes les IA. En dessous, personne ne se
+# detache assez et chaque IA garde sa logique d'opportunite.
+AI_MENACE_LEAD_MARGIN = 25
+# Epargne dirigee : le magot qu'une IA garde de cote pour ses operations
+# speciales au lieu de tout convertir en mercenaires. Elle ne le constitue
+# que si elle peut s'en servir (science du missile atteinte, un humain
+# encore en jeu) — sinon ce serait de l'argent mort.
+AI_SPECIAL_OPERATIONS_RESERVE = MISSILE_COST
+# Doctrines des IA : la seconde moitie de leur caractere. Le profil
+# (AI_PROFILES) dit comment elles se battent ; la doctrine dit ou passe leur
+# argent, ce qui les rendait jusqu'ici presque interchangeables. Elle se
+# deduit du numero de joueur : stable d'un bout a l'autre de la partie,
+# lisible dans la liste des sieges, et sans rien a stocker — les
+# sauvegardes existantes la retrouvent sans conversion.
+#
+# L'ordre compte cinq entrees pour quatre profils : les deux cycles se
+# decalent, si bien que « agressive » n'est pas toujours artificier.
+AI_DOCTRINES_ORDER = (
+    "equilibre", "artificier", "batisseur", "conquerant", "equilibre",
+)
+AI_DOCTRINE_SETTINGS = {
+    # L'equilibre est le comportement historique : il sert de reference.
+    "equilibre": {
+        "territories_per_fortress": 5,
+        "territories_per_knowledge_building": 4,
+        "development_reserve": 200,
+        "war_chest": MISSILE_COST,
+        "fires_missiles": True,
+        "missile_denominator": 2,
+        "missile_cooldown_turns": 3,
+        "missile_min_target_regiments": 5,
+    },
+    # L'artificier mise tout sur la science : elle lui donne la portee et la
+    # puissance de ses missiles, qu'il tire des que la rampe est libre, sur
+    # des garnisons que les autres jugent trop maigres. Il garde le double du
+    # prix d'un tir en caisse — de quoi enchainer.
+    "artificier": {
+        "territories_per_fortress": 6,
+        "territories_per_knowledge_building": 3,
+        "development_reserve": 200,
+        "war_chest": 2 * MISSILE_COST,
+        "fires_missiles": True,
+        "missile_denominator": 1,
+        "missile_cooldown_turns": 2,
+        "missile_min_target_regiments": 3,
+    },
+    # Le batisseur met son argent dans les murs, les universites et les
+    # centres culturels. Il gagne par la science ou la culture, pas par les
+    # armes — mais c'est justement lui qui ouvre le palier missile le
+    # premier, et il garde desormais de quoi tirer un coup : a contrecoeur,
+    # rarement, jamais pour ouvrir une offensive.
+    "batisseur": {
+        "territories_per_fortress": 3,
+        "territories_per_knowledge_building": 3,
+        "development_reserve": 100,
+        "war_chest": MISSILE_COST,
+        "fires_missiles": True,
+        "missile_denominator": 3,
+        "missile_cooldown_turns": 4,
+        "missile_min_target_regiments": 6,
+    },
+    # Le conquerant ne croit qu'aux regiments : batiments au minimum, tout
+    # le reste en mercenaires, ses piles sont enormes. Il met tout de meme de
+    # cote le prix d'un tir, mais 200 ecus valent deux mercenaires a ses yeux :
+    # il tire le plus rarement de tous, et seulement sur une grosse garnison —
+    # celle qu'il compte assaillir dans la foulee.
+    "conquerant": {
+        "territories_per_fortress": 8,
+        "territories_per_knowledge_building": 8,
+        "development_reserve": 400,
+        "war_chest": MISSILE_COST,
+        "fires_missiles": True,
+        "missile_denominator": 4,
+        "missile_cooldown_turns": 5,
+        "missile_min_target_regiments": 8,
+    },
+}
 SEDITION_DENOMINATOR = 50000
 SUBMITTED_TERRITORY_INSTABILITY_DENOMINATOR = 40
 SUBMITTED_TERRITORY_INTEGRATION_DELAY_TURNS = 20
@@ -321,6 +436,27 @@ def assign_ai_personality_to_player(
 ) -> None:
     state.ai_personalities[player] = profile if profile in AI_PROFILES else rng.choice(AI_PROFILES)
     state.ai_current_behavior.pop(player, None)
+
+
+def get_ai_doctrine(state: GameState, player: int) -> str:
+    """La doctrine economique d'une IA : ou passe son argent.
+
+    Elle se lit sur le numero du joueur (cf. ``AI_DOCTRINES_ORDER``) : rien
+    a tirer au sort, rien a sauvegarder, et elle ne change jamais en cours
+    de partie. Un joueur repris en main par un humain garde la sienne — il
+    n'en fait simplement plus rien.
+    """
+    if player < 0:
+        return "equilibre"
+    return AI_DOCTRINES_ORDER[player % len(AI_DOCTRINES_ORDER)]
+
+
+def get_ai_doctrine_setting(state: GameState, player: int, key: str):
+    """Un reglage de la doctrine d'une IA, avec repli sur l'equilibre."""
+    doctrine = AI_DOCTRINE_SETTINGS.get(get_ai_doctrine(state, player), {})
+    if key in doctrine:
+        return doctrine[key]
+    return AI_DOCTRINE_SETTINGS["equilibre"][key]
 
 
 def get_ai_personality(state: GameState, player: int, rng=random) -> str:
@@ -2225,6 +2361,34 @@ def has_science_level(state: GameState, player: int, threshold: int) -> bool:
 
 def can_player_attack_with_four_dice(state: GameState, player: int) -> bool:
     return has_science_level(state, player, SCIENCE_ATTACK_4_DICE_THRESHOLD)
+
+
+def get_player_missile_tier(state: GameState, player: int) -> int:
+    """La puissance du missile ouverte a ce joueur par sa science.
+
+    0 : aucun missile. 1 : sur un territoire adverse voisin. 2 : jusqu'a
+    ``MISSILE_RANGE_PX`` de ses propres terres. 3 : n'importe ou sur la
+    carte, et le territoire est rase. La boutique (``achats.tirer_missile``)
+    et la doctrine des IA lisent le meme palier.
+
+    Seule l'entree differe : une IA ouvre le palier 1 des
+    ``AI_SCIENCE_MISSILE_THRESHOLD`` points, la ou un humain en demande
+    ``SCIENCE_MISSILE_THRESHOLD`` — sans quoi aucune IA n'est armee avant la
+    toute fin de la partie. Un siege IA repris en main par un humain rentre
+    aussitot dans le rang.
+    """
+    science = get_player_science(state, player)
+    if science >= SCIENCE_MISSILE_TOTAL_THRESHOLD:
+        return 3
+    if science >= SCIENCE_MISSILE_RANGE_THRESHOLD:
+        return 2
+    seuil = (
+        AI_SCIENCE_MISSILE_THRESHOLD if is_ai_player(state, player)
+        else SCIENCE_MISSILE_THRESHOLD
+    )
+    if science >= seuil:
+        return 1
+    return 0
 
 
 # ----------------------------------------------------------------------
@@ -4627,6 +4791,37 @@ def get_distance_to_nearest_owned_territory(
     return best
 
 
+def get_nearest_owned_territory(
+    state: GameState,
+    territory_id: int,
+    player: int,
+    cell_width: float,
+    cell_height: float,
+) -> Optional[Territory]:
+    """Le territoire du joueur le plus proche d'une case donnee.
+
+    Un voisin immediat gagne d'office ; sinon on mesure en pixels. Sert a
+    savoir d'ou part un missile, ce qui n'a aucune incidence sur la regle
+    (la portee se compte depuis l'ensemble des terres) mais donne au tir
+    une origine a montrer.
+    """
+    best: Optional[Territory] = None
+    best_distance: Optional[float] = None
+    for terr in state.territories:
+        if terr.owner != player or terr.id == territory_id:
+            continue
+        if terr.id in state.territories[territory_id].neighbors:
+            return terr
+        distance = get_territory_pixel_distance(
+            state, territory_id, terr.id, cell_width, cell_height,
+        )
+        if distance is None:
+            continue
+        if best_distance is None or distance < best_distance:
+            best, best_distance = terr, distance
+    return best
+
+
 def get_expedition_risk_faces(distance_px: float) -> Tuple[int, ...]:
     """Les faces perdantes (25/50/75/100 %) du de a 64 faces pour une distance."""
     for max_distance, faces in EXPEDITION_RISK_TIERS:
@@ -6112,7 +6307,178 @@ def choose_regular_ai_university_target(
     return max(pool, key=lambda terr: (len(terr.neighbors), terr.regiments, rng.random()))
 
 
+def get_player_menace_score(
+    state: GameState, player: int, threats: Optional[List[dict]] = None,
+) -> int:
+    """A quel point ce joueur est en train de gagner la partie.
+
+    Un chiffre unique, croissant, qui melange l'emprise sur la carte (part
+    des territoires, part du revenu) et l'avance vers une victoire non
+    militaire (science, culture, religion, dores, lieux sacres). La
+    progression vers une victoire pese lourd : un joueur a 90 % d'une
+    condition est plus dangereux qu'un gros empire qui stagne.
+
+    ``threats`` evite de recalculer ``get_victory_threats`` a chaque joueur
+    quand on note toute la table d'un coup — c'est de loin le plus cher.
+
+    L'ONU et les joueurs elimines valent zero. Le resultat n'a pas d'unite,
+    il ne sert qu'a comparer les joueurs entre eux.
+    """
+    if player < 0 or is_onu_player(state, player):
+        return 0
+    owned = [terr for terr in state.territories if terr.owner == player]
+    if not owned:
+        return 0
+    total = max(1, len(state.territories))
+    territory_share = 100 * len(owned) // total
+
+    all_income = sum(
+        calculate_territory_income(state, terr)
+        for terr in state.territories if terr.owner >= 0
+    )
+    own_income = sum(calculate_territory_income(state, terr) for terr in owned)
+    income_share = 100 * own_income // all_income if all_income > 0 else 0
+
+    if threats is None:
+        threats = get_victory_threats(state, notice_ratio=0.0)
+    best_progress = 0.0
+    for threat in threats:
+        if threat["joueur"] == player:
+            best_progress = max(best_progress, float(threat["progression"]))
+
+    # Les deux parts pesent une fois chacune, la course a la victoire deux
+    # fois : c'est elle qui doit declencher la ruee sur le meneur.
+    return territory_share + income_share + int(200 * min(1.0, best_progress))
+
+
+def compute_ai_strategic_target(state: GameState, ai_player: int) -> Tuple[Optional[int], bool]:
+    """(cible prioritaire, alerte de victoire) pour cette IA.
+
+    Deux regimes. En temps normal, la cible est le joueur au plus fort
+    score de menace parmi ceux qu'elle peut encore attaquer, et seulement
+    s'il se detache vraiment (``AI_MENACE_LEAD_MARGIN``) : tant que
+    personne ne prend le large, l'IA garde sa logique d'opportunite.
+
+    Mais des qu'une victoire devient imminente — la meme alerte que celle
+    affichee aux joueurs, ``get_imminent_victory_threats`` — la marge ne
+    compte plus : le joueur qui touche au but devient la cible, et le
+    second element du couple dit a l'IA de tout donner contre lui.
+    """
+    if not is_ai_player(state, ai_player):
+        return None, False
+    attaquables = [
+        rival for rival in get_active_players(state)
+        if rival != ai_player
+        and rival >= 0
+        and not is_onu_player(state, rival)
+        and not is_attack_blocked_by_alliance(state, ai_player, rival)
+    ]
+    if not attaquables:
+        return None, False
+
+    threats = get_victory_threats(state, notice_ratio=0.0)
+    urgences = {
+        threat["joueur"]: threat["progression"]
+        for threat in threats
+        if threat["imminent"] and threat["joueur"] in attaquables
+    }
+    if urgences:
+        return max(urgences, key=lambda rival: (urgences[rival], -rival)), True
+
+    scores = {rival: get_player_menace_score(state, rival, threats) for rival in attaquables}
+    leader = max(scores, key=lambda rival: (scores[rival], -rival))
+    own_score = get_player_menace_score(state, ai_player, threats)
+    rivals = [score for rival, score in scores.items() if rival != leader]
+    reference = max([own_score, *rivals]) if rivals or own_score else 0
+    if scores[leader] < reference + AI_MENACE_LEAD_MARGIN:
+        return None, False
+    return leader, False
+
+
+def get_ai_strategic_target(state: GameState, ai_player: int) -> Tuple[Optional[int], bool]:
+    """``compute_ai_strategic_target``, calcule une seule fois par tour.
+
+    Le calcul balaie toute la carte pour tous les joueurs ; il etait
+    refait a chaque passe d'attaque. L'IA arrete donc sa cible en debut de
+    tour et s'y tient — ce qui est aussi plus juste strategiquement qu'une
+    girouette qui changerait d'ennemi entre deux jets de des. Le cache est
+    volatil : il ne part pas dans les sauvegardes.
+    """
+    cle = (state.turn, ai_player, state.current_player)
+    memo = getattr(state, "_ai_strategic_target_memo", None)
+    if memo is not None and memo[0] == cle:
+        return memo[1]
+    resultat = compute_ai_strategic_target(state, ai_player)
+    try:
+        state._ai_strategic_target_memo = (cle, resultat)
+    except AttributeError:
+        pass
+    return resultat
+
+
+def get_ai_priority_target(state: GameState, ai_player: int) -> Optional[int]:
+    """Le joueur que cette IA devrait faire tomber en priorite."""
+    return get_ai_strategic_target(state, ai_player)[0]
+
+
+def is_ai_facing_victory_alert(state: GameState, ai_player: int) -> bool:
+    """Un rival attaquable touche-t-il a la victoire ? (etat d'urgence)"""
+    return get_ai_strategic_target(state, ai_player)[1]
+
+
+def get_ai_war_chest_target(state: GameState, player: int) -> int:
+    """Le magot qu'une IA met de cote au lieu de tout lever en mercenaires.
+
+    Zero tant que cet argent dormirait pour rien : il faut la science du
+    missile et un humain encore en jeu. Le montant vient de la doctrine
+    (``AI_DOCTRINE_SETTINGS``) : deux tirs d'avance pour l'artificier, un
+    seul pour les trois autres. Le reste du temps l'IA arme, comme avant.
+    """
+    if not is_ai_player(state, player) or is_onu_player(state, player):
+        return 0
+    if is_commercial_city_player(state, player) or is_colonized_player(state, player):
+        return 0
+    if not get_ai_doctrine_setting(state, player, "fires_missiles"):
+        return 0
+    if get_player_missile_tier(state, player) <= 0:
+        return 0
+    if not any(is_human_player_id(state, rival) for rival in get_active_players(state)):
+        return 0
+    return get_ai_doctrine_setting(state, player, "war_chest")
+
+
+def get_ai_territory_threat(state: GameState, territory: Territory, player: int) -> int:
+    """La pression ennemie qui pese sur un territoire.
+
+    C'est la somme des regiments adverses masses juste a cote, une fois
+    retires ceux qui ne peuvent pas frapper : l'ONU et les sanctuaires
+    n'attaquent personne, et un allie non plus tant que le pacte tient.
+    Zero signale un territoire de l'interieur, qu'aucun voisin ne menace.
+    """
+    threat = 0
+    for neighbor_id in territory.neighbors:
+        if not (0 <= neighbor_id < len(state.territories)):
+            continue
+        neighbor = state.territories[neighbor_id]
+        if neighbor.owner == player or neighbor.owner < 0:
+            continue
+        if is_onu_player(state, neighbor.owner) or is_sanctuary_territory(state, neighbor.id):
+            continue
+        if is_attack_blocked_by_alliance(state, neighbor.owner, player):
+            continue
+        threat += max(0, neighbor.regiments)
+    return threat
+
+
 def add_regular_ai_mercenaries(state: GameState, owned: List[Territory], quantity: int, rng=random) -> None:
+    """Repartit les mercenaires achetes la ou ils serviront.
+
+    Les renforts vont aux territoires sous pression, un par un : a chaque
+    placement la cible retenue est celle dont le deficit (regiments
+    adverses voisins moins garnison) est le plus grand, si bien que la
+    frontiere se rebouche par son point le plus faible. Une IA sans aucune
+    frontiere chaude retombe sur le tirage au hasard d'origine.
+    """
     active_owned = [
         terr for terr in owned
         if 0 <= terr.id < len(state.territories) and state.territories[terr.id].owner == terr.owner
@@ -6120,11 +6486,55 @@ def add_regular_ai_mercenaries(state: GameState, owned: List[Territory], quantit
     pool = active_owned or owned
     if not pool:
         return
-    for _ in range(max(0, quantity)):
-        rng.choice(pool).regiments += 1
+    quantity = max(0, quantity)
+    if quantity <= 0:
+        return
+    threats = {terr.id: get_ai_territory_threat(state, terr, terr.owner) for terr in pool}
+    frontline = [terr for terr in pool if threats[terr.id] > 0]
+    if not frontline:
+        for _ in range(quantity):
+            rng.choice(pool).regiments += 1
+        return
+    # Un depart tire une fois pour toutes : deux frontieres aussi menacees
+    # l'une que l'autre ne se renforcent pas toujours dans le meme ordre.
+    tiebreak = {terr.id: rng.random() for terr in frontline}
+    for _ in range(quantity):
+        target = max(frontline, key=lambda terr: (
+            threats[terr.id] - terr.regiments, threats[terr.id], tiebreak[terr.id],
+        ))
+        target.regiments += 1
+
+
+def get_ai_fortress_quota(
+    territory_count: int, territories_per_fortress: int = AI_TERRITORIES_PER_FORTRESS,
+) -> int:
+    """Combien de forteresses une IA de cette taille se paie au total.
+
+    La tranche vient de sa doctrine : le batisseur mure tous les trois
+    territoires, le conquerant tous les huit.
+    """
+    return max(1, 1 + territory_count // max(1, territories_per_fortress))
+
+
+def get_ai_player_fortress_quota(state: GameState, player: int, territory_count: int) -> int:
+    return get_ai_fortress_quota(
+        territory_count,
+        get_ai_doctrine_setting(state, player, "territories_per_fortress"),
+    )
+
+
+def get_ai_development_reserve(state: GameState, player: int) -> int:
+    """Ce qu'une IA garde pour ses mercenaires avant de batir du superflu."""
+    return get_ai_doctrine_setting(state, player, "development_reserve")
 
 
 def find_regular_ai_fortress_purchase(state: GameState, player: int, owned: List[Territory], rng=random):
+    """Le premier mur d'une IA : la capitale, sinon son meilleur territoire.
+
+    Priorite absolue, avant tout developpement — une IA sans forteresse
+    perd ses renforts prioritaires et ses trois des en defense. Les murs
+    suivants attendent ``find_regular_ai_extra_fortress_purchase``.
+    """
     if any(terr.id in state.fortress_territory_ids for terr in owned):
         return None
     candidates = [terr for terr in owned if terr.id not in state.fortress_territory_ids]
@@ -6136,6 +6546,35 @@ def find_regular_ai_fortress_purchase(state: GameState, player: int, owned: List
         if capital.owner == player and capital.id not in state.fortress_territory_ids:
             return FORTRESS_COST, lambda terr=capital: add_regular_ai_fortress(state, terr.id)
     target = choose_regular_ai_development_target(state, candidates, player, rng)
+    return FORTRESS_COST, lambda terr=target: add_regular_ai_fortress(state, terr.id)
+
+
+def find_regular_ai_extra_fortress_purchase(
+    state: GameState, player: int, owned: List[Territory], rng=random,
+):
+    """Une forteresse de plus, sur la frontiere la plus mal tenue.
+
+    Le premier mur debout, l'IA continue a fortifier tant qu'elle reste
+    sous son quota (cf. ``get_ai_fortress_quota``), mais seulement sur un
+    territoire reellement expose : l'interieur des terres, qu'aucun voisin
+    ne peut attaquer, ne recoit rien. La depense se prend sur le superflu,
+    ``AI_DEVELOPMENT_SURPLUS_RESERVE`` restant a la levee de mercenaires.
+    """
+    if not owned:
+        return None
+    built = sum(1 for terr in owned if terr.id in state.fortress_territory_ids)
+    if built <= 0 or built >= get_ai_player_fortress_quota(state, player, len(owned)):
+        return None
+    if state.player_money.get(player, 0) < FORTRESS_COST + get_ai_development_reserve(state, player):
+        return None
+    candidates = [terr for terr in owned if terr.id not in state.fortress_territory_ids]
+    threats = {terr.id: get_ai_territory_threat(state, terr, player) for terr in candidates}
+    frontline = [terr for terr in candidates if threats[terr.id] > 0]
+    if not frontline:
+        return None
+    target = max(frontline, key=lambda terr: (
+        threats[terr.id] - terr.regiments, threats[terr.id], len(terr.neighbors), -terr.id,
+    ))
     return FORTRESS_COST, lambda terr=target: add_regular_ai_fortress(state, terr.id)
 
 
@@ -6159,7 +6598,14 @@ def find_regular_ai_industrial_purchase(
 
 
 def find_regular_ai_mercenary_purchase(state: GameState, player: int, owned: List[Territory], rng=random):
-    quantity = state.player_money[player] // MERCENARY_COST
+    """Convertit en mercenaires tout ce qui depasse le magot d'operations.
+
+    Les mercenaires sont le puits sans fond des achats IA : c'est donc ici
+    que l'epargne dirigee se joue. Ce que ``get_ai_war_chest_target`` met
+    de cote reste en caisse pour un missile ; le reste part en regiments.
+    """
+    disponible = state.player_money[player] - get_ai_war_chest_target(state, player)
+    quantity = disponible // MERCENARY_COST
     if quantity <= 0:
         return None
     return quantity * MERCENARY_COST, lambda quantity=quantity, owned=list(owned): add_regular_ai_mercenaries(state, owned, quantity, rng)
@@ -6193,6 +6639,120 @@ def find_ai_wonder_purchase(state: GameState, player: int, rng=random):
         get_wonder_cost(state, player, wonder_type),
         lambda terr=target, kind=wonder_type: build_wonder(state, terr.id, kind),
     )
+
+
+def count_component_universities(state: GameState, territory_ids: List[int]) -> int:
+    return len(state.university_territory_ids & set(territory_ids))
+
+
+def count_component_cultural_centers(state: GameState, territory_ids: List[int]) -> int:
+    return sum(get_cultural_center_count(state, tid) for tid in territory_ids)
+
+
+def get_ai_knowledge_quota(
+    territory_count: int,
+    territories_per_building: int = AI_TERRITORIES_PER_KNOWLEDGE_BUILDING,
+) -> int:
+    """Combien d'universites (et de centres culturels) vise une IA de cette taille.
+
+    La tranche vient de sa doctrine : le batisseur et l'artificier batissent
+    tous les trois territoires, le conquerant tous les huit.
+    """
+    return max(1, territory_count // max(1, territories_per_building))
+
+
+def get_ai_player_knowledge_quota(state: GameState, player: int, territory_count: int) -> int:
+    return get_ai_knowledge_quota(
+        territory_count,
+        get_ai_doctrine_setting(state, player, "territories_per_knowledge_building"),
+    )
+
+
+def find_regular_ai_knowledge_expansion(
+    state: GameState, player: int, owned: List[Territory], rng=random,
+):
+    """Universite ou centre culturel supplementaire, paye sur le superflu.
+
+    Passe le premier equipement du bloc national, l'IA continue a batir
+    tant qu'elle reste sous son quota (cf. ``get_ai_knowledge_quota``) : la
+    science grimpe assez pour lui ouvrir les missiles et le quatrieme de,
+    la culture assez pour declencher ses annexations. Elle alterne entre
+    les deux, le retard d'abord, et n'engage la depense que si la caisse
+    couvre aussi ``AI_DEVELOPMENT_SURPLUS_RESERVE`` : le reste part en
+    mercenaires, un empire savant mais sans garnison ne tiendrait pas.
+    """
+    if not owned:
+        return None
+    territory_ids = [terr.id for terr in owned]
+    quota = get_ai_player_knowledge_quota(state, player, len(owned))
+    reserve = get_ai_development_reserve(state, player)
+    money = state.player_money.get(player, 0)
+
+    university_count = count_component_universities(state, territory_ids)
+    cultural_count = count_component_cultural_centers(state, territory_ids)
+
+    def university_action():
+        if university_count >= quota or money < UNIVERSITY_COST + reserve:
+            return None
+        candidates = [terr for terr in owned if can_add_university(state, terr.id)]
+        if not candidates:
+            return None
+        target = choose_regular_ai_university_target(state, candidates, player, rng)
+        return UNIVERSITY_COST, lambda terr=target: add_university(state, terr.id)
+
+    def cultural_action():
+        if cultural_count >= quota or money < CULTURAL_CENTER_COST + reserve:
+            return None
+        candidates = [terr for terr in owned if can_add_cultural_center(state, terr.id)]
+        if not candidates:
+            return None
+        target = choose_regular_ai_development_target(state, candidates, player, rng)
+        return CULTURAL_CENTER_COST, lambda terr=target: add_cultural_center(state, terr.id, age=0)
+
+    # A egalite la science passe devant : c'est elle qui debloque les armes.
+    order = (
+        (university_action, cultural_action) if university_count <= cultural_count
+        else (cultural_action, university_action)
+    )
+    for build in order:
+        action = build()
+        if action is not None:
+            return action
+    return None
+
+
+def find_regular_ai_surplus_development(
+    state: GameState, player: int, owned: List[Territory], rng=random,
+):
+    """Ce qu'une IA fait de son superflu une fois son bloc national equipe.
+
+    Deux chantiers se disputent l'argent qui reste : fortifier une
+    frontiere de plus, ou pousser la science et la culture. Celui qui est
+    le plus en retard sur son quota passe devant, si bien qu'aucun des
+    deux n'etouffe l'autre. Ce qu'ils laissent part en mercenaires.
+    """
+    if not owned:
+        return None
+    territory_ids = [terr.id for terr in owned]
+    fortress_quota = get_ai_player_fortress_quota(state, player, len(owned))
+    knowledge_quota = 2 * get_ai_player_knowledge_quota(state, player, len(owned))
+    fortresses = sum(1 for terr in owned if terr.id in state.fortress_territory_ids)
+    knowledge = (
+        count_component_universities(state, territory_ids)
+        + count_component_cultural_centers(state, territory_ids)
+    )
+    # Comparaison des deux avancements sans division : fortresses /
+    # fortress_quota face a knowledge / knowledge_quota.
+    order = (
+        (find_regular_ai_extra_fortress_purchase, find_regular_ai_knowledge_expansion)
+        if fortresses * knowledge_quota <= knowledge * fortress_quota
+        else (find_regular_ai_knowledge_expansion, find_regular_ai_extra_fortress_purchase)
+    )
+    for build in order:
+        action = build(state, player, owned, rng)
+        if action is not None:
+            return action
+    return None
 
 
 def find_next_regular_ai_purchase(state: GameState, player: int, rng=random):
@@ -6252,6 +6812,10 @@ def find_next_regular_ai_purchase(state: GameState, player: int, rng=random):
         if action is not None:
             return action
         return find_regular_ai_mercenary_purchase(state, player, owned, rng)
+
+    surplus_action = find_regular_ai_surplus_development(state, player, development_owned, rng)
+    if surplus_action is not None:
+        return surplus_action
 
     return find_regular_ai_mercenary_purchase(state, player, owned, rng)
 

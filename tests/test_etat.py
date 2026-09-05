@@ -34,6 +34,7 @@ EXPECTED_GAME_KEYS = {
     "initial_ai_player_count", "difficulty_level", "tribes_mode",
     "base_ai_players", "auto_controlled_players", "human_controlled_players",
     "eliminated_human_players", "ai_personalities", "ai_current_behavior",
+    "ai_last_missile_turns",
     "commercial_city_players", "commercial_city_capital_ids",
     "player_capital_ids", "pending_commercial_city_spawns", "nation_players",
     "nation_qualification_start_turns", "nation_capital_loss_start_turns",
