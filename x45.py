@@ -161,8 +161,11 @@ class GraphicalGame:
     MAX_REINFORCEMENTS_PER_TURN = 10
     MAX_REINFORCEMENT_ELIGIBLE_REGIMENTS = 120
     MAX_REINFORCEMENT_ELIGIBLE_REGIMENTS_WITH_BONUS_5 = 200
-    BONUS_5_SPAWN_TURNS = (35, 43, 51, 59)
-    PRECIOUS_MINERAL_MINE_SPAWN_TURNS = (37, 45, 53, 61)
+    # Les tours d'apparition des ressources tardives vivent dans le moteur
+    # (BONUS_5_SPAWN_TURNS, PRECIOUS_MINERAL_MINE_SPAWN_TURNS), qui est seul
+    # a les faire apparaitre. x45 en gardait une copie a quatre apparitions,
+    # jamais lue et jamais mise a jour quand le moteur est passe a trois :
+    # exactement le piege qui a fait planter la boutique des merveilles.
     PRECIOUS_MINERAL_MINE_INCOME = 100
     AI_REINFORCEMENT_BONUS_STAGES = (
         (33, 1),
