@@ -39,6 +39,21 @@ class TestIconesDesMerveillesX45(unittest.TestCase):
             raise unittest.SkipTest(f"x45 non importable ici : {exc}")
         cls.x45 = x45
 
+    def test_x45_connait_toutes_les_merveilles_du_moteur(self):
+        """x45 ne doit pas garder sa propre table de merveilles.
+
+        Il en gardait une copie : les merveilles ajoutees ensuite y
+        manquaient, et sa boutique plantait sur un KeyError des que l'une
+        d'elles devenait constructible — la liste des merveilles a batir
+        vient du moteur, leur description venait de la copie.
+        """
+        table = self.x45.GraphicalGame.WONDER_DEFINITIONS
+        self.assertEqual(dict(table), dict(regles.WONDER_DEFINITIONS))
+        for wonder_type in regles.WONDER_DEFINITIONS:
+            with self.subTest(merveille=wonder_type):
+                # L'acces direct est celui que fait la boutique de x45.
+                self.assertIn("name", table[wonder_type])
+
     def test_chaque_merveille_a_sa_couleur(self):
         couleurs = self.x45.GraphicalGame.WONDER_BADGE_COLORS
         for wonder_type in regles.WONDER_DEFINITIONS:

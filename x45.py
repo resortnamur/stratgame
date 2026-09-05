@@ -248,72 +248,13 @@ class GraphicalGame:
     }
     LATE_WONDER_COST = 500
     AI_LATE_WONDER_COST = 300
-    WONDER_DEFINITIONS = {
-        "elyrion_sanctuary": {
-            "name": "Sanctuaire d'Elyrion",
-            "effect": "Fonde Elyrion, religion conquerante liee au territoire",
-            "kind": "science",
-        },
-        "thousand_voices_theatre": {
-            "name": "Theatre des Mille Voix",
-            "effect": "Double la culture de son controleur",
-            "kind": "science",
-        },
-        "atlas_observatory": {
-            "name": "Observatoire d'Atlas",
-            "effect": "Double la science effective de son controleur",
-            "kind": "science",
-        },
-        "golden_pact_palace": {
-            "name": "Palais du Pacte d'Or",
-            "effect": "Fait de son controleur l'unique allie de la Cite commercante",
-            "kind": "science",
-        },
-        # Merveilles culturelles : memes regles d'exclusivite, mais
-        # debloquees par la culture (CULTURE_WONDER_THRESHOLD points).
-        "ivory_rampart": {
-            "name": "Rempart d'Ivoire",
-            "effect": "Protege ce territoire de toute attaque des joueurs IA",
-            "kind": "culture",
-        },
-        "croesus_fountain": {
-            "name": "Fontaine de Cresus",
-            "effect": "Multiplie par 5 l'argent produit par ce territoire",
-            "kind": "culture",
-        },
-        "aurelia_capitol": {
-            "name": "Capitole d'Aurelia",
-            "effect": "Donne aussitot le statut de nation si la capitale de son proprietaire s'y trouve, sans aucune autre condition",
-            "kind": "culture",
-        },
-        "daedalus_forge": {
-            "name": "Forge de Dedale",
-            "effect": "Ponts construits ou detruits gratuitement depuis ce territoire",
-            "kind": "culture",
-        },
-        # Merveilles tardives : sans seuil de science ni de culture, mais
-        # jamais avant le tour LATE_WONDER_FIRST_TURN.
-        "solmyre_oracle": {
-            "name": "Oracle de Solmyre",
-            "effect": "Fonde Solmyre, seconde religion conquerante ; seule Elyrion lui resiste",
-            "kind": "late",
-        },
-        "kaleth_gardens": {
-            "name": "Jardins de Kaleth",
-            "effect": "Rapporte chaque tour 50 points de culture et 50 ecus a son controleur",
-            "kind": "late",
-        },
-        "selene_dome": {
-            "name": "Dome de Selene",
-            "effect": "Protege des missiles tous les territoires de son controleur",
-            "kind": "late",
-        },
-        "orvane_oath": {
-            "name": "Serment d'Orvane",
-            "effect": "Le prochain joueur ne en cours de partie devient l'allie definitif de son controleur",
-            "kind": "late",
-        },
-    }
+    # La table des merveilles vit dans le moteur, et nulle part ailleurs.
+    # x45 en gardait une copie : les quatre merveilles ajoutees depuis
+    # (les trois des IA et le Sceau de l'Apocalypse) y manquaient, et la
+    # boutique plantait sur un KeyError des qu'une d'elles devenait
+    # constructible — la liste des merveilles a batir vient du moteur
+    # (get_buildable_wonder_types), leur description venait d'ici.
+    WONDER_DEFINITIONS = moteur_regles.WONDER_DEFINITIONS
     SAVE_SCHEMA_VERSION = 13
     REPLAY_FRAME_DELAY_MS = 150
     MAX_REPLAY_SNAPSHOTS = 1200
@@ -7216,7 +7157,7 @@ class GraphicalGame:
                         self.shop_action = None
                         self.pending_wonder_type = None
                         if not self.get_available_wonder_types():
-                            self.show_message("Les huit merveilles ont deja ete construites.", 2400)
+                            self.show_message("Toutes les merveilles ont deja ete construites.", 2400)
                         else:
                             self.show_message(
                                 f"Merveilles verrouillees : {required_science} points de science "
