@@ -1029,9 +1029,15 @@ def sync_late_resource_lifetimes(state: GameState) -> None:
     Appele au changement de tour global, pas au chargement : la sauvegarde
     relue reste ainsi identique a l'octet pres.
     """
+    ensure_apocalypse_seal_bonus(state)
     bonus_5_ids = {
-        terr.id for terr in state.territories if terr.reinforcement_bonus == 5
+        terr.id for terr in state.territories
+        if terr.reinforcement_bonus == 5
+        and not is_apocalypse_seal_territory(state, terr.id)
     }
+    # Le filtre ci-dessous jette aussi le compteur qu'une partie commencee
+    # avant ce correctif avait attribue au territoire du Sceau : son +5
+    # cessait alors au bout de vingt tours, sans rien pour le remplacer.
     state.bonus_5_spawn_turns = {
         tid: int(turn) for tid, turn in state.bonus_5_spawn_turns.items()
         if tid in bonus_5_ids
@@ -5760,6 +5766,32 @@ def advance_apocalypse_site(state: GameState, territory_id: int, player: int) ->
     )
     record_major_event(state, message)
     return message
+
+
+def is_apocalypse_seal_territory(state: GameState, territory_id: int) -> bool:
+    """Ce territoire porte-t-il le Sceau ?
+
+    Son bonus de renforts vaut 5 comme une ressource +5, mais il n'en est
+    pas une : il ne s'epuise pas au bout de vingt tours, et rien ne le
+    remplace ailleurs. Les ressources tardives doivent donc l'ignorer.
+    """
+    return state.wonder_territories.get("apocalypse_seal") == territory_id
+
+
+def ensure_apocalypse_seal_bonus(state: GameState) -> None:
+    """Redonne au territoire du Sceau ses cinq renforts s'il les a perdus.
+
+    Les parties commencees avant le correctif ont vu ce bonus s'eteindre
+    au bout de vingt tours, traite comme une ressource tardive. Le remettre
+    a chaque changement de tour repare ces parties-la sans rien demander,
+    et ne coute rien aux autres : la valeur y est deja bonne.
+    """
+    territory_id = state.wonder_territories.get("apocalypse_seal")
+    if territory_id is None or not (0 <= territory_id < len(state.territories)):
+        return
+    territoire = state.territories[territory_id]
+    if territoire.reinforcement_bonus != APOCALYPSE_TERRITORY_REINFORCEMENT_BONUS:
+        territoire.reinforcement_bonus = APOCALYPSE_TERRITORY_REINFORCEMENT_BONUS
 
 
 def get_apocalypse_income_bonus(state: GameState, player: int) -> int:

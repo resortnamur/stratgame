@@ -258,6 +258,40 @@ class TestAgeDeTenebres(unittest.TestCase):
             regles.MAX_REINFORCEMENT_ELIGIBLE_REGIMENTS_WITH_BONUS_5,
         )
 
+    def test_le_plus_cinq_du_sceau_ne_s_epuise_jamais(self):
+        """Il ressemble a une ressource +5, il n'en est pas une.
+
+        Traite comme un gisement tardif, il s'eteignait au bout de vingt
+        tours — et rien ne pouvait le remplacer, les ressources ne
+        repoussant plus sous le sceau. Le proprietaire perdait ses cinq
+        renforts pour de bon, sans un mot.
+        """
+        state = self.build()
+        self.fermer(state)
+        for _ in range(3 * regles.LATE_RESOURCE_LIFETIME_TURNS):
+            state.turn += 1
+            regles.rotate_expired_late_resources(state, random.Random(1))
+        self.assertEqual(
+            state.territories[0].reinforcement_bonus,
+            regles.APOCALYPSE_TERRITORY_REINFORCEMENT_BONUS,
+        )
+        self.assertEqual(state.bonus_5_spawn_turns, {})
+        rapport = regles.grant_reinforcements(state, 0, random.Random(1))
+        self.assertIn("bonus +5: 5", rapport.message)
+
+    def test_une_partie_deja_abimee_se_repare(self):
+        """Les parties commencees avant le correctif retrouvent leur bonus."""
+        state = self.build()
+        self.fermer(state)
+        state.territories[0].reinforcement_bonus = 1  # le degat deja fait
+        state.bonus_5_spawn_turns[0] = state.turn - 30
+        state.turn += 1
+        regles.rotate_expired_late_resources(state, random.Random(1))
+        self.assertEqual(
+            state.territories[0].reinforcement_bonus,
+            regles.APOCALYPSE_TERRITORY_REINFORCEMENT_BONUS,
+        )
+
     def test_plus_aucune_ressource_ne_repousse(self):
         state = self.build()
         self.fermer(state)
