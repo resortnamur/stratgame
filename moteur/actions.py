@@ -79,6 +79,7 @@ class TurnAdvanceReport:
     victory_alerts: List[str] = field(default_factory=list)
     religion_messages: List[str] = field(default_factory=list)
     market_message: Optional[str] = None
+    integration_message: Optional[str] = None
     empire_messages: List[str] = field(default_factory=list)
     begin_turn: Optional[BeginTurnReport] = None
 
@@ -196,6 +197,10 @@ def advance_turn(
                 regles.age_cultural_centers_one_turn(state)
                 regles.age_universities_one_turn(state)
                 report.market_message = regles.maybe_trigger_market_event(state, rng)
+                # La Chancellerie de Vorlan tire une fois par tour de jeu.
+                # Sans la merveille sur la carte, rien n'est tire : le
+                # hasard d'une partie ordinaire ne bouge pas d'un cran.
+                report.integration_message = regles.maybe_integrate_ai_player_with_wonder(state, rng)
             report.empire_messages = regles.maybe_trigger_empire_event(state, rng)
             report.victory_alerts = regles.record_victory_threat_alerts(state)
             active_players = regles.get_active_players(state)

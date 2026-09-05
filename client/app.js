@@ -131,6 +131,9 @@ const MERVEILLES = {
   kaleth_gardens: "Jardins de Kaleth",
   selene_dome: "Dôme de Séléné",
   orvane_oath: "Serment d'Orvane",
+  vorlan_chancellery: "Chancellerie de Vorlan",
+  threl_bank: "Banque de Threl",
+  obsidian_rampart: "Rempart d'Obsidienne",
 };
 
 // Merveilles débloquées par la culture (100 points) plutôt que la science.
@@ -145,6 +148,19 @@ const MERVEILLES_TARDIVES = new Set([
 ]);
 const TOUR_MERVEILLES_TARDIVES = 42;
 
+// Merveilles des IA : tout le monde les bâtit pour 300 écus, mais leur effet
+// ne joue qu'entre les mains d'une IA. Chacune s'ouvre à son propre tour, si
+// bien que le menu se remplit au fil de la partie.
+const MERVEILLES_IA = new Set([
+  "vorlan_chancellery", "threl_bank", "obsidian_rampart",
+]);
+const TOURS_MERVEILLES_IA = {
+  vorlan_chancellery: 12,
+  threl_bank: 24,
+  obsidian_rampart: 36,
+};
+const PREMIER_TOUR_MERVEILLES_IA = Math.min(...Object.values(TOURS_MERVEILLES_IA));
+
 const EFFETS_MERVEILLES = {
   elyrion_sanctuary: "Fonde Elyrion, religion conquérante liée au territoire",
   thousand_voices_theatre: "Double la culture de son contrôleur",
@@ -158,10 +174,14 @@ const EFFETS_MERVEILLES = {
   kaleth_gardens: "Rapporte chaque tour 50 points de culture et 50 écus à son contrôleur",
   selene_dome: "Protège des missiles tous les territoires de son contrôleur",
   orvane_oath: "Le prochain joueur né en cours de partie devient l'allié définitif de son contrôleur",
+  vorlan_chancellery: "IA seulement : chaque tour, une chance sur dix d'intégrer une IA voisine",
+  threl_bank: "IA seulement : son contrôleur ne perd rien dans un crash ni une crise boursière",
+  obsidian_rampart: "IA seulement : ce territoire ne peut pas être attaqué par un joueur humain",
 };
 
 // La famille d'une merveille, pour trier le menu déroulant de la boutique.
 function familleMerveille(type) {
+  if (MERVEILLES_IA.has(type)) return "ia";
   if (MERVEILLES_TARDIVES.has(type)) return "tardive";
   if (MERVEILLES_CULTURELLES.has(type)) return "culturelle";
   return "science";
@@ -203,6 +223,12 @@ const CATALOGUE_ACHATS = [
   { id: "merveille_tardive", achat: "merveille", libelle: "Merveille tardive — 500",
     cibles: ["mien"], merveille: true, famille: "tardive", cout: 500,
     tour: TOUR_MERVEILLES_TARDIVES },
+  // Merveilles des IA : bâtissables par tout le monde, mais elles ne rendent
+  // rien à un humain. La seule raison d'en prendre une est de la refuser aux
+  // IA — chacune n'apparaît dans le menu qu'à partir de son tour.
+  { id: "merveille_ia", achat: "merveille", libelle: "Merveille des IA — 300",
+    cibles: ["mien"], merveille: true, famille: "ia", cout: 300,
+    tour: PREMIER_TOUR_MERVEILLES_IA },
   { id: "capitale", libelle: "Changer capitale — 300", cibles: ["mien"], cout: 300 },
   { id: "alliance", libelle: "Alliance déf. — 20/terr.", cibles: ["ennemi"] },
   { id: "alliance_offensive", libelle: "Alliance off. — 25/terr.", allie: true, cible: true },
@@ -1482,11 +1508,15 @@ function afficherParamsBoutique() {
     label.textContent = {
       culturelle: "Merveille culturelle",
       tardive: "Merveille tardive",
+      ia: "Merveille des IA",
     }[article.famille] || "Merveille";
     const champ = document.createElement("select");
     champ.id = "achat-merveille";
     for (const [type, nom] of Object.entries(MERVEILLES)) {
       if (familleMerveille(type) !== article.famille) continue;
+      // Les trois merveilles des IA n'ouvrent pas au même tour.
+      if (MERVEILLES_IA.has(type)
+          && (client.etat.turn || 0) < TOURS_MERVEILLES_IA[type]) continue;
       if (Object.keys(client.etat.wonder_territories).includes(type)) continue;
       const option = document.createElement("option");
       option.value = type;
@@ -2041,6 +2071,7 @@ function journalRapportTour(rapport) {
     textes.push(rapport.reinforcement_report.message);
   }
   textes.push(rapport.sedition_message, rapport.market_message);
+  textes.push(rapport.integration_message);
   textes.push(...(rapport.resource_messages || []));
   textes.push(...(rapport.religion_messages || []));
   textes.push(...(rapport.empire_messages || []));
@@ -2666,6 +2697,11 @@ function dessinerBadge(ctx, type, x, y, etat, tid) {
       kaleth_gardens: ["rgb(58,104,32)", "rgb(206,245,150)", "Ka"],
       selene_dome: ["rgb(20,92,100)", "rgb(170,240,250)", "Sé"],
       orvane_oath: ["rgb(124,34,44)", "rgb(255,178,178)", "Or"],
+      // Merveilles des IA : trois teintes froides, pour qu'on les repère
+      // d'un coup d'oeil parmi les douze autres.
+      vorlan_chancellery: ["rgb(46,58,96)", "rgb(178,196,255)", "Va"],
+      threl_bank: ["rgb(72,60,24)", "rgb(255,232,150)", "Th"],
+      obsidian_rampart: ["rgb(26,30,38)", "rgb(200,208,224)", "Ob"],
     };
     const [fond, symbole, lettre] = couleurs[type.split(":")[1]]
       || ["rgb(70,70,70)", "rgb(235,235,235)", "?"];

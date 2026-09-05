@@ -232,6 +232,9 @@ class GraphicalGame:
         "kaleth_gardens": ((58, 104, 32), (206, 245, 150)),
         "selene_dome": ((20, 92, 100), (170, 240, 250)),
         "orvane_oath": ((124, 34, 44), (255, 178, 178)),
+        "vorlan_chancellery": ((46, 58, 96), (178, 196, 255)),
+        "threl_bank": ((72, 60, 24), (255, 232, 150)),
+        "obsidian_rampart": ((26, 30, 38), (200, 208, 224)),
     }
     VICTORY_CONDITION_LABELS = {
         "lieux_sacres": "lieux sacres",
@@ -9909,6 +9912,8 @@ class GraphicalGame:
                 self.show_message(" ".join(report.religion_messages), 5200)
             if report.market_message:
                 self.show_message(report.market_message, 5200)
+            if report.integration_message:
+                self.show_message(report.integration_message, 6200)
             for message in report.empire_messages:
                 self.show_message(message, 4600)
         self.selected_source = None
@@ -11601,6 +11606,25 @@ class GraphicalGame:
             pygame.draw.rect(self.screen, symbol_color, (cx - 5, cy - 5, 10, 11), 2)
             pygame.draw.circle(self.screen, symbol_color, (cx - 7, cy - 5), 3, 2)
             pygame.draw.circle(self.screen, symbol_color, (cx + 7, cy + 6), 3, 2)
+        elif wonder_type == "vorlan_chancellery":
+            # Un petit cercle happe par un grand : l'integration
+            pygame.draw.circle(self.screen, symbol_color, (cx - 5, cy), 6, 2)
+            pygame.draw.circle(self.screen, symbol_color, (cx + 7, cy), 3, 2)
+            pygame.draw.line(self.screen, symbol_color, (cx + 4, cy), (cx - 1, cy), 2)
+            pygame.draw.polygon(
+                self.screen, symbol_color,
+                [(cx - 3, cy), (cx + 1, cy - 3), (cx + 1, cy + 3)],
+            )
+        elif wonder_type == "threl_bank":
+            # Porte de coffre et sa molette
+            pygame.draw.rect(self.screen, symbol_color, (cx - 8, cy - 8, 16, 16), 2)
+            pygame.draw.circle(self.screen, symbol_color, (cx, cy), 4, 2)
+            pygame.draw.line(self.screen, symbol_color, (cx, cy - 4), (cx, cy + 4), 1)
+        elif wonder_type == "obsidian_rampart":
+            # Muraille crenelee : le miroir sombre du Rempart d'Ivoire
+            pygame.draw.rect(self.screen, symbol_color, (cx - 8, cy - 2, 16, 9), 2)
+            for dx in (-8, -3, 2):
+                pygame.draw.rect(self.screen, symbol_color, (cx + dx, cy - 7, 5, 5), 2)
 
     def draw_money_bonus_badge(self, x: int, y: int, commercial_city: bool = False, vassal: bool = False) -> None:
         badge_rect = pygame.Rect(0, 0, 28, 24)

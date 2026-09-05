@@ -138,7 +138,10 @@ class TestDemenagementIA(unittest.TestCase):
         self.assertFalse(regles.ai_should_move_capital_to_mainland(state, 0))
 
     def test_le_tour_economique_deplace_la_capitale(self):
-        state = build_state()
+        # Les merveilles passent avant tout dans un tour economique d'IA, et
+        # depuis le tour 12 la Chancellerie de Vorlan est toujours a prendre :
+        # il faut de quoi la batir *et* rapatrier la capitale.
+        state = build_state(argent=regles.WONDER_COST + regles.CHANGE_CAPITAL_COST)
         actions_faites = regles.execute_ai_economic_actions(state, 0, random.Random(20260728))
         self.assertGreaterEqual(actions_faites, 1)
         self.assertEqual(state.player_capital_ids[0], 3, "capitale rapatriee sur le continent")

@@ -125,7 +125,36 @@ WONDER_DEFINITIONS = {
         "effect": "Le prochain joueur ne en cours de partie devient l'allie definitif de son controleur",
         "kind": "late",
     },
+    # Merveilles des IA : n'importe qui les batit, au prix ordinaire de
+    # WONDER_COST, mais leur effet ne joue qu'entre les mains d'une IA. Un
+    # humain qui en prend une la retire du jeu sans rien en tirer — c'est
+    # tout ce qu'il peut en faire, et c'est deja beaucoup. Aucun seuil de
+    # science ni de culture : chacune s'ouvre a son tour ("first_turn").
+    "vorlan_chancellery": {
+        "name": "Chancellerie de Vorlan",
+        "effect": "Chaque tour, une chance sur dix que son controleur IA integre une IA voisine",
+        "kind": "ia",
+        "first_turn": 12,
+    },
+    "threl_bank": {
+        "name": "Banque de Threl",
+        "effect": "Son controleur IA ne perd rien dans un crash ni dans une crise boursiere",
+        "kind": "ia",
+        "first_turn": 24,
+    },
+    "obsidian_rampart": {
+        "name": "Rempart d'Obsidienne",
+        "effect": "Protege ce territoire de toute attaque des joueurs humains",
+        "kind": "ia",
+        "first_turn": 36,
+    },
 }
+
+# Le tirage de la Chancellerie de Vorlan : une chance sur dix, a chaque tour
+# de jeu, d'integrer une IA voisine. Le tirage n'a lieu que si la merveille
+# est batie, tenue par une IA, et qu'une IA la touche — sans quoi rien n'est
+# tire, et la suite du hasard de la partie reste inchangee.
+AI_WONDER_INTEGRATION_DENOMINATOR = 10
 
 AI_PROFILES = ["standard", "aggressive", "defensive", "variable"]
 
@@ -1173,6 +1202,35 @@ def player_controls_wonder(state: GameState, player: int, wonder_type: str) -> b
 def is_territory_protected_from_ai_attacks(state: GameState, territory_id: int) -> bool:
     """Le Rempart d'Ivoire protege son territoire des attaques des IA."""
     return state.wonder_territories.get("ivory_rampart") == territory_id
+
+
+def get_ai_wonder_controller(state: GameState, wonder_type: str) -> Optional[int]:
+    """Le controleur d'une merveille des IA, s'il en est bien une.
+
+    Les trois merveilles des IA se batissent comme les autres, mais elles
+    ne rendent rien a un humain : entre ses mains elles sont mortes, et
+    c'est la seule raison qu'il a d'en prendre une — la refuser aux IA.
+    """
+    controller = get_wonder_controller(state, wonder_type)
+    if controller is None or not is_ai_player(state, controller):
+        return None
+    return controller
+
+
+def is_territory_protected_from_human_attacks(state: GameState, territory_id: int) -> bool:
+    """Le Rempart d'Obsidienne protege son territoire des attaques humaines.
+
+    Miroir exact du Rempart d'Ivoire, du cote des IA — et comme lui, il
+    n'arrete que les attaques : ni missile, ni corruption, ni revolte.
+    """
+    if state.wonder_territories.get("obsidian_rampart") != territory_id:
+        return False
+    return get_ai_wonder_controller(state, "obsidian_rampart") is not None
+
+
+def is_player_immune_to_market_events(state: GameState, player: int) -> bool:
+    """La Banque de Threl met son controleur IA a l'abri des krachs."""
+    return get_ai_wonder_controller(state, "threl_bank") == player
 
 
 def get_player_temple_count(state: GameState, player: int) -> int:
@@ -3552,6 +3610,8 @@ def can_attack_specific_target(
         return False
     if is_ai_player(state, src.owner) and is_territory_protected_from_ai_attacks(state, dst.id):
         return False
+    if is_human_player_id(state, src.owner) and is_territory_protected_from_human_attacks(state, dst.id):
+        return False
     if is_attack_blocked_by_alliance(state, src.owner, dst.owner):
         return False
     return True
@@ -3573,6 +3633,8 @@ def resolve_attack_once(
     """
     if is_ai_player(state, src.owner) and is_territory_protected_from_ai_attacks(state, dst.id):
         return AttackResult("attaque interdite", "territoire protege par le Rempart d'Ivoire", False)
+    if is_human_player_id(state, src.owner) and is_territory_protected_from_human_attacks(state, dst.id):
+        return AttackResult("attaque interdite", "territoire protege par le Rempart d'Obsidienne", False)
     alliance_break_message = break_alliance_due_to_human_attack(state, src.owner, dst.owner) or ""
     if src.regiments >= 5 and can_player_attack_with_four_dice(state, src.owner):
         att_dice = 4
@@ -4063,6 +4125,21 @@ def can_player_build_late_wonder(state: GameState, player: int) -> bool:
     return state.turn >= LATE_WONDER_FIRST_TURN
 
 
+def is_ai_wonder_type(wonder_type: Optional[str]) -> bool:
+    """Merveille des IA : aucun seuil, un tour d'ouverture, un effet reserve."""
+    definition = WONDER_DEFINITIONS.get(wonder_type or "")
+    return bool(definition) and definition.get("kind") == "ia"
+
+
+def get_ai_wonder_first_turn(wonder_type: Optional[str]) -> int:
+    definition = WONDER_DEFINITIONS.get(wonder_type or "")
+    return int(definition.get("first_turn", 0)) if definition else 0
+
+
+def can_player_build_ai_wonder(state: GameState, player: int, wonder_type: str) -> bool:
+    return state.turn >= get_ai_wonder_first_turn(wonder_type)
+
+
 def get_wonder_cost(state: GameState, player: int, wonder_type: Optional[str]) -> int:
     """Le prix d'une merveille pour ce joueur.
 
@@ -4094,6 +4171,8 @@ def has_built_wonder_this_turn(state: GameState, player: int) -> bool:
 
 
 def can_player_build_wonder_type(state: GameState, player: int, wonder_type: str) -> bool:
+    if is_ai_wonder_type(wonder_type):
+        return can_player_build_ai_wonder(state, player, wonder_type)
     if is_late_wonder_type(wonder_type):
         return can_player_build_late_wonder(state, player)
     if is_cultural_wonder_type(wonder_type):
@@ -4871,6 +4950,8 @@ def can_launch_expedition(
         return False
     if is_ai_player(state, src.owner) and is_territory_protected_from_ai_attacks(state, dst.id):
         return False
+    if is_human_player_id(state, src.owner) and is_territory_protected_from_human_attacks(state, dst.id):
+        return False
     if is_attack_blocked_by_alliance(state, src.owner, dst.owner):
         return False
     return get_expedition_route_distance(state, src.id, dst.id, cell_width, cell_height) is not None
@@ -5451,20 +5532,80 @@ def maybe_trigger_market_event(state: GameState, rng=random) -> Optional[str]:
         return None
 
     total_lost = 0
+    # La Banque de Threl : son controleur IA traverse le krach sans rien
+    # perdre. Personne d'autre n'y echappe, pas meme l'humain qui l'a batie.
+    abrite = get_ai_wonder_controller(state, "threl_bank")
+    for player in list(state.player_money):
+        if player == abrite:
+            continue
+        current = state.player_money[player]
+        lost = (current * 2) // 3 if event_type == "crash" else current // 3
+        state.player_money[player] = current - lost
+        total_lost += lost
     if event_type == "crash":
-        for player in list(state.player_money):
-            current = state.player_money[player]
-            lost = (current * 2) // 3
-            state.player_money[player] = current - lost
-            total_lost += lost
         message = f"Tour {state.turn}: crash boursier. Tous les joueurs perdent deux tiers de leurs ecus economises ({total_lost} ecu(s) perdus)."
     else:
-        for player in list(state.player_money):
-            current = state.player_money[player]
-            lost = current // 3
-            state.player_money[player] = current - lost
-            total_lost += lost
         message = f"Tour {state.turn}: crise boursiere. Tous les joueurs perdent un tiers de leurs ecus economises ({total_lost} ecu(s) perdus)."
+    if abrite is not None:
+        message += f" J{abrite + 1} n'y perd rien : la {get_wonder_name('threl_bank')} tient."
+    record_major_event(state, message)
+    return message
+
+
+def find_ai_wonder_integration_candidates(state: GameState, integrator: int) -> List[int]:
+    """Les IA qui touchent l'empire de l'integrateur, et elles seules.
+
+    Le voisinage garde la Chancellerie honnete : elle agrandit un empire de
+    proche en proche, elle ne telepporte pas des enclaves a l'autre bout de
+    la carte. L'ONU, les humains et l'integrateur lui-meme sont hors jeu.
+    """
+    voisines: Set[int] = set()
+    for terr in state.territories:
+        if terr.owner != integrator:
+            continue
+        for neighbor_id in terr.neighbors:
+            autre = state.territories[neighbor_id].owner
+            if autre < 0 or autre == integrator:
+                continue
+            if is_onu_player(state, autre) or not is_ai_player(state, autre):
+                continue
+            voisines.add(autre)
+    return sorted(voisines)
+
+
+def maybe_integrate_ai_player_with_wonder(state: GameState, rng=random) -> Optional[str]:
+    """Le tirage de la Chancellerie de Vorlan, une fois par tour de jeu.
+
+    Une chance sur ``AI_WONDER_INTEGRATION_DENOMINATOR`` d'absorber une IA
+    voisine : ses territoires et leurs garnisons changent de main d'un bloc,
+    elle disparait de la partie faute de terres. Ses ecus et sa science ne
+    se transmettent pas — ils s'evanouissent avec elle.
+
+    Rien n'est tire tant que la merveille n'est pas batie, tenue par une IA,
+    et qu'une IA ne la touche pas : une partie sans Chancellerie deroule
+    exactement le meme hasard qu'avant.
+    """
+    integrator = get_ai_wonder_controller(state, "vorlan_chancellery")
+    if integrator is None:
+        return None
+    candidates = find_ai_wonder_integration_candidates(state, integrator)
+    if not candidates:
+        return None
+    if rng.randint(1, AI_WONDER_INTEGRATION_DENOMINATOR) != 1:
+        return None
+    absorbee = rng.choice(candidates)
+    territoires = [terr for terr in state.territories if terr.owner == absorbee]
+    if not territoires:
+        return None
+    regiments = sum(max(0, int(terr.regiments)) for terr in territoires)
+    for terr in territoires:
+        terr.owner = integrator
+    refresh_eliminated_human_players(state)
+    message = (
+        f"Tour {state.turn}: la {get_wonder_name('vorlan_chancellery')} integre J{absorbee + 1} "
+        f"a J{integrator + 1} : {len(territoires)} territoire(s) et {regiments} regiment(s) "
+        f"changent de main, J{absorbee + 1} disparait de la carte."
+    )
     record_major_event(state, message)
     return message
 

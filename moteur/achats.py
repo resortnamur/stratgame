@@ -456,7 +456,13 @@ def construire_merveille(state: GameState, terr: Territory, wonder_type: Optiona
         return _refus("Choisissez d'abord une merveille dans le menu des achats.")
     if regles.has_built_wonder_this_turn(state, state.current_player):
         return _refus("Une seule merveille par tour : la prochaine attendra le tour suivant.")
-    if regles.is_late_wonder_type(wonder_type):
+    if regles.is_ai_wonder_type(wonder_type):
+        if not regles.can_player_build_ai_wonder(state, wonder_type=wonder_type, player=state.current_player):
+            return _refus(
+                f"{regles.get_wonder_name(wonder_type)} ne se batit qu'a partir du tour "
+                f"{regles.get_ai_wonder_first_turn(wonder_type)} (nous sommes au tour {state.turn})."
+            )
+    elif regles.is_late_wonder_type(wonder_type):
         if not regles.can_player_build_late_wonder(state, state.current_player):
             return _refus(
                 f"{regles.get_wonder_name(wonder_type)} ne se batit qu'a partir du tour "
