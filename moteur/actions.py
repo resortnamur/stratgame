@@ -80,6 +80,7 @@ class TurnAdvanceReport:
     religion_messages: List[str] = field(default_factory=list)
     market_message: Optional[str] = None
     integration_message: Optional[str] = None
+    apocalypse_messages: List[str] = field(default_factory=list)
     empire_messages: List[str] = field(default_factory=list)
     begin_turn: Optional[BeginTurnReport] = None
 
@@ -201,6 +202,9 @@ def advance_turn(
                 # Sans la merveille sur la carte, rien n'est tire : le
                 # hasard d'une partie ordinaire ne bouge pas d'un cran.
                 report.integration_message = regles.maybe_integrate_ai_player_with_wonder(state, rng)
+                # Les chantiers de l'Apocalypse dont la terre a change de
+                # main tombent ici : prendre le territoire rase le travail.
+                report.apocalypse_messages = regles.purge_lost_apocalypse_sites(state)
             report.empire_messages = regles.maybe_trigger_empire_event(state, rng)
             report.victory_alerts = regles.record_victory_threat_alerts(state)
             active_players = regles.get_active_players(state)

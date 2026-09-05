@@ -235,6 +235,7 @@ class GraphicalGame:
         "vorlan_chancellery": ((46, 58, 96), (178, 196, 255)),
         "threl_bank": ((72, 60, 24), (255, 232, 150)),
         "obsidian_rampart": ((26, 30, 38), (200, 208, 224)),
+        "apocalypse_seal": ((72, 10, 12), (255, 150, 120)),
     }
     VICTORY_CONDITION_LABELS = {
         "lieux_sacres": "lieux sacres",
@@ -402,6 +403,10 @@ class GraphicalGame:
         self.religious_influence: dict[int, int] = {}
         self.last_religion_foundation_message: Optional[str] = None
         self.wonder_territories: dict[str, int] = {}
+        # Chantiers du Sceau de l'Apocalypse : territoire -> versements, et
+        # territoire -> qui les a faits (cf. moteur.regles).
+        self.apocalypse_site_stages: dict[int, int] = {}
+        self.apocalypse_site_owners: dict[int, int] = {}
         # Le joueur lie au Serment d'Orvane, s'il y en a un.
         self.eternal_ally_player: Optional[int] = None
         self.eternal_ally_patron: Optional[int] = None
@@ -1369,6 +1374,14 @@ class GraphicalGame:
                 str(player): int(milestone)
                 for player, milestone in getattr(self, "culture_expansion_milestones", {}).items()
             },
+            "apocalypse_site_stages": {
+                str(tid): int(stages)
+                for tid, stages in getattr(self, "apocalypse_site_stages", {}).items()
+            },
+            "apocalypse_site_owners": {
+                str(tid): int(owner)
+                for tid, owner in getattr(self, "apocalypse_site_owners", {}).items()
+            },
             "wonder_territories": {
                 str(wonder_type): int(tid)
                 for wonder_type, tid in getattr(self, "wonder_territories", {}).items()
@@ -1646,6 +1659,14 @@ class GraphicalGame:
         self.culture_expansion_milestones = {
             int(player): max(0, int(milestone) // 50 * 50)
             for player, milestone in payload.get("culture_expansion_milestones", {}).items()
+        }
+        self.apocalypse_site_stages = {
+            int(k): max(0, int(v))
+            for k, v in payload.get("apocalypse_site_stages", {}).items()
+        }
+        self.apocalypse_site_owners = {
+            int(k): int(v)
+            for k, v in payload.get("apocalypse_site_owners", {}).items()
         }
         self.wonder_territories = {
             str(wonder_type): int(tid)
@@ -5316,6 +5337,8 @@ class GraphicalGame:
         self.player_science = {}
         self.culture_expansion_milestones = {}
         self.wonder_territories = {}
+        self.apocalypse_site_stages = {}
+        self.apocalypse_site_owners = {}
         self.wonder_construction_turns = {}
         self.pending_wonder_type = None
         self.eternal_ally_player = None
@@ -9914,6 +9937,8 @@ class GraphicalGame:
                 self.show_message(report.market_message, 5200)
             if report.integration_message:
                 self.show_message(report.integration_message, 6200)
+            for message in report.apocalypse_messages:
+                self.show_message(message, 6200)
             for message in report.empire_messages:
                 self.show_message(message, 4600)
         self.selected_source = None
@@ -11625,6 +11650,11 @@ class GraphicalGame:
             pygame.draw.rect(self.screen, symbol_color, (cx - 8, cy - 2, 16, 9), 2)
             for dx in (-8, -3, 2):
                 pygame.draw.rect(self.screen, symbol_color, (cx + dx, cy - 7, 5, 5), 2)
+        elif wonder_type == "apocalypse_seal":
+            # Soleil eteint : le disque barre d'une croix
+            pygame.draw.circle(self.screen, symbol_color, (cx, cy), 7, 2)
+            pygame.draw.line(self.screen, symbol_color, (cx - 6, cy - 6), (cx + 6, cy + 6), 2)
+            pygame.draw.line(self.screen, symbol_color, (cx - 6, cy + 6), (cx + 6, cy - 6), 2)
 
     def draw_money_bonus_badge(self, x: int, y: int, commercial_city: bool = False, vassal: bool = False) -> None:
         badge_rect = pygame.Rect(0, 0, 28, 24)

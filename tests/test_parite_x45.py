@@ -63,6 +63,7 @@ ALLIANCE_LIST_KEYS = {
 CLES_ABSENTES_DE_L_ORIGINAL = (
     "ruin_territory_ids", "eternal_ally_player", "eternal_ally_patron",
     "victory_milestones", "ai_last_missile_turns",
+    "apocalypse_site_stages", "apocalypse_site_owners",
 )
 # Meme chose dans les instantanes de replay, ou la cle porte un autre nom.
 CLES_D_INSTANTANE_ABSENTES_DE_L_ORIGINAL = ("ruins",)

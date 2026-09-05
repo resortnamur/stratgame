@@ -148,7 +148,37 @@ WONDER_DEFINITIONS = {
         "kind": "ia",
         "first_turn": 36,
     },
+    # La merveille a part : un chantier de cinq versements, ouvert a tous a
+    # partir du tour APOCALYPSE_FIRST_TURN, et qui eteint le monde quand il
+    # s'acheve. Elle n'a pas de famille commune avec les autres : son "kind"
+    # lui est propre (cf. is_apocalypse_wonder_type).
+    "apocalypse_seal": {
+        "name": "Sceau de l'Apocalypse",
+        "effect": (
+            "Plonge le monde dans un age de tenebres : culture, science et revenus "
+            "divises par 10 pour tous, ressources +5 et mines de minerais precieux "
+            "eteintes. Son territoire rapporte 5 renforts et 100 ecus par tour"
+        ),
+        "kind": "apocalypse",
+        "first_turn": 60,
+    },
 }
+
+# Le Sceau de l'Apocalypse. Cinq versements de WONDER_COST sur un meme
+# territoire, un par tour comme toute merveille : le chantier est donc
+# visible cinq tours durant, et chaque versement est annonce a tout le monde
+# (cf. advance_apocalypse_site). Le premier qui acheve efface les chantiers
+# des autres, sans rien leur rendre.
+APOCALYPSE_FIRST_TURN = 60
+APOCALYPSE_STAGES = 5
+# L'age de tenebres : tout ce qui se compte est divise par dix. La science
+# deja acquise l'est une fois, seche, au moment ou le sceau se ferme ; la
+# culture, la science et les revenus le sont ensuite a chaque tour.
+APOCALYPSE_DIVISOR = 10
+# Ce que le territoire du sceau rend a son proprietaire, et qui echappe a la
+# division : un montant fixe, comme les mines et les ruines.
+APOCALYPSE_TERRITORY_INCOME = 100
+APOCALYPSE_TERRITORY_REINFORCEMENT_BONUS = 5
 
 # Le tirage de la Chancellerie de Vorlan : une chance sur dix, a chaque tour
 # de jeu, d'integrer une IA voisine. Le tirage n'a lieu que si la merveille
@@ -1039,6 +1069,19 @@ def sanitize_economy_state(state: GameState) -> None:
         sanitized_wonders[wonder_type] = territory_id
         occupied_wonder_territories.add(territory_id)
     state.wonder_territories = sanitized_wonders
+    # Chantiers de l'Apocalypse : on jette ceux dont le territoire n'existe
+    # plus, ceux sans proprietaire connu, et tous si le sceau est deja ferme.
+    state.apocalypse_site_stages = {
+        tid: max(0, int(stages))
+        for tid, stages in state.apocalypse_site_stages.items()
+        if tid in valid_ids and 0 < int(stages) < APOCALYPSE_STAGES
+        and tid in state.apocalypse_site_owners
+        and "apocalypse_seal" not in sanitized_wonders
+    }
+    state.apocalypse_site_owners = {
+        tid: int(owner) for tid, owner in state.apocalypse_site_owners.items()
+        if tid in state.apocalypse_site_stages
+    }
     raw_factory_ids = {tid for tid in state.factory_territory_ids if tid in valid_ids}
     raw_airport_ids = {tid for tid in state.airport_territory_ids if tid in valid_ids}
     raw_port_ids = {tid for tid in state.port_territory_ids if tid in valid_ids}
@@ -1411,6 +1454,11 @@ def calculate_player_income(state: GameState, player: int) -> int:
     income += get_player_ruin_count(state, player) * RUIN_INCOME
     if player_controls_wonder(state, player, "kaleth_gardens"):
         income += TOURISM_WONDER_INCOME
+    if is_apocalypse_active(state):
+        # L'age de tenebres : tout est divise, sauf ce que le sceau rend a
+        # son propre territoire.
+        income //= APOCALYPSE_DIVISOR
+        income += get_apocalypse_income_bonus(state, player)
     return income
 
 
@@ -2520,6 +2568,8 @@ def calculate_player_culture(state: GameState, player: int) -> int:
     if player_controls_wonder(state, player, "kaleth_gardens"):
         # Apport fixe du tourisme : les doubleurs ne le multiplient pas.
         culture += TOURISM_WONDER_CULTURE
+    if is_apocalypse_active(state):
+        culture //= APOCALYPSE_DIVISOR
     return culture
 
 
@@ -3814,10 +3864,13 @@ def calculate_territory_science(state: GameState, territory: Territory) -> int:
 def calculate_player_science_income(state: GameState, player: int) -> int:
     if player < 0 or is_onu_player(state, player):
         return 0
-    return sum(
+    science = sum(
         calculate_territory_science(state, terr)
         for terr in state.territories if terr.owner == player
     )
+    if is_apocalypse_active(state):
+        science //= APOCALYPSE_DIVISOR
+    return science
 
 
 def get_base_player_science(state: GameState, player: int) -> int:
@@ -4131,6 +4184,15 @@ def is_ai_wonder_type(wonder_type: Optional[str]) -> bool:
     return bool(definition) and definition.get("kind") == "ia"
 
 
+def is_apocalypse_wonder_type(wonder_type: Optional[str]) -> bool:
+    definition = WONDER_DEFINITIONS.get(wonder_type or "")
+    return bool(definition) and definition.get("kind") == "apocalypse"
+
+
+def can_player_build_apocalypse_wonder(state: GameState, player: int) -> bool:
+    return state.turn >= APOCALYPSE_FIRST_TURN
+
+
 def get_ai_wonder_first_turn(wonder_type: Optional[str]) -> int:
     definition = WONDER_DEFINITIONS.get(wonder_type or "")
     return int(definition.get("first_turn", 0)) if definition else 0
@@ -4161,6 +4223,18 @@ def can_player_build_cultural_wonder(state: GameState, player: int) -> bool:
     return calculate_player_culture(state, player) >= get_wonder_culture_threshold(state, player)
 
 
+def register_wonder_construction_turn(state: GameState, player: int) -> None:
+    """Note que ce joueur a bati (ou verse) ce tour-ci.
+
+    Le registre vit en memoire de session, pas dans les sauvegardes : un
+    versement du Sceau de l'Apocalypse s'y inscrit comme une construction,
+    ce qui limite le chantier a une etape par tour.
+    """
+    if not hasattr(state, "wonder_construction_turns"):
+        state.wonder_construction_turns = {}
+    state.wonder_construction_turns[player] = state.turn
+
+
 def has_built_wonder_this_turn(state: GameState, player: int) -> bool:
     """Une seule merveille par joueur et par tour.
 
@@ -4171,6 +4245,8 @@ def has_built_wonder_this_turn(state: GameState, player: int) -> bool:
 
 
 def can_player_build_wonder_type(state: GameState, player: int, wonder_type: str) -> bool:
+    if is_apocalypse_wonder_type(wonder_type):
+        return can_player_build_apocalypse_wonder(state, player)
     if is_ai_wonder_type(wonder_type):
         return can_player_build_ai_wonder(state, player, wonder_type)
     if is_late_wonder_type(wonder_type):
@@ -4207,10 +4283,7 @@ def build_wonder(state: GameState, territory_id: int, wonder_type: str, record_e
     if territory.owner < 0 or is_onu_player(state, territory.owner):
         return False
     state.wonder_territories[wonder_type] = territory_id
-    # Registre en memoire du "une merveille par tour" (non sauvegarde).
-    if not hasattr(state, "wonder_construction_turns"):
-        state.wonder_construction_turns = {}
-    state.wonder_construction_turns[territory.owner] = state.turn
+    register_wonder_construction_turn(state, territory.owner)
     wonder_religion_id = get_wonder_religion_id_for_wonder(wonder_type)
     if wonder_religion_id is not None:
         state.religion_foundation_turns[wonder_religion_id] = state.turn
@@ -5303,8 +5376,11 @@ def spawn_bonus_5_resource(
     """Pose une ressource +5 sur un territoire tire au hasard.
 
     ``exclude`` ecarte un territoire du tirage : le gisement qui vient de
-    s'epuiser ne peut pas se rallumer sur place.
+    s'epuiser ne peut pas se rallumer sur place. Sous le sceau de
+    l'Apocalypse, plus rien ne repousse.
     """
+    if is_apocalypse_active(state):
+        return None
     candidates = [
         terr for terr in state.territories
         if terr.owner >= 0
@@ -5331,8 +5407,11 @@ def spawn_precious_mineral_mine(
     """Pose une mine de minerais precieux sur un territoire tire au hasard.
 
     ``exclude`` ecarte un territoire du tirage : la mine qui vient de
-    s'epuiser ne peut pas se reouvrir sur place.
+    s'epuiser ne peut pas se reouvrir sur place. Sous le sceau de
+    l'Apocalypse, plus aucune ne se rouvre.
     """
+    if is_apocalypse_active(state):
+        return None
     candidates = [
         terr for terr in state.territories
         if terr.owner >= 0
@@ -5550,6 +5629,147 @@ def maybe_trigger_market_event(state: GameState, rng=random) -> Optional[str]:
         message += f" J{abrite + 1} n'y perd rien : la {get_wonder_name('threl_bank')} tient."
     record_major_event(state, message)
     return message
+
+
+def is_apocalypse_active(state: GameState) -> bool:
+    """Le sceau est-il ferme ? Alors le monde vit son age de tenebres."""
+    return "apocalypse_seal" in state.wonder_territories
+
+
+def get_apocalypse_site_stages(state: GameState, territory_id: int) -> int:
+    """Les versements deja faits sur ce territoire, s'ils tiennent encore.
+
+    Un chantier n'appartient pas au territoire mais a celui qui l'a commence :
+    si la terre a change de main, il ne vaut plus rien (le balayage de fin de
+    tour, ``purge_lost_apocalypse_sites``, le fait disparaitre).
+    """
+    stages = int(state.apocalypse_site_stages.get(territory_id, 0))
+    if stages <= 0:
+        return 0
+    owner = state.apocalypse_site_owners.get(territory_id)
+    if owner is None or not (0 <= territory_id < len(state.territories)):
+        return 0
+    if state.territories[territory_id].owner != owner:
+        return 0
+    return stages
+
+
+def clear_apocalypse_site(state: GameState, territory_id: int) -> None:
+    state.apocalypse_site_stages.pop(territory_id, None)
+    state.apocalypse_site_owners.pop(territory_id, None)
+
+
+def purge_lost_apocalypse_sites(state: GameState) -> List[str]:
+    """Rase les chantiers dont le territoire a change de main.
+
+    Prendre le territoire d'un rival, c'est detruire son chantier, pas en
+    heriter : les versements sont perdus pour tout le monde. Le balayage
+    passe une fois par tour de jeu.
+    """
+    messages: List[str] = []
+    for territory_id in sorted(state.apocalypse_site_stages):
+        owner = state.apocalypse_site_owners.get(territory_id)
+        if owner is None or not (0 <= territory_id < len(state.territories)):
+            clear_apocalypse_site(state, territory_id)
+            continue
+        if state.territories[territory_id].owner == owner:
+            continue
+        stages = int(state.apocalypse_site_stages.get(territory_id, 0))
+        clear_apocalypse_site(state, territory_id)
+        message = (
+            f"Tour {state.turn}: le chantier du {get_wonder_name('apocalypse_seal')} "
+            f"de J{owner + 1} sur {get_territory_name_or_default(state, territory_id)} "
+            f"est rase avec la prise du territoire ({stages} versement(s) perdus)."
+        )
+        record_major_event(state, message)
+        messages.append(message)
+    return messages
+
+
+def trigger_apocalypse(state: GameState, territory_id: int) -> str:
+    """Ferme le sceau : le monde bascule dans son age de tenebres.
+
+    Tout se divise par dix d'un coup pour la science deja acquise, puis a
+    chaque tour pour la culture, la science et les revenus. Les ressources
+    tardives s'eteignent — et ne reapparaissent plus. Seul le territoire du
+    sceau y gagne : cinq renforts et cent ecus par tour, hors division.
+
+    Les religions ne bougent pas : elles se repandent, convertissent et
+    gagnent comme avant. Ce sont les comptes du monde qui s'effondrent, pas
+    les croyances.
+    """
+    state.apocalypse_site_stages.clear()
+    state.apocalypse_site_owners.clear()
+    build_wonder(state, territory_id, "apocalypse_seal", record_event=False)
+
+    for player in list(state.player_science):
+        state.player_science[player] = int(state.player_science[player]) // APOCALYPSE_DIVISOR
+
+    for terr in state.territories:
+        if terr.reinforcement_bonus == 5:
+            terr.reinforcement_bonus = 1
+    state.bonus_5_spawn_turns.clear()
+    state.precious_mineral_mine_ids.clear()
+    state.precious_mineral_mine_spawn_turns.clear()
+
+    if 0 <= territory_id < len(state.territories):
+        state.territories[territory_id].reinforcement_bonus = (
+            APOCALYPSE_TERRITORY_REINFORCEMENT_BONUS
+        )
+
+    nom = get_territory_name_or_default(state, territory_id)
+    proprietaire = state.territories[territory_id].owner if 0 <= territory_id < len(state.territories) else -1
+    message = (
+        f"Tour {state.turn}: le {get_wonder_name('apocalypse_seal')} se ferme sur {nom}. "
+        f"Le monde entre dans son age de tenebres : culture, science et revenus divises "
+        f"par {APOCALYPSE_DIVISOR} pour tous, ressources +5 et mines de minerais precieux "
+        f"eteintes a jamais. Seul {nom} prospere : {APOCALYPSE_TERRITORY_REINFORCEMENT_BONUS} "
+        f"renforts et {APOCALYPSE_TERRITORY_INCOME} ecus par tour pour J{proprietaire + 1}."
+    )
+    record_major_event(state, message)
+    return message
+
+
+def advance_apocalypse_site(state: GameState, territory_id: int, player: int) -> Optional[str]:
+    """Un versement de plus sur ce chantier, et le sceau si c'est le dernier.
+
+    Chaque versement est annonce a tous : le chantier ne se cache pas, c'est
+    tout son interet. Un chantier commence par quelqu'un d'autre est rase et
+    repart de zero — on ne reprend pas le travail d'un rival.
+    """
+    if is_apocalypse_active(state):
+        return None
+    if not (0 <= territory_id < len(state.territories)):
+        return None
+    if state.apocalypse_site_owners.get(territory_id) != player:
+        clear_apocalypse_site(state, territory_id)
+    stages = get_apocalypse_site_stages(state, territory_id) + 1
+    nom = get_territory_name_or_default(state, territory_id)
+    # Un versement compte comme une construction : c'est ce qui limite le
+    # chantier a une etape par tour, du cote des IA comme de la boutique.
+    register_wonder_construction_turn(state, player)
+    if stages >= APOCALYPSE_STAGES:
+        return trigger_apocalypse(state, territory_id)
+    state.apocalypse_site_stages[territory_id] = stages
+    state.apocalypse_site_owners[territory_id] = player
+    restants = APOCALYPSE_STAGES - stages
+    message = (
+        f"Tour {state.turn}: J{player + 1} avance le chantier du "
+        f"{get_wonder_name('apocalypse_seal')} sur {nom} ({stages}/{APOCALYPSE_STAGES}). "
+        f"Encore {restants} versement(s) avant que le monde s'eteigne."
+    )
+    record_major_event(state, message)
+    return message
+
+
+def get_apocalypse_income_bonus(state: GameState, player: int) -> int:
+    """Les cent ecus du sceau, qui echappent a la division comme les mines."""
+    territory_id = state.wonder_territories.get("apocalypse_seal")
+    if territory_id is None or not (0 <= territory_id < len(state.territories)):
+        return 0
+    if state.territories[territory_id].owner != player:
+        return 0
+    return APOCALYPSE_TERRITORY_INCOME
 
 
 def find_ai_wonder_integration_candidates(state: GameState, integrator: int) -> List[int]:
@@ -6776,6 +6996,23 @@ def find_ai_wonder_purchase(state: GameState, player: int, rng=random):
             -territory.id,
         ),
     )
+    if is_apocalypse_wonder_type(wonder_type):
+        # Le sceau se batit en cinq versements sur un meme territoire :
+        # l'IA reprend son propre chantier s'il en existe un, et n'en ouvre
+        # un nouveau que si elle n'en a aucun.
+        en_cours = [
+            territory for territory in candidates
+            if get_apocalypse_site_stages(state, territory.id) > 0
+            and state.apocalypse_site_owners.get(territory.id) == player
+        ]
+        if en_cours:
+            target = max(en_cours, key=lambda territory: (
+                get_apocalypse_site_stages(state, territory.id), -territory.id,
+            ))
+        return (
+            get_wonder_cost(state, player, wonder_type),
+            lambda terr=target, joueur=player: advance_apocalypse_site(state, terr.id, joueur),
+        )
     return (
         get_wonder_cost(state, player, wonder_type),
         lambda terr=target, kind=wonder_type: build_wonder(state, terr.id, kind),

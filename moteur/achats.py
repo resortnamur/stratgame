@@ -456,7 +456,13 @@ def construire_merveille(state: GameState, terr: Territory, wonder_type: Optiona
         return _refus("Choisissez d'abord une merveille dans le menu des achats.")
     if regles.has_built_wonder_this_turn(state, state.current_player):
         return _refus("Une seule merveille par tour : la prochaine attendra le tour suivant.")
-    if regles.is_ai_wonder_type(wonder_type):
+    if regles.is_apocalypse_wonder_type(wonder_type):
+        if not regles.can_player_build_apocalypse_wonder(state, state.current_player):
+            return _refus(
+                f"{regles.get_wonder_name(wonder_type)} ne se batit qu'a partir du tour "
+                f"{regles.APOCALYPSE_FIRST_TURN} (nous sommes au tour {state.turn})."
+            )
+    elif regles.is_ai_wonder_type(wonder_type):
         if not regles.can_player_build_ai_wonder(state, wonder_type=wonder_type, player=state.current_player):
             return _refus(
                 f"{regles.get_wonder_name(wonder_type)} ne se batit qu'a partir du tour "
@@ -487,6 +493,15 @@ def construire_merveille(state: GameState, terr: Territory, wonder_type: Optiona
     cost = regles.get_wonder_cost(state, state.current_player, wonder_type)
     if not spend_player_money(state, state.current_player, cost):
         return _refus(f"Pas assez d'ecus : {cost} requis pour cette merveille.")
+    if regles.is_apocalypse_wonder_type(wonder_type):
+        # Un versement, pas une construction : le sceau ne se ferme qu'au
+        # cinquieme. Le registre "une merveille par tour" compte le
+        # versement, si bien que le chantier dure au moins cinq tours.
+        message = regles.advance_apocalypse_site(state, terr.id, state.current_player)
+        if message is None:
+            state.player_money[state.current_player] += cost
+            return _refus("Ce chantier ne peut plus avancer.")
+        return _succes(message)
     if not regles.build_wonder(state, terr.id, wonder_type):
         state.player_money[state.current_player] += cost
         return _refus("Construction de la merveille impossible.")

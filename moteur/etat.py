@@ -203,6 +203,12 @@ class GameState:
     player_science: Dict[int, int] = field(default_factory=dict)
     culture_expansion_milestones: Dict[int, int] = field(default_factory=dict)
     wonder_territories: Dict[str, int] = field(default_factory=dict)
+    # Chantiers du Sceau de l'Apocalypse : territoire -> versements faits, et
+    # territoire -> qui les a faits. Deux registres paralleles, comme pour les
+    # territoires soumis. Le chantier appartient a celui qui l'a commence :
+    # si la terre change de main, il est rase (purge_lost_apocalypse_sites).
+    apocalypse_site_stages: Dict[int, int] = field(default_factory=dict)
+    apocalypse_site_owners: Dict[int, int] = field(default_factory=dict)
     # Le joueur lie au Serment d'Orvane : allie definitif de qui tient la
     # merveille. Un seul a la fois ; a sa mort, le suivant prend sa place.
     eternal_ally_player: Optional[int] = None
@@ -653,6 +659,14 @@ class GameState:
             str(wonder_type): int(tid)
             for wonder_type, tid in payload.get("wonder_territories", {}).items()
         }
+        self.apocalypse_site_stages = {
+            int(tid): max(0, int(stages))
+            for tid, stages in payload.get("apocalypse_site_stages", {}).items()
+        }
+        self.apocalypse_site_owners = {
+            int(tid): int(owner)
+            for tid, owner in payload.get("apocalypse_site_owners", {}).items()
+        }
         allie = payload.get("eternal_ally_player")
         self.eternal_ally_player = None if allie is None else int(allie)
         patron = payload.get("eternal_ally_patron")
@@ -869,6 +883,14 @@ class GameState:
             "wonder_territories": {
                 str(wonder_type): int(tid)
                 for wonder_type, tid in self.wonder_territories.items()
+            },
+            "apocalypse_site_stages": {
+                str(tid): int(stages)
+                for tid, stages in self.apocalypse_site_stages.items()
+            },
+            "apocalypse_site_owners": {
+                str(tid): int(owner)
+                for tid, owner in self.apocalypse_site_owners.items()
             },
             "eternal_ally_player": (
                 None if self.eternal_ally_player is None else int(self.eternal_ally_player)

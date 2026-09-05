@@ -134,6 +134,7 @@ const MERVEILLES = {
   vorlan_chancellery: "Chancellerie de Vorlan",
   threl_bank: "Banque de Threl",
   obsidian_rampart: "Rempart d'Obsidienne",
+  apocalypse_seal: "Sceau de l'Apocalypse",
 };
 
 // Merveilles débloquées par la culture (100 points) plutôt que la science.
@@ -161,6 +162,13 @@ const TOURS_MERVEILLES_IA = {
 };
 const PREMIER_TOUR_MERVEILLES_IA = Math.min(...Object.values(TOURS_MERVEILLES_IA));
 
+// Le Sceau de l'Apocalypse : une famille à lui seul. Cinq versements de 300
+// écus sur un même territoire, un par tour, à partir du tour 60. Le premier
+// qui achève éteint le monde — et chaque versement est annoncé à tous.
+const MERVEILLE_APOCALYPSE = "apocalypse_seal";
+const TOUR_APOCALYPSE = 60;
+const ETAPES_APOCALYPSE = 5;
+
 const EFFETS_MERVEILLES = {
   elyrion_sanctuary: "Fonde Elyrion, religion conquérante liée au territoire",
   thousand_voices_theatre: "Double la culture de son contrôleur",
@@ -177,10 +185,12 @@ const EFFETS_MERVEILLES = {
   vorlan_chancellery: "IA seulement : chaque tour, une chance sur dix d'intégrer une IA voisine",
   threl_bank: "IA seulement : son contrôleur ne perd rien dans un crash ni une crise boursière",
   obsidian_rampart: "IA seulement : ce territoire ne peut pas être attaqué par un joueur humain",
+  apocalypse_seal: "Âge de ténèbres : culture, science et revenus divisés par 10 pour TOUS, ressources +5 et mines éteintes. Ce territoire : +5 renforts et +100 écus par tour",
 };
 
 // La famille d'une merveille, pour trier le menu déroulant de la boutique.
 function familleMerveille(type) {
+  if (type === MERVEILLE_APOCALYPSE) return "apocalypse";
   if (MERVEILLES_IA.has(type)) return "ia";
   if (MERVEILLES_TARDIVES.has(type)) return "tardive";
   if (MERVEILLES_CULTURELLES.has(type)) return "culturelle";
@@ -229,6 +239,11 @@ const CATALOGUE_ACHATS = [
   { id: "merveille_ia", achat: "merveille", libelle: "Merveille des IA — 300",
     cibles: ["mien"], merveille: true, famille: "ia", cout: 300,
     tour: PREMIER_TOUR_MERVEILLES_IA },
+  // Le Sceau de l'Apocalypse : le bouton porte l'avertissement, parce qu'un
+  // clic de trop finit par éteindre le monde pour tout le monde.
+  { id: "merveille_apocalypse", achat: "merveille",
+    libelle: "⚠ Apocalypse — 300 × 5 étapes", cibles: ["mien"], merveille: true,
+    famille: "apocalypse", cout: 300, tour: TOUR_APOCALYPSE, style: "special" },
   { id: "capitale", libelle: "Changer capitale — 300", cibles: ["mien"], cout: 300 },
   { id: "alliance", libelle: "Alliance déf. — 20/terr.", cibles: ["ennemi"] },
   { id: "alliance_offensive", libelle: "Alliance off. — 25/terr.", allie: true, cible: true },
@@ -1509,6 +1524,7 @@ function afficherParamsBoutique() {
       culturelle: "Merveille culturelle",
       tardive: "Merveille tardive",
       ia: "Merveille des IA",
+      apocalypse: "Sceau de l'Apocalypse (5 × 300)",
     }[article.famille] || "Merveille";
     const champ = document.createElement("select");
     champ.id = "achat-merveille";
@@ -2072,6 +2088,7 @@ function journalRapportTour(rapport) {
   }
   textes.push(rapport.sedition_message, rapport.market_message);
   textes.push(rapport.integration_message);
+  textes.push(...(rapport.apocalypse_messages || []));
   textes.push(...(rapport.resource_messages || []));
   textes.push(...(rapport.religion_messages || []));
   textes.push(...(rapport.empire_messages || []));
@@ -2164,6 +2181,16 @@ function afficherDetailTerritoire() {
   if (etat.precious_mineral_mine_ids.includes(id)) {
     const restants = toursRestantsRessource(etat, id, "mine");
     if (restants !== null) lignes.push(`Mine épuisée dans ${restants} tour(s)`);
+  }
+  // Chantier de l'Apocalypse : personne ne doit pouvoir dire qu'il n'a pas vu.
+  const etapesApocalypse = (etat.apocalypse_site_stages || {})[String(id)];
+  if (etapesApocalypse) {
+    const batisseur = (etat.apocalypse_site_owners || {})[String(id)];
+    const qui = batisseur === undefined ? "" : ` par ${nomDuJoueur(Number(batisseur))}`;
+    lignes.push(
+      `<strong>⚠ Chantier de l'Apocalypse${qui} : ` +
+      `${etapesApocalypse}/${ETAPES_APOCALYPSE}</strong>`,
+    );
   }
   const etiquettes = [];
   const capitales = Object.entries(etat.player_capital_ids)
@@ -2702,6 +2729,7 @@ function dessinerBadge(ctx, type, x, y, etat, tid) {
       vorlan_chancellery: ["rgb(46,58,96)", "rgb(178,196,255)", "Va"],
       threl_bank: ["rgb(72,60,24)", "rgb(255,232,150)", "Th"],
       obsidian_rampart: ["rgb(26,30,38)", "rgb(200,208,224)", "Ob"],
+      apocalypse_seal: ["rgb(72,10,12)", "rgb(255,150,120)", "Ap"],
     };
     const [fond, symbole, lettre] = couleurs[type.split(":")[1]]
       || ["rgb(70,70,70)", "rgb(235,235,235)", "?"];
