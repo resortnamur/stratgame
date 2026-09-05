@@ -182,7 +182,7 @@ const EFFETS_MERVEILLES = {
   kaleth_gardens: "Rapporte chaque tour 50 points de culture et 50 écus à son contrôleur",
   selene_dome: "Protège des missiles tous les territoires de son contrôleur",
   orvane_oath: "Le prochain joueur né en cours de partie devient l'allié définitif de son contrôleur",
-  vorlan_chancellery: "IA seulement : chaque tour, une chance sur dix d'intégrer une IA voisine",
+  vorlan_chancellery: "IA seulement : chaque tour, une chance sur cinq d'intégrer une IA voisine",
   threl_bank: "IA seulement : son contrôleur ne perd rien dans un crash ni une crise boursière",
   obsidian_rampart: "IA seulement : ce territoire ne peut pas être attaqué par un joueur humain",
   apocalypse_seal: "Âge de ténèbres : culture, science et revenus divisés par 10 pour TOUS, ressources +5 et mines éteintes. Ce territoire : +5 renforts et +100 écus par tour",

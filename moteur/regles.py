@@ -132,7 +132,7 @@ WONDER_DEFINITIONS = {
     # science ni de culture : chacune s'ouvre a son tour ("first_turn").
     "vorlan_chancellery": {
         "name": "Chancellerie de Vorlan",
-        "effect": "Chaque tour, une chance sur dix que son controleur IA integre une IA voisine",
+        "effect": "Chaque tour, une chance sur cinq que son controleur IA integre une IA voisine",
         "kind": "ia",
         "first_turn": 12,
     },
@@ -180,11 +180,11 @@ APOCALYPSE_DIVISOR = 10
 APOCALYPSE_TERRITORY_INCOME = 100
 APOCALYPSE_TERRITORY_REINFORCEMENT_BONUS = 5
 
-# Le tirage de la Chancellerie de Vorlan : une chance sur dix, a chaque tour
+# Le tirage de la Chancellerie de Vorlan : une chance sur cinq, a chaque tour
 # de jeu, d'integrer une IA voisine. Le tirage n'a lieu que si la merveille
 # est batie, tenue par une IA, et qu'une IA la touche — sans quoi rien n'est
 # tire, et la suite du hasard de la partie reste inchangee.
-AI_WONDER_INTEGRATION_DENOMINATOR = 10
+AI_WONDER_INTEGRATION_DENOMINATOR = 5
 
 AI_PROFILES = ["standard", "aggressive", "defensive", "variable"]
 

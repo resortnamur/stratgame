@@ -3,7 +3,7 @@
 Elles se batissent comme les autres, au prix ordinaire et par n'importe qui,
 mais leur effet ne joue qu'entre les mains d'une IA :
 
-* la Chancellerie de Vorlan integre une IA voisine, une chance sur dix par
+* la Chancellerie de Vorlan integre une IA voisine, une chance sur cinq par
   tour de jeu, territoires et regiments d'un bloc ;
 * la Banque de Threl met son controleur a l'abri des krachs ;
 * le Rempart d'Obsidienne ferme son territoire aux attaques humaines.
@@ -159,7 +159,7 @@ class TestConstruction(unittest.TestCase):
 
 
 class TestChancellerieDeVorlan(unittest.TestCase):
-    """Une chance sur dix par tour d'avaler une IA voisine."""
+    """Une chance sur cinq par tour d'avaler une IA voisine."""
 
     def build(self, owners=(0, 1, 2), regiments=(5, 7, 9), ia_players=(0, 1, 2)):
         state = build_state(
