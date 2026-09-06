@@ -238,7 +238,10 @@ class GraphicalGame:
         "vorlan_chancellery": ((46, 58, 96), (178, 196, 255)),
         "threl_bank": ((72, 60, 24), (255, 232, 150)),
         "obsidian_rampart": ((26, 30, 38), (200, 208, 224)),
+        "thyr_conclave": ((34, 72, 88), (158, 228, 246)),
         "apocalypse_seal": ((72, 10, 12), (255, 150, 120)),
+        "cinder_bastion": ((74, 62, 54), (250, 212, 170)),
+        "diamond_chasm": ((36, 50, 70), (198, 244, 255)),
     }
     VICTORY_CONDITION_LABELS = {
         "lieux_sacres": "lieux sacres",
@@ -11594,11 +11597,29 @@ class GraphicalGame:
             pygame.draw.rect(self.screen, symbol_color, (cx - 8, cy - 2, 16, 9), 2)
             for dx in (-8, -3, 2):
                 pygame.draw.rect(self.screen, symbol_color, (cx + dx, cy - 7, 5, 5), 2)
+        elif wonder_type == "thyr_conclave":
+            # Deux cercles happes par un troisieme : la seconde chancellerie
+            pygame.draw.circle(self.screen, symbol_color, (cx - 4, cy), 7, 2)
+            pygame.draw.circle(self.screen, symbol_color, (cx + 7, cy - 4), 3, 2)
+            pygame.draw.circle(self.screen, symbol_color, (cx + 7, cy + 4), 3, 2)
+            pygame.draw.line(self.screen, symbol_color, (cx + 4, cy), (cx - 1, cy), 2)
         elif wonder_type == "apocalypse_seal":
             # Soleil eteint : le disque barre d'une croix
             pygame.draw.circle(self.screen, symbol_color, (cx, cy), 7, 2)
             pygame.draw.line(self.screen, symbol_color, (cx - 6, cy - 6), (cx + 6, cy + 6), 2)
             pygame.draw.line(self.screen, symbol_color, (cx - 6, cy + 6), (cx + 6, cy - 6), 2)
+        elif wonder_type == "cinder_bastion":
+            # Un donjon debout sur les cendres : le mur, la tour, le sol
+            pygame.draw.rect(self.screen, symbol_color, (cx - 7, cy - 1, 14, 8), 2)
+            pygame.draw.rect(self.screen, symbol_color, (cx - 2, cy - 8, 4, 7), 2)
+            pygame.draw.line(self.screen, symbol_color, (cx - 8, cy + 8), (cx + 8, cy + 8), 2)
+        elif wonder_type == "diamond_chasm":
+            # Le diamant : sa table et ses facettes
+            pygame.draw.polygon(
+                self.screen, symbol_color,
+                [(cx, cy - 7), (cx + 8, cy - 2), (cx, cy + 8), (cx - 8, cy - 2)], 2,
+            )
+            pygame.draw.line(self.screen, symbol_color, (cx - 8, cy - 2), (cx + 8, cy - 2), 2)
 
     def draw_money_bonus_badge(self, x: int, y: int, commercial_city: bool = False, vassal: bool = False) -> None:
         badge_rect = pygame.Rect(0, 0, 28, 24)

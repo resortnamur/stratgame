@@ -456,13 +456,28 @@ def construire_merveille(state: GameState, terr: Territory, wonder_type: Optiona
         return _refus("Choisissez d'abord une merveille dans le menu des achats.")
     if regles.has_built_wonder_this_turn(state, state.current_player):
         return _refus("Une seule merveille par tour : la prochaine attendra le tour suivant.")
-    if regles.is_apocalypse_wonder_type(wonder_type):
+    if regles.is_post_apocalypse_wonder_type(wonder_type):
+        if not regles.can_player_build_post_apocalypse_wonder(state, state.current_player):
+            return _refus(
+                f"{regles.get_wonder_name(wonder_type)} ne se batit qu'une fois le "
+                f"{regles.get_wonder_name('apocalypse_seal')} ferme."
+            )
+    elif regles.is_apocalypse_wonder_type(wonder_type):
         if not regles.can_player_build_apocalypse_wonder(state, state.current_player):
             return _refus(
                 f"{regles.get_wonder_name(wonder_type)} ne se batit qu'a partir du tour "
                 f"{regles.APOCALYPSE_FIRST_TURN} (nous sommes au tour {state.turn})."
             )
     elif regles.is_ai_wonder_type(wonder_type):
+        if (
+            wonder_type == regles.SECOND_CHANCELLERY_WONDER
+            and regles.blocks_second_chancellery(state, state.current_player)
+        ):
+            return _refus(
+                f"{regles.get_wonder_name(wonder_type)} est fermee a qui tient deja la "
+                f"{regles.get_wonder_name(regles.FIRST_CHANCELLERY_WONDER)} : "
+                "les deux ne se cumulent pas."
+            )
         if not regles.can_player_build_ai_wonder(state, wonder_type=wonder_type, player=state.current_player):
             return _refus(
                 f"{regles.get_wonder_name(wonder_type)} ne se batit qu'a partir du tour "
@@ -585,6 +600,12 @@ def financer_revolte(state: GameState, terr: Territory, rng=random) -> AchatResu
         return _refus("Revolte impossible : les Cites Commercantes sont immunisees contre les revoltes.")
     if target_player in state.nation_players:
         return _refus("Revolte impossible : les nations sont immunisees contre les revoltes.")
+    if regles.is_player_immune_to_revolt_by_wonder(state, target_player):
+        return _refus(
+            f"Revolte impossible : J{target_player + 1} tient le "
+            f"{regles.get_wonder_name(regles.SECOND_CHANCELLERY_WONDER)}, "
+            "aucune revolte ne l'atteint."
+        )
     owned = [t for t in state.territories if t.owner == target_player]
     if not owned:
         return _refus("Cet ennemi n'a plus de territoire a perdre.")

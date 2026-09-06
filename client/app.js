@@ -134,7 +134,10 @@ const MERVEILLES = {
   vorlan_chancellery: "Chancellerie de Vorlan",
   threl_bank: "Banque de Threl",
   obsidian_rampart: "Rempart d'Obsidienne",
+  thyr_conclave: "Conclave de Thyr",
   apocalypse_seal: "Sceau de l'Apocalypse",
+  cinder_bastion: "Bastion de Cendres",
+  diamond_chasm: "Gouffre de Diamant",
 };
 
 // Merveilles débloquées par la culture (100 points) plutôt que la science.
@@ -153,13 +156,19 @@ const TOUR_MERVEILLES_TARDIVES = 42;
 // ne joue qu'entre les mains d'une IA. Chacune s'ouvre à son propre tour, si
 // bien que le menu se remplit au fil de la partie.
 const MERVEILLES_IA = new Set([
-  "vorlan_chancellery", "threl_bank", "obsidian_rampart",
+  "vorlan_chancellery", "threl_bank", "obsidian_rampart", "thyr_conclave",
 ]);
 const TOURS_MERVEILLES_IA = {
   vorlan_chancellery: 12,
   threl_bank: 24,
   obsidian_rampart: 36,
+  thyr_conclave: 32,
 };
+// Pas de cumul entre les deux chancelleries : qui tient celle de Vorlan ne
+// peut pas bâtir le Conclave de Thyr — et s'il finit par contrôler les deux,
+// seule la première agit. Le serveur refuse de toute façon la construction.
+const PREMIERE_CHANCELLERIE = "vorlan_chancellery";
+const SECONDE_CHANCELLERIE = "thyr_conclave";
 const PREMIER_TOUR_MERVEILLES_IA = Math.min(...Object.values(TOURS_MERVEILLES_IA));
 
 // Le Sceau de l'Apocalypse : une famille à lui seul. Cinq versements de 300
@@ -168,6 +177,12 @@ const PREMIER_TOUR_MERVEILLES_IA = Math.min(...Object.values(TOURS_MERVEILLES_IA
 const MERVEILLE_APOCALYPSE = "apocalypse_seal";
 const TOUR_APOCALYPSE = 60;
 const ETAPES_APOCALYPSE = 5;
+
+// Les deux merveilles d'après la fin du monde : 300 écus, aucun seuil, aucun
+// tour — mais rien ne les ouvre tant que le Sceau n'est pas fermé. Dans un
+// monde où plus aucune ressource ne repousse, ce sont les deux derniers
+// gisements, et le temps ne les épuise pas.
+const MERVEILLES_POST_APOCALYPSE = new Set(["cinder_bastion", "diamond_chasm"]);
 
 const EFFETS_MERVEILLES = {
   elyrion_sanctuary: "Fonde Elyrion, religion conquérante liée au territoire",
@@ -182,15 +197,19 @@ const EFFETS_MERVEILLES = {
   kaleth_gardens: "Rapporte chaque tour 50 points de culture et 50 écus à son contrôleur",
   selene_dome: "Protège des missiles tous les territoires de son contrôleur",
   orvane_oath: "Le prochain joueur né en cours de partie devient l'allié définitif de son contrôleur",
-  vorlan_chancellery: "IA seulement : chaque tour, une chance sur cinq d'intégrer une IA voisine",
+  vorlan_chancellery: "IA seulement : chaque tour, une chance sur cinq d'intégrer une IA voisine (jamais une Cité commerçante)",
   threl_bank: "IA seulement : son contrôleur ne perd rien dans un crash ni une crise boursière",
   obsidian_rampart: "IA seulement : ce territoire ne peut pas être attaqué par un joueur humain",
+  thyr_conclave: "IA seulement : chaque tour, une chance sur dix d'intégrer une IA voisine (jamais une Cité commerçante), et aucune révolte, révolution ni trahison ne l'atteint. Inutile à qui tient déjà la Chancellerie de Vorlan",
   apocalypse_seal: "Âge de ténèbres : culture, science et revenus divisés par 10 pour TOUS, ressources +5 et mines éteintes. Ce territoire : +5 renforts et +100 écus par tour",
+  cinder_bastion: "Après l'Apocalypse : +5 renforts par tour sur ce territoire, perpétuellement, pour qui le contrôle",
+  diamond_chasm: "Après l'Apocalypse : +100 écus par tour, perpétuellement, à qui contrôle ce territoire",
 };
 
 // La famille d'une merveille, pour trier le menu déroulant de la boutique.
 function familleMerveille(type) {
   if (type === MERVEILLE_APOCALYPSE) return "apocalypse";
+  if (MERVEILLES_POST_APOCALYPSE.has(type)) return "post_apocalypse";
   if (MERVEILLES_IA.has(type)) return "ia";
   if (MERVEILLES_TARDIVES.has(type)) return "tardive";
   if (MERVEILLES_CULTURELLES.has(type)) return "culturelle";
@@ -244,6 +263,11 @@ const CATALOGUE_ACHATS = [
   { id: "merveille_apocalypse", achat: "merveille",
     libelle: "⚠ Apocalypse — 300 × 5 étapes", cibles: ["mien"], merveille: true,
     famille: "apocalypse", cout: 300, tour: TOUR_APOCALYPSE, style: "special" },
+  // Les deux merveilles d'après la fin : l'article n'apparaît qu'une fois le
+  // Sceau fermé — avant, elles n'existent pas.
+  { id: "merveille_post_apocalypse", achat: "merveille",
+    libelle: "Merveille d'après la fin — 300", cibles: ["mien"], merveille: true,
+    famille: "post_apocalypse", cout: 300, apocalypse: true },
   { id: "capitale", libelle: "Changer capitale — 300", cibles: ["mien"], cout: 300 },
   { id: "alliance", libelle: "Alliance déf. — 20/terr.", cibles: ["ennemi"] },
   { id: "alliance_offensive", libelle: "Alliance off. — 25/terr.", allie: true, cible: true },
@@ -1463,6 +1487,7 @@ function afficherBoutique() {
     if (article.science && science < article.science && !pontDeLaForge) continue;
     if (article.culture && culture < article.culture) continue;
     if (article.tour && (etat.turn || 0) < article.tour) continue;
+    if (article.apocalypse && !apocalypseFermee()) continue;
     const bouton = document.createElement("button");
     bouton.type = "button";
     bouton.textContent = article.libelle;
@@ -1478,6 +1503,21 @@ function afficherBoutique() {
   }
   afficherParamsBoutique();
   afficherConsigneBoutique();
+}
+
+// Le Sceau est-il fermé ? C'est ce qui ouvre les merveilles d'après la fin.
+function apocalypseFermee() {
+  return ((client.etat || {}).wonder_territories || {})[MERVEILLE_APOCALYPSE] !== undefined;
+}
+
+// Contrôle-t-on cette merveille ? Même lecture que le serveur : c'est le
+// propriétaire de son territoire qui la tient.
+function jeControleMerveille(type) {
+  const etat = client.etat || {};
+  const tid = (etat.wonder_territories || {})[type];
+  if (tid === undefined) return false;
+  const terr = (etat.territories_state || {})[tid];
+  return !!terr && terr.owner === client.monSiege;
 }
 
 function afficherParamsBoutique() {
@@ -1525,14 +1565,18 @@ function afficherParamsBoutique() {
       tardive: "Merveille tardive",
       ia: "Merveille des IA",
       apocalypse: "Sceau de l'Apocalypse (5 × 300)",
+      post_apocalypse: "Merveille d'après la fin",
     }[article.famille] || "Merveille";
     const champ = document.createElement("select");
     champ.id = "achat-merveille";
     for (const [type, nom] of Object.entries(MERVEILLES)) {
       if (familleMerveille(type) !== article.famille) continue;
-      // Les trois merveilles des IA n'ouvrent pas au même tour.
+      // Les quatre merveilles des IA n'ouvrent pas au même tour.
       if (MERVEILLES_IA.has(type)
           && (client.etat.turn || 0) < TOURS_MERVEILLES_IA[type]) continue;
+      // Le Conclave est fermé à qui tient déjà la Chancellerie de Vorlan.
+      if (type === SECONDE_CHANCELLERIE
+          && jeControleMerveille(PREMIERE_CHANCELLERIE)) continue;
       if (Object.keys(client.etat.wonder_territories).includes(type)) continue;
       const option = document.createElement("option");
       option.value = type;
@@ -2729,7 +2773,11 @@ function dessinerBadge(ctx, type, x, y, etat, tid) {
       vorlan_chancellery: ["rgb(46,58,96)", "rgb(178,196,255)", "Va"],
       threl_bank: ["rgb(72,60,24)", "rgb(255,232,150)", "Th"],
       obsidian_rampart: ["rgb(26,30,38)", "rgb(200,208,224)", "Ob"],
+      thyr_conclave: ["rgb(34,72,88)", "rgb(158,228,246)", "Ty"],
       apocalypse_seal: ["rgb(72,10,12)", "rgb(255,150,120)", "Ap"],
+      // Les deux merveilles d'après la fin : cendre et diamant.
+      cinder_bastion: ["rgb(74,62,54)", "rgb(250,212,170)", "Bc"],
+      diamond_chasm: ["rgb(36,50,70)", "rgb(198,244,255)", "Gd"],
     };
     const [fond, symbole, lettre] = couleurs[type.split(":")[1]]
       || ["rgb(70,70,70)", "rgb(235,235,235)", "?"];

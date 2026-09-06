@@ -148,6 +148,15 @@ WONDER_DEFINITIONS = {
         "kind": "ia",
         "first_turn": 36,
     },
+    "thyr_conclave": {
+        "name": "Conclave de Thyr",
+        "effect": (
+            "Chaque tour, une chance sur dix que son controleur IA integre une IA "
+            "voisine ; aucune revolte, revolution ni trahison ne l'atteint"
+        ),
+        "kind": "ia",
+        "first_turn": 32,
+    },
     # La merveille a part : un chantier de cinq versements, ouvert a tous a
     # partir du tour APOCALYPSE_FIRST_TURN, et qui eteint le monde quand il
     # s'acheve. Elle n'a pas de famille commune avec les autres : son "kind"
@@ -161,6 +170,24 @@ WONDER_DEFINITIONS = {
         ),
         "kind": "apocalypse",
         "first_turn": 60,
+    },
+    # Les deux merveilles d'apres la fin du monde : rien ne les ouvre tant que
+    # le Sceau n'est pas ferme. Elles ne rendent pas plus qu'un gisement
+    # ordinaire — mais un gisement que le temps n'epuise jamais, dans un monde
+    # ou plus aucun ne repousse.
+    "cinder_bastion": {
+        "name": "Bastion de Cendres",
+        "effect": (
+            "Donne a ce territoire 5 renforts par tour, a jamais, pour qui le controle"
+        ),
+        "kind": "post_apocalypse",
+    },
+    "diamond_chasm": {
+        "name": "Gouffre de Diamant",
+        "effect": (
+            "Rapporte chaque tour 100 ecus, a jamais, a qui controle ce territoire"
+        ),
+        "kind": "post_apocalypse",
     },
 }
 
@@ -180,11 +207,34 @@ APOCALYPSE_DIVISOR = 10
 APOCALYPSE_TERRITORY_INCOME = 100
 APOCALYPSE_TERRITORY_REINFORCEMENT_BONUS = 5
 
+# Les deux merveilles d'apres la fin du monde, a 300 ecus comme les autres :
+# un gisement +5 et une mine de diamant, mais perpetuels. Elles echappent aux
+# vingt tours des ressources tardives et, pour la mine, a la division par dix.
+POST_APOCALYPSE_REINFORCEMENT_BONUS = 5
+POST_APOCALYPSE_MINE_INCOME = 100
+# Les territoires dont le +5 ne s'epuise pas : ni rotation, ni compteur de
+# duree de vie. Le Sceau les a ouverts, le Bastion de Cendres les continue.
+PERMANENT_BONUS_5_WONDERS = {
+    "apocalypse_seal": APOCALYPSE_TERRITORY_REINFORCEMENT_BONUS,
+    "cinder_bastion": POST_APOCALYPSE_REINFORCEMENT_BONUS,
+}
+
 # Le tirage de la Chancellerie de Vorlan : une chance sur cinq, a chaque tour
 # de jeu, d'integrer une IA voisine. Le tirage n'a lieu que si la merveille
 # est batie, tenue par une IA, et qu'une IA la touche — sans quoi rien n'est
 # tire, et la suite du hasard de la partie reste inchangee.
 AI_WONDER_INTEGRATION_DENOMINATOR = 5
+# Le Conclave de Thyr fait la meme chose, deux fois moins souvent, et met en
+# plus son controleur a l'abri des revoltes. Les deux ne se cumulent jamais :
+# qui tient la Chancellerie ne tire rien du Conclave (cf.
+# get_ai_integration_wonder_controller).
+FIRST_CHANCELLERY_WONDER = "vorlan_chancellery"
+SECOND_CHANCELLERY_WONDER = "thyr_conclave"
+THYR_INTEGRATION_DENOMINATOR = 10
+AI_INTEGRATION_WONDERS = (
+    (FIRST_CHANCELLERY_WONDER, AI_WONDER_INTEGRATION_DENOMINATOR),
+    (SECOND_CHANCELLERY_WONDER, THYR_INTEGRATION_DENOMINATOR),
+)
 
 AI_PROFILES = ["standard", "aggressive", "defensive", "variable"]
 
@@ -1029,11 +1079,11 @@ def sync_late_resource_lifetimes(state: GameState) -> None:
     Appele au changement de tour global, pas au chargement : la sauvegarde
     relue reste ainsi identique a l'octet pres.
     """
-    ensure_apocalypse_seal_bonus(state)
+    ensure_permanent_wonder_reinforcement_bonuses(state)
     bonus_5_ids = {
         terr.id for terr in state.territories
         if terr.reinforcement_bonus == 5
-        and not is_apocalypse_seal_territory(state, terr.id)
+        and not is_permanent_bonus_5_wonder_territory(state, terr.id)
     }
     # Le filtre ci-dessous jette aussi le compteur qu'une partie commencee
     # avant ce correctif avait attribue au territoire du Sceau : son +5
@@ -1282,6 +1332,36 @@ def is_player_immune_to_market_events(state: GameState, player: int) -> bool:
     return get_ai_wonder_controller(state, "threl_bank") == player
 
 
+def get_ai_integration_wonder_controller(
+    state: GameState, wonder_type: str,
+) -> Optional[int]:
+    """Le controleur IA dont cette chancellerie joue vraiment.
+
+    Les deux ne se cumulent pas : qui tient la Chancellerie de Vorlan ne
+    tire rien du Conclave de Thyr, meme s'il l'a pris aussi. La premiere
+    annule la seconde — ni le tirage, ni l'immunite aux revoltes.
+    """
+    controller = get_ai_wonder_controller(state, wonder_type)
+    if controller is None:
+        return None
+    if (
+        wonder_type == SECOND_CHANCELLERY_WONDER
+        and get_ai_wonder_controller(state, FIRST_CHANCELLERY_WONDER) == controller
+    ):
+        return None
+    return controller
+
+
+def is_player_immune_to_revolt_by_wonder(state: GameState, player: int) -> bool:
+    """Le Conclave de Thyr : ni revolte, ni revolution, ni trahison.
+
+    L'immunite suit la merveille : elle passe a qui prend son territoire,
+    et elle s'eteint si son controleur tient aussi la Chancellerie de
+    Vorlan (pas de cumul) ou s'il n'est pas une IA.
+    """
+    return get_ai_integration_wonder_controller(state, SECOND_CHANCELLERY_WONDER) == player
+
+
 def get_player_temple_count(state: GameState, player: int) -> int:
     if player < 0 or is_onu_player(state, player):
         return 0
@@ -1465,6 +1545,7 @@ def calculate_player_income(state: GameState, player: int) -> int:
         # son propre territoire.
         income //= APOCALYPSE_DIVISOR
         income += get_apocalypse_income_bonus(state, player)
+        income += get_post_apocalypse_mine_income(state, player)
     return income
 
 
@@ -4199,6 +4280,21 @@ def can_player_build_apocalypse_wonder(state: GameState, player: int) -> bool:
     return state.turn >= APOCALYPSE_FIRST_TURN
 
 
+def is_post_apocalypse_wonder_type(wonder_type: Optional[str]) -> bool:
+    """Merveille d'apres la fin du monde : aucun seuil, aucun tour, un sceau.
+
+    Elles ne s'ouvrent qu'une fois le Sceau de l'Apocalypse ferme. Dans un
+    monde ou plus aucune ressource ne repousse, ce sont les deux seuls
+    gisements qui restent a prendre.
+    """
+    definition = WONDER_DEFINITIONS.get(wonder_type or "")
+    return bool(definition) and definition.get("kind") == "post_apocalypse"
+
+
+def can_player_build_post_apocalypse_wonder(state: GameState, player: int) -> bool:
+    return is_apocalypse_active(state)
+
+
 def get_ai_wonder_first_turn(wonder_type: Optional[str]) -> int:
     definition = WONDER_DEFINITIONS.get(wonder_type or "")
     return int(definition.get("first_turn", 0)) if definition else 0
@@ -4250,10 +4346,24 @@ def has_built_wonder_this_turn(state: GameState, player: int) -> bool:
     return getattr(state, "wonder_construction_turns", {}).get(player) == state.turn
 
 
+def blocks_second_chancellery(state: GameState, player: int) -> bool:
+    """La Chancellerie de Vorlan ferme la porte du Conclave de Thyr.
+
+    Qui la tient deja ne peut pas batir la seconde : le Conclave ne lui
+    servirait a rien (pas de cumul), et le lui laisser batir reviendrait a
+    le laisser retirer la merveille du jeu pour rien.
+    """
+    return player_controls_wonder(state, player, FIRST_CHANCELLERY_WONDER)
+
+
 def can_player_build_wonder_type(state: GameState, player: int, wonder_type: str) -> bool:
+    if is_post_apocalypse_wonder_type(wonder_type):
+        return can_player_build_post_apocalypse_wonder(state, player)
     if is_apocalypse_wonder_type(wonder_type):
         return can_player_build_apocalypse_wonder(state, player)
     if is_ai_wonder_type(wonder_type):
+        if wonder_type == SECOND_CHANCELLERY_WONDER and blocks_second_chancellery(state, player):
+            return False
         return can_player_build_ai_wonder(state, player, wonder_type)
     if is_late_wonder_type(wonder_type):
         return can_player_build_late_wonder(state, player)
@@ -4298,6 +4408,11 @@ def build_wonder(state: GameState, territory_id: int, wonder_type: str, record_e
         apply_initial_religious_influence(state, wonder_religion_id, territory_id)
     elif wonder_type == "golden_pact_palace":
         enforce_commercial_city_wonder_exclusivity(state)
+    elif wonder_type in PERMANENT_BONUS_5_WONDERS:
+        # Le gisement prend effet aussitot, et pour toujours : aucun compteur
+        # de duree de vie ne le suit (cf. sync_late_resource_lifetimes).
+        territory.reinforcement_bonus = PERMANENT_BONUS_5_WONDERS[wonder_type]
+        state.bonus_5_spawn_turns.pop(territory_id, None)
     if record_event:
         message = (
             f"Tour {state.turn}: J{territory.owner + 1} construit {get_wonder_name(wonder_type)} "
@@ -5768,30 +5883,35 @@ def advance_apocalypse_site(state: GameState, territory_id: int, player: int) ->
     return message
 
 
-def is_apocalypse_seal_territory(state: GameState, territory_id: int) -> bool:
-    """Ce territoire porte-t-il le Sceau ?
+def is_permanent_bonus_5_wonder_territory(state: GameState, territory_id: int) -> bool:
+    """Ce territoire porte-t-il une merveille a +5 perpetuel ?
 
-    Son bonus de renforts vaut 5 comme une ressource +5, mais il n'en est
-    pas une : il ne s'epuise pas au bout de vingt tours, et rien ne le
-    remplace ailleurs. Les ressources tardives doivent donc l'ignorer.
+    Le Sceau de l'Apocalypse et le Bastion de Cendres donnent cinq renforts
+    comme une ressource +5, mais ils n'en sont pas : ils ne s'epuisent pas
+    au bout de vingt tours, et rien ne les remplace ailleurs. Les ressources
+    tardives doivent donc les ignorer.
     """
-    return state.wonder_territories.get("apocalypse_seal") == territory_id
+    return any(
+        state.wonder_territories.get(wonder_type) == territory_id
+        for wonder_type in PERMANENT_BONUS_5_WONDERS
+    )
 
 
-def ensure_apocalypse_seal_bonus(state: GameState) -> None:
-    """Redonne au territoire du Sceau ses cinq renforts s'il les a perdus.
+def ensure_permanent_wonder_reinforcement_bonuses(state: GameState) -> None:
+    """Redonne leurs cinq renforts aux territoires qui les ont perdus.
 
-    Les parties commencees avant le correctif ont vu ce bonus s'eteindre
-    au bout de vingt tours, traite comme une ressource tardive. Le remettre
-    a chaque changement de tour repare ces parties-la sans rien demander,
-    et ne coute rien aux autres : la valeur y est deja bonne.
+    Les parties commencees avant le correctif ont vu le bonus du Sceau
+    s'eteindre au bout de vingt tours, traite comme une ressource tardive.
+    Le remettre a chaque changement de tour repare ces parties-la sans rien
+    demander, et ne coute rien aux autres : la valeur y est deja bonne.
     """
-    territory_id = state.wonder_territories.get("apocalypse_seal")
-    if territory_id is None or not (0 <= territory_id < len(state.territories)):
-        return
-    territoire = state.territories[territory_id]
-    if territoire.reinforcement_bonus != APOCALYPSE_TERRITORY_REINFORCEMENT_BONUS:
-        territoire.reinforcement_bonus = APOCALYPSE_TERRITORY_REINFORCEMENT_BONUS
+    for wonder_type, bonus in PERMANENT_BONUS_5_WONDERS.items():
+        territory_id = state.wonder_territories.get(wonder_type)
+        if territory_id is None or not (0 <= territory_id < len(state.territories)):
+            continue
+        territoire = state.territories[territory_id]
+        if territoire.reinforcement_bonus != bonus:
+            territoire.reinforcement_bonus = bonus
 
 
 def get_apocalypse_income_bonus(state: GameState, player: int) -> int:
@@ -5804,12 +5924,31 @@ def get_apocalypse_income_bonus(state: GameState, player: int) -> int:
     return APOCALYPSE_TERRITORY_INCOME
 
 
+def get_post_apocalypse_mine_income(state: GameState, player: int) -> int:
+    """Les cent ecus du Gouffre de Diamant, une mine que rien n'epuise.
+
+    Comme les mines de minerais precieux dont il prend la suite, son revenu
+    est un montant fixe : il echappe a la division de l'age de tenebres, et
+    il suit le territoire — le prendre, c'est le prendre.
+    """
+    territory_id = state.wonder_territories.get("diamond_chasm")
+    if territory_id is None or not (0 <= territory_id < len(state.territories)):
+        return 0
+    if state.territories[territory_id].owner != player:
+        return 0
+    return POST_APOCALYPSE_MINE_INCOME
+
+
 def find_ai_wonder_integration_candidates(state: GameState, integrator: int) -> List[int]:
     """Les IA qui touchent l'empire de l'integrateur, et elles seules.
 
     Le voisinage garde la Chancellerie honnete : elle agrandit un empire de
     proche en proche, elle ne telepporte pas des enclaves a l'autre bout de
     la carte. L'ONU, les humains et l'integrateur lui-meme sont hors jeu.
+
+    Les Cites commercantes aussi : ce sont des IA au sens du code, mais pas
+    des joueurs IA comme les autres. Aucune chancellerie ne les fusionne,
+    jamais — ni celle de Vorlan, ni le Conclave de Thyr.
     """
     voisines: Set[int] = set()
     for terr in state.territories:
@@ -5821,29 +5960,33 @@ def find_ai_wonder_integration_candidates(state: GameState, integrator: int) -> 
                 continue
             if is_onu_player(state, autre) or not is_ai_player(state, autre):
                 continue
+            if is_commercial_city_player(state, autre):
+                continue
             voisines.add(autre)
     return sorted(voisines)
 
 
-def maybe_integrate_ai_player_with_wonder(state: GameState, rng=random) -> Optional[str]:
-    """Le tirage de la Chancellerie de Vorlan, une fois par tour de jeu.
+def maybe_integrate_ai_player_with_one_wonder(
+    state: GameState, wonder_type: str, denominator: int, rng=random,
+) -> Optional[str]:
+    """Le tirage d'une chancellerie, une fois par tour de jeu.
 
-    Une chance sur ``AI_WONDER_INTEGRATION_DENOMINATOR`` d'absorber une IA
-    voisine : ses territoires et leurs garnisons changent de main d'un bloc,
-    elle disparait de la partie faute de terres. Ses ecus et sa science ne
-    se transmettent pas — ils s'evanouissent avec elle.
+    Une chance sur ``denominator`` d'absorber une IA voisine : ses
+    territoires et leurs garnisons changent de main d'un bloc, elle
+    disparait de la partie faute de terres. Ses ecus et sa science ne se
+    transmettent pas — ils s'evanouissent avec elle.
 
-    Rien n'est tire tant que la merveille n'est pas batie, tenue par une IA,
-    et qu'une IA ne la touche pas : une partie sans Chancellerie deroule
-    exactement le meme hasard qu'avant.
+    Rien n'est tire tant que la merveille n'est pas batie, tenue par une IA
+    dont l'effet joue vraiment, et qu'une IA ne la touche pas : une partie
+    sans chancellerie deroule exactement le meme hasard qu'avant.
     """
-    integrator = get_ai_wonder_controller(state, "vorlan_chancellery")
+    integrator = get_ai_integration_wonder_controller(state, wonder_type)
     if integrator is None:
         return None
     candidates = find_ai_wonder_integration_candidates(state, integrator)
     if not candidates:
         return None
-    if rng.randint(1, AI_WONDER_INTEGRATION_DENOMINATOR) != 1:
+    if rng.randint(1, denominator) != 1:
         return None
     absorbee = rng.choice(candidates)
     territoires = [terr for terr in state.territories if terr.owner == absorbee]
@@ -5854,12 +5997,33 @@ def maybe_integrate_ai_player_with_wonder(state: GameState, rng=random) -> Optio
         terr.owner = integrator
     refresh_eliminated_human_players(state)
     message = (
-        f"Tour {state.turn}: la {get_wonder_name('vorlan_chancellery')} integre J{absorbee + 1} "
+        f"Tour {state.turn}: la {get_wonder_name(wonder_type)} integre J{absorbee + 1} "
         f"a J{integrator + 1} : {len(territoires)} territoire(s) et {regiments} regiment(s) "
         f"changent de main, J{absorbee + 1} disparait de la carte."
     )
     record_major_event(state, message)
     return message
+
+
+def maybe_integrate_ai_player_with_wonder(state: GameState, rng=random) -> Optional[str]:
+    """Les tirages des deux chancelleries, dans l'ordre de leur arrivee.
+
+    La Chancellerie de Vorlan tire une fois sur cinq, le Conclave de Thyr
+    une fois sur dix. Un meme controleur ne tire jamais deux fois : le
+    Conclave est muet entre les mains de qui tient deja la Chancellerie
+    (cf. ``get_ai_integration_wonder_controller``). Entre deux mains
+    differentes, les deux tirages ont bien lieu, et le message les joint.
+    """
+    messages = [
+        message for message in (
+            maybe_integrate_ai_player_with_one_wonder(state, wonder_type, denominator, rng)
+            for wonder_type, denominator in AI_INTEGRATION_WONDERS
+        )
+        if message
+    ]
+    if not messages:
+        return None
+    return " | ".join(messages)
 
 
 # ----------------------------------------------------------------------
@@ -6171,7 +6335,11 @@ def maybe_trigger_empire_event(state: GameState, rng=random) -> List[str]:
         pending_transfers: List[Tuple[int, int, List[Territory]]] = []
 
         for player in active_players:
-            if player in state.nation_players or is_commercial_city_player(state, player):
+            if (
+                player in state.nation_players
+                or is_commercial_city_player(state, player)
+                or is_player_immune_to_revolt_by_wonder(state, player)
+            ):
                 skipped_players.append(player)
                 continue
             owned = [terr for terr in state.territories if terr.owner == player]
@@ -6249,6 +6417,8 @@ def maybe_trigger_empire_event(state: GameState, rng=random) -> List[str]:
         for player in get_active_players(state)
         if player not in state.nation_players
         and not is_commercial_city_player(state, player)
+        # Le Conclave de Thyr : son controleur IA n'est jamais la cible.
+        and not is_player_immune_to_revolt_by_wonder(state, player)
     ]
     if not active_players:
         event_message = f"Tour {state.turn}: aucun evenement d'empire, aucun joueur actif non immunise."

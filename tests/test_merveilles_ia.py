@@ -1,4 +1,4 @@
-"""Les trois merveilles des IA : chancellerie, banque, rempart d'obsidienne.
+"""Les quatre merveilles des IA : deux chancelleries, une banque, un rempart.
 
 Elles se batissent comme les autres, au prix ordinaire et par n'importe qui,
 mais leur effet ne joue qu'entre les mains d'une IA :
@@ -6,6 +6,10 @@ mais leur effet ne joue qu'entre les mains d'une IA :
 * la Chancellerie de Vorlan integre une IA voisine, une chance sur cinq par
   tour de jeu, territoires et regiments d'un bloc ;
 * la Banque de Threl met son controleur a l'abri des krachs ;
+* le Conclave de Thyr fait comme la Chancellerie, une fois sur dix, et met en
+  plus son controleur a l'abri des revoltes, revolutions et trahisons ; les
+  deux chancelleries ne se cumulent jamais, et ni l'une ni l'autre n'absorbe
+  une Cite commercante ;
 * le Rempart d'Obsidienne ferme son territoire aux attaques humaines.
 
 Lancement, depuis le dossier "Jeux Strat" :
@@ -49,6 +53,17 @@ class TirageBloque(TirageForce):
     """Le meme, mais ``randint`` rate toujours."""
 
     def randint(self, borne_basse, borne_haute):
+        return borne_haute if borne_haute != borne_basse else borne_basse
+
+
+class TirageEspion(TirageForce):
+    """Le meme, mais il note les denominateurs consultes et rate toujours."""
+
+    def __init__(self):
+        self.denominateurs = []
+
+    def randint(self, borne_basse, borne_haute):
+        self.denominateurs.append(borne_haute)
         return borne_haute if borne_haute != borne_basse else borne_basse
 
 
@@ -111,6 +126,7 @@ class TestConstruction(unittest.TestCase):
     TOURS = {
         "vorlan_chancellery": 12,
         "threl_bank": 24,
+        "thyr_conclave": 32,
         "obsidian_rampart": 36,
     }
 
@@ -235,6 +251,228 @@ class TestChancellerieDeVorlan(unittest.TestCase):
         self.assertEqual(
             [terr.owner for terr in state.territories], [0, 0, 0],
         )
+
+
+class TestConclaveDeThyr(unittest.TestCase):
+    """La seconde chancellerie : une fois sur dix, et rien ne la renverse."""
+
+    def build(self, owners=(0, 1, 2), ia_players=(0, 1, 2), chancellerie=None):
+        state = build_state(
+            owners=owners, regiments=(5, 7, 9)[:len(owners)],
+            ia_players=ia_players, money=500,
+        )
+        state.wonder_territories["thyr_conclave"] = 0
+        if chancellerie is not None:
+            state.wonder_territories["vorlan_chancellery"] = chancellerie
+        return state
+
+    def test_le_tirage_est_une_chance_sur_dix(self):
+        state = self.build()
+        espion = TirageEspion()
+        self.assertIsNone(regles.maybe_integrate_ai_player_with_wonder(state, espion))
+        self.assertEqual(espion.denominateurs, [regles.THYR_INTEGRATION_DENOMINATOR])
+        self.assertEqual(regles.THYR_INTEGRATION_DENOMINATOR, 10)
+
+    def test_il_integre_une_ia_voisine_comme_la_chancellerie(self):
+        state = self.build()
+        message = regles.maybe_integrate_ai_player_with_wonder(state, TirageForce())
+        self.assertIsNotNone(message)
+        self.assertIn(regles.get_wonder_name("thyr_conclave"), message)
+        self.assertEqual(state.territories[1].owner, 0)
+
+    def test_un_humain_n_en_tire_rien(self):
+        state = self.build(ia_players=(1, 2))
+        self.assertIsNone(
+            regles.maybe_integrate_ai_player_with_wonder(state, TirageInterdit()),
+        )
+        self.assertFalse(regles.is_player_immune_to_revolt_by_wonder(state, 0))
+
+    def test_l_immunite_suit_le_controleur_ia(self):
+        state = self.build()
+        self.assertTrue(regles.is_player_immune_to_revolt_by_wonder(state, 0))
+        self.assertFalse(regles.is_player_immune_to_revolt_by_wonder(state, 1))
+        # Le territoire change de main : l'immunite aussi.
+        state.territories[0].owner = 1
+        self.assertFalse(regles.is_player_immune_to_revolt_by_wonder(state, 0))
+        self.assertTrue(regles.is_player_immune_to_revolt_by_wonder(state, 1))
+
+
+class TestPasDeCumulEntreLesDeuxChancelleries(unittest.TestCase):
+    """Controler la premiere annule entierement la seconde."""
+
+    def build(self, conclave=0, chancellerie=0, ia_players=(0, 1, 2)):
+        state = build_state(
+            owners=(0, 1, 2), regiments=(5, 7, 9), ia_players=ia_players, money=500,
+        )
+        state.wonder_territories["thyr_conclave"] = conclave
+        state.wonder_territories["vorlan_chancellery"] = chancellerie
+        return state
+
+    def test_un_seul_tirage_quand_les_deux_sont_dans_la_meme_main(self):
+        state = self.build()
+        espion = TirageEspion()
+        self.assertIsNone(regles.maybe_integrate_ai_player_with_wonder(state, espion))
+        self.assertEqual(
+            espion.denominateurs, [regles.AI_WONDER_INTEGRATION_DENOMINATOR],
+        )
+
+    def test_l_immunite_tombe_avec_le_reste(self):
+        state = self.build()
+        self.assertFalse(regles.is_player_immune_to_revolt_by_wonder(state, 0))
+
+    def test_deux_mains_differentes_tirent_chacune(self):
+        """J1 tient la Chancellerie, J2 le Conclave : les deux tirages ont lieu."""
+        state = self.build(conclave=1, chancellerie=0)
+        espion = TirageEspion()
+        self.assertIsNone(regles.maybe_integrate_ai_player_with_wonder(state, espion))
+        self.assertEqual(
+            espion.denominateurs,
+            [regles.AI_WONDER_INTEGRATION_DENOMINATOR, regles.THYR_INTEGRATION_DENOMINATOR],
+        )
+        self.assertTrue(regles.is_player_immune_to_revolt_by_wonder(state, 1))
+
+    def test_la_construction_est_fermee_a_qui_tient_la_chancellerie(self):
+        state = build_state(
+            owners=(0, 1), regiments=(5, 5), ia_players=(0,),
+            money=regles.WONDER_COST, turn=40,
+        )
+        state.wonder_territories["vorlan_chancellery"] = 0
+        self.assertNotIn(
+            "thyr_conclave", regles.get_buildable_wonder_types(state, 0),
+        )
+        resultat = achats.construire_merveille(
+            state, state.territories[0], "thyr_conclave",
+        )
+        self.assertFalse(resultat.ok)
+        self.assertNotIn("thyr_conclave", state.wonder_territories)
+        self.assertEqual(state.player_money[0], regles.WONDER_COST)
+
+    def test_un_autre_joueur_peut_toujours_le_batir(self):
+        state = build_state(
+            owners=(0, 1), regiments=(5, 5), ia_players=(0, 1),
+            money=regles.WONDER_COST, turn=40,
+        )
+        state.wonder_territories["vorlan_chancellery"] = 0
+        state.current_player = 1
+        resultat = achats.construire_merveille(
+            state, state.territories[1], "thyr_conclave",
+        )
+        self.assertTrue(resultat.ok, resultat.message)
+        self.assertEqual(state.wonder_territories["thyr_conclave"], 1)
+
+
+class TestCitesCommercantesEpargnees(unittest.TestCase):
+    """Une CC n'est pas une IA comme les autres : aucune chancellerie ne la prend."""
+
+    CHANCELLERIES = ("vorlan_chancellery", "thyr_conclave")
+
+    def build(self, owners, cites, chancellerie):
+        state = build_state(
+            owners=owners, regiments=(5,) * len(owners),
+            ia_players=tuple(range(max(owners) + 1)), money=500,
+        )
+        state.commercial_city_players.update(cites)
+        state.wonder_territories[chancellerie] = 0
+        return state
+
+    def test_une_cc_voisine_n_est_jamais_fusionnee(self):
+        """Seule voisine : la chancellerie n'a rien a prendre, rien n'est tire."""
+        for chancellerie in self.CHANCELLERIES:
+            with self.subTest(merveille=chancellerie):
+                state = self.build(
+                    owners=(0, 1, 2), cites=(1,), chancellerie=chancellerie,
+                )
+                self.assertTrue(regles.is_commercial_city_player(state, 1))
+                self.assertEqual(
+                    regles.find_ai_wonder_integration_candidates(state, 0), [],
+                )
+                self.assertIsNone(
+                    regles.maybe_integrate_ai_player_with_wonder(state, TirageInterdit()),
+                )
+                self.assertEqual(state.territories[1].owner, 1)
+
+    def test_l_ia_ordinaire_est_prise_mais_pas_la_cc(self):
+        """J1 est une CC, J2 une IA ordinaire : seule J2 change de main."""
+        for chancellerie in self.CHANCELLERIES:
+            with self.subTest(merveille=chancellerie):
+                state = self.build(
+                    owners=(0, 1, 0, 2), cites=(1,), chancellerie=chancellerie,
+                )
+                self.assertEqual(
+                    regles.find_ai_wonder_integration_candidates(state, 0), [2],
+                )
+                message = regles.maybe_integrate_ai_player_with_wonder(state, TirageForce())
+                self.assertIsNotNone(message)
+                self.assertEqual(state.territories[3].owner, 0)
+                self.assertEqual(state.territories[1].owner, 1)
+
+    def test_sans_le_statut_de_cc_la_voisine_est_bien_prise(self):
+        """Le temoin : c'est le statut de Cite commercante qui la sauve."""
+        for chancellerie in self.CHANCELLERIES:
+            with self.subTest(merveille=chancellerie):
+                state = self.build(
+                    owners=(0, 1, 2), cites=(), chancellerie=chancellerie,
+                )
+                self.assertIsNotNone(
+                    regles.maybe_integrate_ai_player_with_wonder(state, TirageForce()),
+                )
+                self.assertEqual(state.territories[1].owner, 0)
+
+
+class TestImmuniteAuxRevoltes(unittest.TestCase):
+    """Ni revolte financee, ni trahison, ni revolution generale."""
+
+    def build(self, turn, conclave=True):
+        state = build_state(
+            owners=(0, 0, 0, 0, 1, 1, 1, 2, 2),
+            regiments=(5,) * 9, ia_players=(0, 1, 2), money=10_000, turn=turn,
+        )
+        if conclave:
+            state.wonder_territories["thyr_conclave"] = 0
+        return state
+
+    def terres(self, state, joueur):
+        return [terr.id for terr in state.territories if terr.owner == joueur]
+
+    def test_la_revolte_financee_est_refusee(self):
+        state = self.build(turn=40)
+        state.current_player = 1
+        resultat = achats.financer_revolte(state, state.territories[0], TirageForce())
+        self.assertFalse(resultat.ok)
+        self.assertIn(regles.get_wonder_name("thyr_conclave"), resultat.message)
+        self.assertEqual(self.terres(state, 0), [0, 1, 2, 3])
+        self.assertEqual(state.player_money[1], 10_000)
+
+    def test_la_revolte_financee_passe_sans_la_merveille(self):
+        state = self.build(turn=40, conclave=False)
+        state.current_player = 1
+        resultat = achats.financer_revolte(state, state.territories[0], TirageForce())
+        self.assertTrue(resultat.ok, resultat.message)
+        self.assertLess(len(self.terres(state, 0)), 4)
+
+    def test_la_trahison_ne_le_cible_pas(self):
+        """Tour 50 : l'evenement d'empire va au plus gros non immunise."""
+        state = self.build(turn=50)
+        messages = " | ".join(regles.maybe_trigger_empire_event(state, TirageBloque()))
+        self.assertEqual(self.terres(state, 0), [0, 1, 2, 3])
+        self.assertNotIn("J1 perd", messages)
+
+    def test_sans_la_merveille_la_trahison_vise_le_plus_gros(self):
+        state = self.build(turn=50, conclave=False)
+        regles.maybe_trigger_empire_event(state, TirageBloque())
+        self.assertLess(len(self.terres(state, 0)), 4)
+
+    def test_la_revolution_generale_le_saute(self):
+        """Tour 80 : tout le monde se coupe en deux, sauf lui."""
+        state = self.build(turn=80)
+        regles.maybe_trigger_empire_event(state, TirageBloque())
+        self.assertEqual(self.terres(state, 0), [0, 1, 2, 3])
+        self.assertLess(len(self.terres(state, 1)), 3)
+
+    def test_sans_la_merveille_la_revolution_le_touche(self):
+        state = self.build(turn=80, conclave=False)
+        regles.maybe_trigger_empire_event(state, TirageBloque())
+        self.assertLess(len(self.terres(state, 0)), 4)
 
 
 class TestBanqueDeThrel(unittest.TestCase):
