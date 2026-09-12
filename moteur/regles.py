@@ -2157,14 +2157,16 @@ def choose_farthest_territories_from_capital(
 def split_empire_after_milestone(
     state: GameState, player: int, rng=random,
 ) -> Optional[dict]:
-    """Coupe en deux l'empire de celui qui vient de franchir un palier.
+    """Coupe en deux l'empire d'un joueur, quand un palier vient de tomber.
 
     Un premier palier franchi lancait son auteur vers tous les suivants :
     l'avance qui l'avait porte la ne faisait que grandir. Desormais elle se
-    paie. La moitie de l'empire la plus eloignee de la capitale fait
-    secession et passe a un nouveau joueur IA, qui emporte la moitie du
-    tresor — autant de perdu pour son ancien maitre — et le meme niveau de
-    science, que l'ancien maitre conserve aussi. La culture ne se partage
+    paie, et toute la carte avec lui (cf.
+    ``split_all_empires_after_milestone``). La moitie de l'empire la plus
+    eloignee de la capitale fait secession et passe a un nouveau joueur IA,
+    qui emporte la moitie du tresor — autant de perdu pour son ancien
+    maitre — et le meme niveau de science, que l'ancien maitre conserve
+    aussi. La culture ne se partage
     pas : elle se recompte de part et d'autre a partir des amenagements
     restes sur les territoires de chacun.
 
@@ -2202,14 +2204,42 @@ def split_empire_after_milestone(
     }
 
 
+def split_all_empires_after_milestone(
+    state: GameState, author: int, rng=random,
+) -> List[dict]:
+    """Coupe en deux tous les empires de la carte, celui de l'auteur d'abord.
+
+    Un palier franchi ne coute plus seulement a celui qui le decroche : il
+    rebat la carte entiere. Chaque empire — humain, IA, nation, Cite
+    commercante et ONU comprises — laisse partir sa moitie la plus eloignee
+    de sa capitale vers un nouveau joueur IA, avec la moitie de son tresor
+    et le meme niveau de science. Autant de nouveaux joueurs que d'empires
+    coupes. Seul echappe l'empire d'un seul territoire, qui ne se coupe pas
+    en deux.
+
+    Les joueurs nes de la scission ne se scindent pas a leur tour : la liste
+    des empires est arretee avant la premiere coupe.
+    """
+    empires = [author] + [
+        player for player in get_active_players(state) if player != author
+    ]
+    scissions: List[dict] = []
+    for player in empires:
+        scission = split_empire_after_milestone(state, player, rng)
+        if scission:
+            scissions.append(scission)
+    return scissions
+
+
 def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
     """Enregistre les paliers nouvellement franchis et distribue les points.
 
     Un palier deja franchi ne se rejoue jamais : que le meme joueur ou un
     autre remplisse a nouveau la condition ne change plus rien.
 
-    Chaque palier franchi coupe en deux l'empire de son auteur, sauf celui
-    qui met fin a la partie : voir ``split_empire_after_milestone``.
+    Chaque palier franchi coupe en deux tous les empires de la carte, sauf
+    celui qui met fin a la partie : voir
+    ``split_all_empires_after_milestone``.
     """
     crossed = get_crossed_victory_conditions(state)
     nouveaux: List[dict] = []
@@ -2245,11 +2275,17 @@ def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
             f"Il marque un point de victoire ({get_victory_points(state, owner)} au total). "
             + suite
         ))
-        # La partie continue : le palier se paie d'une scission. Inutile de
-        # couper en deux un empire qui vient de gagner, ni celui qui tient
-        # deja toute la carte — la partie s'acheve dans les deux cas.
+        # La partie continue : le palier se paie d'une scission generale.
+        # Inutile de couper en deux la carte de celui qui vient de gagner,
+        # ni celle d'un bloc qui tient tout — la partie s'acheve dans les
+        # deux cas.
         if restants and get_bloc_owning_everything(state) is None:
-            scission = split_empire_after_milestone(state, owner, rng)
+            scissions = split_all_empires_after_milestone(state, owner, rng)
+            if scissions:
+                palier["scissions"] = scissions
+            scission = next(
+                (detail for detail in scissions if detail["joueur"] == owner), None,
+            )
             if scission:
                 palier["scission"] = scission
                 record_major_event(state, (
@@ -2259,6 +2295,20 @@ def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
                     f"qui emporte {scission['argent']} ecu(s) et le meme niveau de science "
                     f"({scission['science']}). J{owner + 1} garde sa capitale, "
                     f"{scission['restants']} territoire(s) et son point de victoire."
+                ))
+            autres = [
+                detail for detail in scissions if detail["joueur"] != owner
+            ]
+            if autres:
+                detail_texte = " | ".join(
+                    f"J{detail['joueur'] + 1} -> J{detail['nouveau_joueur'] + 1} "
+                    f"({detail['territoires']} territoire(s), {detail['argent']} ecu(s))"
+                    for detail in autres
+                )
+                record_major_event(state, (
+                    f"Tour {state.turn}: SCISSION GENERALE dans la foulee du palier : "
+                    f"tous les autres empires se coupent aussi en deux, chacun donnant "
+                    f"naissance a un joueur IA. {detail_texte}"
                 ))
     return nouveaux
 

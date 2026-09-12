@@ -1,12 +1,13 @@
-"""Regles d'aout 2026 : franchir un palier coupe l'empire en deux.
+"""Regles d'aout 2026 : franchir un palier coupe les empires en deux.
 
 Le premier palier franchi lancait son auteur vers tous les suivants :
 l'avance qui l'avait porte la ne faisait que grandir, et la partie se jouait
-d'un seul elan. Desormais chaque palier se paie. La moitie de l'empire la
-plus eloignee de la capitale fait secession et passe a un nouveau joueur IA,
-qui emporte la moitie du tresor et le meme niveau de science. Le point de
-victoire, lui, reste acquis. Seul le palier qui acheve la partie ne scinde
-rien : il n'y aurait plus personne pour en profiter.
+d'un seul elan. Desormais chaque palier se paie, et il se paie sur toute la
+carte : chaque empire laisse partir sa moitie la plus eloignee de sa
+capitale vers un nouveau joueur IA, qui emporte la moitie du tresor et le
+meme niveau de science. Autant de nouveaux joueurs que d'empires coupes. Le
+point de victoire, lui, reste acquis. Seul le palier qui acheve la partie ne
+scinde rien : il n'y aurait plus personne pour en profiter.
 
 Lancement, depuis le dossier "Jeux Strat" :
     python -m unittest tests.test_scission_palier -v
@@ -127,6 +128,91 @@ class TestScissionApresPalier(BaseScission):
             sum(1 for terr in recharge.territories if terr.owner == secessionniste),
             attendu,
         )
+
+
+class TestScissionGenerale(BaseScission):
+    """Un palier coupe en deux tous les empires, pas seulement son auteur."""
+
+    def repartir(self, parts):
+        """Distribue la carte : ``parts`` associe un joueur a son nombre de terres."""
+        index = 0
+        for joueur, combien in parts:
+            for _ in range(combien):
+                self.state.territories[index].owner = joueur
+                index += 1
+        for terr in self.state.territories[index:]:
+            terr.owner = parts[0][0]
+
+    def test_le_rival_se_coupe_aussi_en_deux(self):
+        premier_ne = self.state.num_players
+        avant_rival = self.total - self.seuil
+        self.franchir_le_palier_territorial(joueur=0, rival=1)
+        self.assertEqual(len(self.territoires_de(1)), avant_rival - avant_rival // 2)
+        # Deux empires coupes, donc deux nouveaux joueurs.
+        self.assertEqual(self.state.num_players, premier_ne + 2)
+        self.assertTrue(self.territoires_de(premier_ne + 1))
+
+    def test_chaque_empire_donne_naissance_a_un_joueur(self):
+        self.repartir([(0, self.seuil), (1, 8), (2, 6), (3, 5)])
+        premier_ne = self.state.num_players
+        nouveaux = regles.register_victory_milestones(self.state, random.Random(7))
+        self.assertTrue(nouveaux)
+        self.assertEqual(self.state.num_players, premier_ne + 4)
+        for rang, ancien in enumerate((0, 1, 2, 3)):
+            with self.subTest(joueur=ancien):
+                self.assertTrue(self.territoires_de(premier_ne + rang))
+
+    def test_l_auteur_du_palier_est_coupe_le_premier(self):
+        self.repartir([(0, self.seuil), (1, 10), (2, 9)])
+        premier_ne = self.state.num_players
+        nouveaux = regles.register_victory_milestones(self.state, random.Random(7))
+        palier = next(p for p in nouveaux if p["condition"] == "territoires")
+        self.assertEqual(palier["scission"]["joueur"], 0)
+        self.assertEqual(palier["scission"]["nouveau_joueur"], premier_ne)
+        self.assertEqual(
+            [detail["joueur"] for detail in palier["scissions"]], [0, 1, 2],
+        )
+
+    def test_un_empire_d_un_seul_territoire_est_epargne(self):
+        self.repartir([(0, self.seuil), (1, self.total - self.seuil - 1), (2, 1)])
+        nouveaux = regles.register_victory_milestones(self.state, random.Random(7))
+        palier = next(p for p in nouveaux if p["condition"] == "territoires")
+        self.assertNotIn(2, [detail["joueur"] for detail in palier["scissions"]])
+        self.assertEqual(len(self.territoires_de(2)), 1)
+
+    def test_les_nouveaux_joueurs_ne_se_scindent_pas_a_leur_tour(self):
+        self.repartir([(0, self.seuil), (1, 10), (2, 9)])
+        premier_ne = self.state.num_players
+        regles.register_victory_milestones(self.state, random.Random(7))
+        # Trois empires coupes, trois joueurs nes : pas un de plus.
+        self.assertEqual(self.state.num_players, premier_ne + 3)
+
+    def test_la_scission_generale_est_annoncee(self):
+        self.franchir_le_palier_territorial()
+        self.assertTrue(
+            any("SCISSION GENERALE" in evenement
+                for evenement in self.state.recent_major_events)
+        )
+
+    def test_la_cite_commercante_se_coupe_comme_les_autres(self):
+        cites = sorted(self.state.commercial_city_players)
+        if not cites:
+            self.skipTest("Aucune Cite commercante sur cette partie.")
+        cite = cites[0]
+        self.repartir([(0, self.seuil), (1, 10), (cite, 9)])
+        nouveaux = regles.register_victory_milestones(self.state, random.Random(7))
+        palier = next(p for p in nouveaux if p["condition"] == "territoires")
+        self.assertIn(cite, [detail["joueur"] for detail in palier["scissions"]])
+
+    def test_le_dernier_palier_ne_coupe_toujours_rien(self):
+        for condition in regles.REQUIRED_VICTORY_CONDITIONS:
+            if condition != "territoires":
+                self.fermer(condition, 1)
+        self.repartir([(0, self.seuil), (1, 10), (2, 9)])
+        joueurs_avant = self.state.num_players
+        regles.register_victory_milestones(self.state, random.Random(7))
+        self.assertEqual(self.state.num_players, joueurs_avant)
+        self.assertEqual(len(self.territoires_de(1)), 10)
 
 
 class TestDecoupeDepuisLaCapitale(BaseScission):

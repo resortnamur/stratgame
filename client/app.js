@@ -1188,12 +1188,21 @@ function afficherMenacesVictoire() {
     const franchis = paliers.map((palier) => {
       const pion = `<span class="pion" style="background:${rgb(couleurJoueur(palier.joueur))}"></span>`;
       const moyen = LIBELLES_MENACES[palier.condition] || palier.condition;
-      // Chaque palier franchi coupe l'empire de son auteur en deux, sauf le
-      // dernier : la moitié la plus lointaine part à un nouveau joueur IA.
+      // Chaque palier franchi coupe en deux TOUS les empires de la carte,
+      // sauf le dernier : chacun laisse sa moitié la plus lointaine à un
+      // nouveau joueur IA. Le détail affiché est celui de l'auteur.
+      const autres = (palier.scissions || []).filter(
+        (detail) => detail.joueur !== palier.joueur,
+      ).length;
+      const suite = autres
+        ? ` (+ ${autres} autre(s) empire(s) scindé(s))`
+        : "";
       const scission = palier.scission
         ? ` <span class="scission-palier">— scindé : ${palier.scission.territoires} territoire(s)`
-          + ` à ${nomDuJoueur(palier.scission.nouveau_joueur)}</span>`
-        : "";
+          + ` à ${nomDuJoueur(palier.scission.nouveau_joueur)}${suite}</span>`
+        : (autres
+            ? ` <span class="scission-palier">— ${autres} empire(s) scindé(s)</span>`
+            : "");
       return `<li class="palier">${pion}${nomDuJoueur(palier.joueur)} — <strong>${moyen}</strong>${bonus(palier.condition)}`
         + ` <span class="tour-palier">(tour ${palier.tour})</span>${scission}</li>`;
     });
