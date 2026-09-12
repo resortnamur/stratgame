@@ -235,6 +235,9 @@ AI_INTEGRATION_WONDERS = (
     (FIRST_CHANCELLERY_WONDER, AI_WONDER_INTEGRATION_DENOMINATOR),
     (SECOND_CHANCELLERY_WONDER, THYR_INTEGRATION_DENOMINATOR),
 )
+# En dessous de trois joueurs IA sur la carte, les chancelleries se taisent :
+# la derniere IA face a l'integrateur ne se fait pas avaler sans combat.
+AI_INTEGRATION_MIN_AI_PLAYERS = 3
 
 AI_PROFILES = ["standard", "aggressive", "defensive", "variable"]
 
@@ -6016,6 +6019,30 @@ def find_ai_wonder_integration_candidates(state: GameState, integrator: int) -> 
     return sorted(voisines)
 
 
+def count_ai_players_on_map(state: GameState) -> int:
+    """Combien de joueurs IA tiennent encore de la terre.
+
+    Les Cites commercantes n'en sont pas, comme partout ailleurs dans les
+    chancelleries : ce sont des IA au sens du code, pas des joueurs IA. Ni
+    l'ONU, que ``is_ai_player`` ecarte deja.
+    """
+    return sum(
+        1 for player in get_active_players(state)
+        if is_ai_player(state, player) and not is_commercial_city_player(state, player)
+    )
+
+
+def are_ai_integration_wonders_active(state: GameState) -> bool:
+    """Les chancelleries integrent-elles encore quelque chose ?
+
+    A deux joueurs IA sur la carte, non : l'integrateur et sa derniere
+    semblable restent face a face, et il faudra la prendre au combat. Le
+    reste des effets ne bouge pas — l'immunite du Conclave de Thyr continue
+    de proteger son controleur.
+    """
+    return count_ai_players_on_map(state) >= AI_INTEGRATION_MIN_AI_PLAYERS
+
+
 def get_ai_integration_weakness_key(state: GameState, player: int) -> Tuple[int, int, int]:
     """De quoi ranger les proies d'une chancellerie, la plus faible d'abord.
 
@@ -6044,9 +6071,15 @@ def maybe_integrate_ai_player_with_one_wonder(
     Rien n'est tire tant que la merveille n'est pas batie, tenue par une IA
     dont l'effet joue vraiment, et qu'une IA ne la touche pas : une partie
     sans chancellerie deroule exactement le meme hasard qu'avant.
+
+    Rien n'est tire non plus quand il ne reste que deux joueurs IA sur la
+    carte : les chancelleries s'arretent la (cf.
+    ``are_ai_integration_wonders_active``).
     """
     integrator = get_ai_integration_wonder_controller(state, wonder_type)
     if integrator is None:
+        return None
+    if not are_ai_integration_wonders_active(state):
         return None
     candidates = find_ai_wonder_integration_candidates(state, integrator)
     if not candidates:

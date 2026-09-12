@@ -292,13 +292,17 @@ class TestChancellerieDeVorlan(unittest.TestCase):
         self.assertEqual(state.territories[2].owner, 0)
 
     def test_l_integration_se_rejoue_tour_apres_tour(self):
-        """Rien ne l'arrete : elle avale ses voisines l'une apres l'autre."""
-        state = self.build(owners=(0, 1, 2), regiments=(5, 7, 9))
+        """Elle avale ses voisines l'une apres l'autre, jusqu'au plancher."""
+        state = self.build(
+            owners=(0, 1, 2, 3), regiments=(5, 7, 9, 11), ia_players=(0, 1, 2, 3),
+        )
         self.assertIsNotNone(self.integrer(state))
         self.assertIsNotNone(self.integrer(state))
         self.assertEqual(
-            [terr.owner for terr in state.territories], [0, 0, 0],
+            [terr.owner for terr in state.territories], [0, 0, 0, 3],
         )
+        # Il ne reste que deux joueurs IA : la chancellerie s'arrete la.
+        self.assertIsNone(self.integrer(state, TirageInterdit()))
 
 
 class TestConclaveDeThyr(unittest.TestCase):
@@ -443,8 +447,10 @@ class TestCitesCommercantesEpargnees(unittest.TestCase):
         """J1 est une CC, J2 une IA ordinaire : seule J2 change de main."""
         for chancellerie in self.CHANCELLERIES:
             with self.subTest(merveille=chancellerie):
+                # J3, IA ordinaire et lointaine, tient le plancher des trois
+                # joueurs IA : une Cite commercante n'y compte pas.
                 state = self.build(
-                    owners=(0, 1, 0, 2), cites=(1,), chancellerie=chancellerie,
+                    owners=(0, 1, 0, 2, 3), cites=(1,), chancellerie=chancellerie,
                 )
                 self.assertEqual(
                     regles.find_ai_wonder_integration_candidates(state, 0), [2],
@@ -459,12 +465,88 @@ class TestCitesCommercantesEpargnees(unittest.TestCase):
         for chancellerie in self.CHANCELLERIES:
             with self.subTest(merveille=chancellerie):
                 state = self.build(
-                    owners=(0, 1, 2), cites=(), chancellerie=chancellerie,
+                    owners=(0, 1, 2, 3), cites=(), chancellerie=chancellerie,
                 )
                 self.assertIsNotNone(
                     regles.maybe_integrate_ai_player_with_wonder(state, TirageForce()),
                 )
                 self.assertEqual(state.territories[1].owner, 0)
+
+
+class TestPlancherDeDeuxJoueursIA(unittest.TestCase):
+    """A deux joueurs IA sur la carte, les chancelleries ne prennent plus rien."""
+
+    CHANCELLERIES = ("vorlan_chancellery", "thyr_conclave")
+
+    def build(self, owners, ia_players, cites=(), chancellerie="vorlan_chancellery"):
+        state = build_state(
+            owners=owners, regiments=(5,) * len(owners), ia_players=ia_players,
+            money=500,
+        )
+        state.commercial_city_players.update(cites)
+        state.wonder_territories[chancellerie] = 0
+        return state
+
+    def test_deux_ia_seules_ne_donnent_plus_rien(self):
+        """Face a face : aucune integration, et aucun tirage consomme."""
+        for chancellerie in self.CHANCELLERIES:
+            with self.subTest(merveille=chancellerie):
+                state = self.build(
+                    owners=(0, 1), ia_players=(0, 1), chancellerie=chancellerie,
+                )
+                self.assertEqual(regles.count_ai_players_on_map(state), 2)
+                self.assertFalse(regles.are_ai_integration_wonders_active(state))
+                self.assertIsNone(
+                    regles.maybe_integrate_ai_player_with_wonder(state, TirageInterdit()),
+                )
+                self.assertEqual(state.territories[1].owner, 1)
+
+    def test_une_troisieme_ia_rouvre_la_chancellerie(self):
+        for chancellerie in self.CHANCELLERIES:
+            with self.subTest(merveille=chancellerie):
+                state = self.build(
+                    owners=(0, 1, 2), ia_players=(0, 1, 2), chancellerie=chancellerie,
+                )
+                self.assertTrue(regles.are_ai_integration_wonders_active(state))
+                self.assertIsNotNone(
+                    regles.maybe_integrate_ai_player_with_wonder(state, TirageForce()),
+                )
+
+    def test_les_humains_ne_comptent_pas_dans_le_plancher(self):
+        """Deux IA au milieu d'une foule humaine : la chancellerie se tait."""
+        state = self.build(owners=(0, 1, 2, 3), ia_players=(0, 1))
+        self.assertEqual(regles.count_ai_players_on_map(state), 2)
+        self.assertIsNone(
+            regles.maybe_integrate_ai_player_with_wonder(state, TirageInterdit()),
+        )
+
+    def test_une_cite_commercante_ne_compte_pas_dans_le_plancher(self):
+        """Elle n'est jamais une proie : elle ne tient pas lieu de troisieme IA."""
+        state = self.build(owners=(0, 1, 2), ia_players=(0, 1, 2), cites=(2,))
+        self.assertTrue(regles.is_commercial_city_player(state, 2))
+        self.assertEqual(regles.count_ai_players_on_map(state), 2)
+        self.assertIsNone(
+            regles.maybe_integrate_ai_player_with_wonder(state, TirageInterdit()),
+        )
+
+    def test_une_ia_disparue_de_la_carte_ne_compte_plus(self):
+        """Le decompte se lit sur la carte, pas sur le nombre de joueurs."""
+        state = self.build(owners=(0, 1, 2), ia_players=(0, 1, 2))
+        state.territories[2].owner = 1
+        self.assertEqual(regles.count_ai_players_on_map(state), 2)
+        self.assertIsNone(
+            regles.maybe_integrate_ai_player_with_wonder(state, TirageInterdit()),
+        )
+
+    def test_l_immunite_du_conclave_survit_au_plancher(self):
+        """Seule l'integration s'arrete : le reste de la merveille tient."""
+        state = self.build(
+            owners=(0, 1), ia_players=(0, 1), chancellerie="thyr_conclave",
+        )
+        self.assertIsNone(
+            regles.maybe_integrate_ai_player_with_wonder(state, TirageInterdit()),
+        )
+        self.assertTrue(regles.is_player_immune_to_revolt_by_wonder(state, 0))
 
 
 class TestImmuniteAuxRevoltes(unittest.TestCase):
