@@ -5966,6 +5966,18 @@ def find_ai_wonder_integration_candidates(state: GameState, integrator: int) -> 
     return sorted(voisines)
 
 
+def get_ai_integration_weakness_key(state: GameState, player: int) -> Tuple[int, int, int]:
+    """De quoi ranger les proies d'une chancellerie, la plus faible d'abord.
+
+    La faiblesse se lit comme ailleurs dans le jeu (cf.
+    ``find_ai_expedition_target``) : d'abord le nombre de regiments, puis la
+    taille de l'empire, l'identifiant le plus bas departageant les egalites.
+    """
+    territoires = [terr for terr in state.territories if terr.owner == player]
+    regiments = sum(max(0, int(terr.regiments)) for terr in territoires)
+    return (regiments, len(territoires), player)
+
+
 def maybe_integrate_ai_player_with_one_wonder(
     state: GameState, wonder_type: str, denominator: int, rng=random,
 ) -> Optional[str]:
@@ -5975,6 +5987,9 @@ def maybe_integrate_ai_player_with_one_wonder(
     territoires et leurs garnisons changent de main d'un bloc, elle
     disparait de la partie faute de terres. Ses ecus et sa science ne se
     transmettent pas — ils s'evanouissent avec elle.
+
+    La proie n'est pas tiree au sort : entre plusieurs voisines, c'est
+    toujours la plus faible qui est integree.
 
     Rien n'est tire tant que la merveille n'est pas batie, tenue par une IA
     dont l'effet joue vraiment, et qu'une IA ne la touche pas : une partie
@@ -5988,7 +6003,11 @@ def maybe_integrate_ai_player_with_one_wonder(
         return None
     if rng.randint(1, denominator) != 1:
         return None
-    absorbee = rng.choice(candidates)
+    # Pas de proie au hasard : la chancellerie prend toujours la plus faible
+    # de ses voisines (cf. ``get_ai_integration_weakness_key``).
+    absorbee = min(
+        candidates, key=lambda joueur: get_ai_integration_weakness_key(state, joueur),
+    )
     territoires = [terr for terr in state.territories if terr.owner == absorbee]
     if not territoires:
         return None

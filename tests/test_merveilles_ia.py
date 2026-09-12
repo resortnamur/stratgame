@@ -243,6 +243,54 @@ class TestChancellerieDeVorlan(unittest.TestCase):
             regles.maybe_integrate_ai_player_with_wonder(state, TirageInterdit()),
         )
 
+    def entouree(self, regiments):
+        """J0 au centre, une IA de chaque cote, la merveille sur son sol."""
+        state = build_state(
+            owners=(1, 0, 2), regiments=regiments, ia_players=(0, 1, 2), money=500,
+        )
+        state.wonder_territories["vorlan_chancellery"] = 1
+        return state
+
+    def test_la_plus_faible_des_voisines_est_prise_en_premier(self):
+        """Entre deux voisines, la moins armee part la premiere."""
+        state = self.entouree(regiments=(9, 5, 3))
+        message = self.integrer(state)
+        self.assertIn("J3", message)
+        self.assertEqual(state.territories[2].owner, 0)
+        self.assertEqual(state.territories[0].owner, 1)
+
+    def test_le_choix_ne_suit_pas_l_ordre_des_joueurs(self):
+        """Le meme cas, forces inversees : c'est l'autre voisine qui tombe."""
+        state = self.entouree(regiments=(3, 5, 9))
+        message = self.integrer(state)
+        self.assertIn("J2", message)
+        self.assertEqual(state.territories[0].owner, 0)
+        self.assertEqual(state.territories[2].owner, 2)
+
+    def test_a_regiments_egaux_le_plus_petit_empire_tombe(self):
+        state = build_state(
+            owners=(1, 0, 2, 2), regiments=(4, 5, 2, 2), ia_players=(0, 1, 2),
+            money=500,
+        )
+        state.wonder_territories["vorlan_chancellery"] = 1
+        # J1 et J2 alignent quatre regiments chacun : J1 n'en tient qu'un
+        # territoire, J2 deux — c'est J1 qui est integre.
+        message = self.integrer(state)
+        self.assertIn("J2", message)
+        self.assertEqual(state.territories[0].owner, 0)
+        self.assertEqual(state.territories[2].owner, 2)
+
+    def test_la_proie_n_est_jamais_tiree_au_sort(self):
+        """Le hasard n'intervient que pour le tirage d'une chance sur cinq."""
+        state = self.entouree(regiments=(9, 5, 3))
+
+        class TirageSansChoix(TirageForce):
+            def choice(self, sequence):
+                raise AssertionError("la proie ne se tire pas au sort")
+
+        self.assertIsNotNone(self.integrer(state, TirageSansChoix()))
+        self.assertEqual(state.territories[2].owner, 0)
+
     def test_l_integration_se_rejoue_tour_apres_tour(self):
         """Rien ne l'arrete : elle avale ses voisines l'une apres l'autre."""
         state = self.build(owners=(0, 1, 2), regiments=(5, 7, 9))
