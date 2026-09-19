@@ -154,7 +154,7 @@ def advance_turn(
     regles.cleanup_expired_alliances(state)
     previous_player = state.current_player
     if not simple:
-        regles.execute_ai_economic_actions(state, previous_player, rng)
+        regles.execute_ai_economic_actions(state, previous_player, rng, cell_width, cell_height)
     report.reinforcement_report = regles.grant_reinforcements(state, previous_player, rng)
     active_players = regles.get_active_players(state)
     report.has_active_players = bool(active_players)

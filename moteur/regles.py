@@ -4850,6 +4850,33 @@ def get_valid_bridge_candidates(
     return candidates
 
 
+def count_buildable_bridges_from_territory(
+    state: GameState, territory_id: int, cell_width: float, cell_height: float,
+) -> int:
+    """Combien de ponts neufs pourraient encore partir de ce territoire.
+
+    Compte les territoires qu'un pont pourrait atteindre : ni deja voisins,
+    ni deja relies, et geometriquement joignables (cf.
+    ``find_bridge_connection_points``). La propriete des deux rives n'entre
+    pas en compte : un pont se construit des qu'on tient une extremite.
+    """
+    if not (0 <= territory_id < len(state.territories)):
+        return 0
+    if cell_width <= 0 or cell_height <= 0:
+        return 0
+    territory = state.territories[territory_id]
+    neighbors = set(territory.neighbors)
+    total = 0
+    for other in range(len(state.territories)):
+        if other == territory_id or other in neighbors:
+            continue
+        if tuple(sorted((territory_id, other))) in state.bridge_links:
+            continue
+        if find_bridge_connection_points(state, territory_id, other, cell_width, cell_height) is not None:
+            total += 1
+    return total
+
+
 def get_territory_graph_distance(state: GameState, start: int, target: int) -> int:
     if start == target:
         return 0
@@ -7285,7 +7312,10 @@ def find_regular_ai_mercenary_purchase(state: GameState, player: int, owned: Lis
     return quantity * MERCENARY_COST, lambda quantity=quantity, owned=list(owned): add_regular_ai_mercenaries(state, owned, quantity, rng)
 
 
-def find_ai_wonder_purchase(state: GameState, player: int, rng=random):
+def find_ai_wonder_purchase(
+    state: GameState, player: int, rng=random,
+    cell_width: Optional[float] = None, cell_height: Optional[float] = None,
+):
     if not is_ai_player(state, player) or has_built_wonder_this_turn(state, player):
         return None
     available_wonders = get_buildable_wonder_types(state, player)
@@ -7309,6 +7339,20 @@ def find_ai_wonder_purchase(state: GameState, player: int, rng=random):
             -territory.id,
         ),
     )
+    if wonder_type == "daedalus_forge" and cell_width and cell_height:
+        # La Forge de Dedale ne rend gratuits que les ponts dont une extremite
+        # est son propre territoire : l'IA la pose donc la ou le plus de ponts
+        # restent a batir, et non sur sa province la plus riche.
+        target = max(
+            candidates,
+            key=lambda territory: (
+                count_buildable_bridges_from_territory(state, territory.id, cell_width, cell_height),
+                calculate_territory_income(state, territory),
+                len(territory.neighbors),
+                territory.regiments,
+                -territory.id,
+            ),
+        )
     if is_apocalypse_wonder_type(wonder_type):
         # Le sceau se batit en cinq versements sur un meme territoire :
         # l'IA reprend son propre chantier s'il en existe un, et n'en ouvre
@@ -7595,7 +7639,10 @@ def execute_commercial_city_economic_actions(state: GameState, player: int, rng=
     return actions
 
 
-def execute_ai_economic_actions(state: GameState, player: int, rng=random) -> int:
+def execute_ai_economic_actions(
+    state: GameState, player: int, rng=random,
+    cell_width: Optional[float] = None, cell_height: Optional[float] = None,
+) -> int:
     if not is_ai_player(state, player) or is_onu_player(state, player):
         return 0
     if is_colonized_player(state, player):
@@ -7610,7 +7657,7 @@ def execute_ai_economic_actions(state: GameState, player: int, rng=random) -> in
     # atteints. Si l'argent manque, l'IA epargne au lieu de le disperser
     # dans des achats secondaires.
     while get_buildable_wonder_types(state, player):
-        wonder_action = find_ai_wonder_purchase(state, player, rng)
+        wonder_action = find_ai_wonder_purchase(state, player, rng, cell_width, cell_height)
         if wonder_action is None:
             break
         cost, callback = wonder_action
