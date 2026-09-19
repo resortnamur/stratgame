@@ -685,10 +685,19 @@ def refresh_destroyed_commercial_cities(state: GameState) -> List[str]:
 # ----------------------------------------------------------------------
 
 def get_regular_capital_owner(state: GameState, territory_id: int) -> Optional[int]:
+    # Plusieurs joueurs peuvent pointer le meme territoire : celui qui l'a perdue
+    # garde son entree (affichage "ancienne capitale") pendant qu'un autre vient
+    # d'y poser sa nouvelle capitale. Le proprietaire effectif prime, sinon la
+    # capitale achetee resterait inactive : ni sigle C, ni revenu x10.
+    fallback: Optional[int] = None
     for player, capital_id in state.player_capital_ids.items():
-        if capital_id == territory_id:
+        if capital_id != territory_id:
+            continue
+        if 0 <= territory_id < len(state.territories) and state.territories[territory_id].owner == player:
             return player
-    return None
+        if fallback is None:
+            fallback = player
+    return fallback
 
 
 def is_regular_capital_territory(state: GameState, territory_id: int) -> bool:

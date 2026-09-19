@@ -4578,10 +4578,19 @@ class GraphicalGame:
         raise RuntimeError("Impossible de generer une carte avec eaux connectee.")
 
     def get_regular_capital_owner(self, territory_id: int) -> Optional[int]:
+        # Plusieurs joueurs peuvent pointer le meme territoire : celui qui l'a perdue
+        # garde son entree (affichage "ancienne capitale") pendant qu'un autre vient
+        # d'y poser sa nouvelle capitale. Le proprietaire effectif prime, sinon la
+        # capitale achetee resterait inactive : ni sigle C, ni revenu x10.
+        fallback: Optional[int] = None
         for player, capital_id in getattr(self, "player_capital_ids", {}).items():
-            if capital_id == territory_id:
+            if capital_id != territory_id:
+                continue
+            if 0 <= territory_id < len(self.territories) and self.territories[territory_id].owner == player:
                 return player
-        return None
+            if fallback is None:
+                fallback = player
+        return fallback
 
     def is_regular_capital_territory(self, territory_id: int) -> bool:
         return self.get_regular_capital_owner(territory_id) is not None
