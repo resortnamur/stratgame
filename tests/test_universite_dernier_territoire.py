@@ -103,5 +103,36 @@ class TestDernierTerritoire(unittest.TestCase):
         self.assertNotIn("converti", rapport.message)
 
 
+class TestCapitale(unittest.TestCase):
+    """Une universite dans la capitale n'y empeche pas les renforts."""
+
+    def test_la_capitale_recoit_ses_regiments_malgre_l_universite(self):
+        state = build_state(owners=(0, 0, 1))
+        alpha = state.territories[0]
+        state.player_capital_ids[0] = alpha.id
+        regles.add_university(state, alpha.id)
+        converti = regles.place_end_turn_reinforcement(state, alpha, 0)
+        self.assertFalse(converti)
+        self.assertEqual(alpha.regiments, 4)
+        self.assertEqual(state.player_money[0], 0)
+
+    def test_une_autre_universite_convertit_toujours(self):
+        state = build_state(owners=(0, 0, 1))
+        state.player_capital_ids[0] = state.territories[0].id
+        bravo = state.territories[1]
+        regles.add_university(state, bravo.id)
+        self.assertTrue(regles.place_end_turn_reinforcement(state, bravo, 0))
+        self.assertEqual(bravo.regiments, 3)
+        self.assertEqual(state.player_money[0], 10)
+
+    def test_la_capitale_d_un_autre_prise_convertit(self):
+        """L'ancienne capitale d'un adversaire n'est pas la sienne."""
+        state = build_state(owners=(0, 0, 1))
+        alpha = state.territories[0]
+        state.player_capital_ids[1] = alpha.id
+        regles.add_university(state, alpha.id)
+        self.assertTrue(regles.place_end_turn_reinforcement(state, alpha, 0))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1616,14 +1616,25 @@ def get_ai_reinforcement_bonus(state: GameState, player: int) -> int:
     return bonus
 
 
+def is_player_own_capital(state: GameState, territory_id: int, player: int) -> bool:
+    """Le territoire est-il la capitale en titre de ce joueur, qu'il tient ?"""
+    if territory_id == get_active_regular_capital_id_for_player(state, player):
+        return True
+    return (
+        is_commercial_city_player(state, player)
+        and territory_id == get_commercial_city_capital_id(state, player)
+    )
+
+
 def place_end_turn_reinforcement(state: GameState, terr: Territory, player: int) -> bool:
     """Place un renfort, ou le convertit en ecus si le territoire a une universite.
 
-    Exception : un joueur reduit a son dernier territoire touche ses renforts
+    Exceptions : un joueur reduit a son dernier territoire touche ses renforts
     en regiments meme sous une universite — elle ne doit pas le condamner en
-    asphyxiant sa seule source de troupes.
+    asphyxiant sa seule source de troupes. Et la capitale du joueur (ordinaire
+    ou marchande) garde toujours ses renforts militaires, universite ou non.
     """
-    if terr.id in state.university_territory_ids:
+    if terr.id in state.university_territory_ids and not is_player_own_capital(state, terr.id, player):
         owned_count = sum(1 for t in state.territories if t.owner == player)
         if owned_count > 1:
             ensure_player_economy(state, player)
