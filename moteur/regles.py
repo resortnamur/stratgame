@@ -122,7 +122,7 @@ WONDER_DEFINITIONS = {
     },
     "orvane_oath": {
         "name": "Serment d'Orvane",
-        "effect": "Le prochain joueur ne en cours de partie devient l'allie definitif de son controleur",
+        "effect": "Le prochain joueur ne en cours de partie devient l'allie definitif de son controleur. Sans effet s'il ne reste que deux joueurs IA sur la carte",
         "kind": "late",
     },
     # Merveilles des IA : n'importe qui les batit, au prix ordinaire de
@@ -238,6 +238,9 @@ AI_INTEGRATION_WONDERS = (
 # En dessous de trois joueurs IA sur la carte, les chancelleries se taisent :
 # la derniere IA face a l'integrateur ne se fait pas avaler sans combat.
 AI_INTEGRATION_MIN_AI_PLAYERS = 3
+# Meme seuil pour le Serment d'Orvane : a deux joueurs IA, l'allie
+# definitif n'en est plus un.
+ETERNAL_ALLY_MIN_AI_PLAYERS = 3
 
 AI_PROFILES = ["standard", "aggressive", "defensive", "variable"]
 
@@ -1799,6 +1802,10 @@ def get_eternal_ally(state: GameState) -> Optional[int]:
 
     Le serment lie un allie a un patron precis : des que le Serment d'Orvane
     quitte les mains de celui qui l'a recu, l'alliance tombe.
+
+    Il se tait aussi quand il ne reste que deux joueurs IA sur la carte,
+    comme les chancelleries : plus d'alliance, plus de bloc de victoire. Le
+    serment reste noue et reprend si un troisieme joueur IA reapparait.
     """
     ally = getattr(state, "eternal_ally_player", None)
     if ally is None:
@@ -1807,6 +1814,8 @@ def get_eternal_ally(state: GameState) -> Optional[int]:
     if patron is None or patron == ally:
         return None
     if patron != getattr(state, "eternal_ally_patron", None):
+        return None
+    if count_ai_players_on_map(state) < ETERNAL_ALLY_MIN_AI_PLAYERS:
         return None
     return ally
 

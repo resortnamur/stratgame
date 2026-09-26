@@ -196,7 +196,7 @@ const EFFETS_MERVEILLES = {
   solmyre_oracle: "Fonde Solmyre, seconde religion conquérante ; seule Elyrion lui résiste",
   kaleth_gardens: "Rapporte chaque tour 50 points de culture et 50 écus à son contrôleur",
   selene_dome: "Protège des missiles tous les territoires de son contrôleur",
-  orvane_oath: "Le prochain joueur né en cours de partie devient l'allié définitif de son contrôleur",
+  orvane_oath: "Le prochain joueur né en cours de partie devient l'allié définitif de son contrôleur. Sans effet s'il ne reste que deux joueurs IA sur la carte",
   vorlan_chancellery: "IA seulement : chaque tour, une chance sur cinq d'intégrer la plus faible de ses IA voisines (jamais une Cité commerçante). Sans effet s'il ne reste que deux joueurs IA sur la carte",
   threl_bank: "IA seulement : son contrôleur ne perd rien dans un crash ni une crise boursière",
   obsidian_rampart: "IA seulement : ce territoire ne peut pas être attaqué par un joueur humain",

@@ -23,6 +23,7 @@ import random
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -195,6 +196,11 @@ class TestMenacesParBloc(BaseMenaces):
 
     def setUp(self):
         super().setUp()
+        # Partie sans IA : le seuil de trois joueurs IA du serment est
+        # neutralise ici (il a ses propres tests dans test_merveilles_tardives).
+        seuil = mock.patch.object(regles, "ETERNAL_ALLY_MIN_AI_PLAYERS", 0)
+        seuil.start()
+        self.addCleanup(seuil.stop)
         self.state.turn = regles.LATE_WONDER_FIRST_TURN
         patron_terr = next(t for t in self.state.territories if t.owner == 0)
         self.assertTrue(

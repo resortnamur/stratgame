@@ -22,6 +22,7 @@ import random
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -289,7 +290,17 @@ class TestDomeDeSelene(BaseMerveille):
 
 
 class TestSermentDOrvane(BaseMerveille):
-    """Un allie definitif, un seul a la fois, et des reussites communes."""
+    """Un allie definitif, un seul a la fois, et des reussites communes.
+
+    La partie de test n'a que des humains : le seuil de trois joueurs IA est
+    neutralise ici et verifie a part (``TestSermentADeuxJoueursIA``).
+    """
+
+    def setUp(self):
+        super().setUp()
+        seuil = mock.patch.object(regles, "ETERNAL_ALLY_MIN_AI_PLAYERS", 0)
+        seuil.start()
+        self.addCleanup(seuil.stop)
 
     def _naissance(self):
         return regles.allocate_rebel_player(self.state, random.Random(3))[0]
@@ -436,6 +447,45 @@ class TestSermentDOrvane(BaseMerveille):
         recharge = GameState.from_payload(json.loads(json.dumps(self.state.to_payload())))
         regles.sanitize_after_load(recharge)
         self.assertEqual(regles.get_eternal_ally(recharge), allie)
+
+
+class TestSermentADeuxJoueursIA(BaseMerveille):
+    """A deux joueurs IA sur la carte, l'allie definitif n'en est plus un."""
+
+    def setUp(self):
+        super().setUp()
+        for joueur in (1, 2, 3):
+            self.state.human_controlled_players.discard(joueur)
+            self.state.base_ai_players.add(joueur)
+        self.poser("orvane_oath")
+        self.allie = regles.allocate_rebel_player(self.state, random.Random(3))[0]
+        self.state.territories[self.mien(1).id].owner = self.allie
+
+    def ne_garder_que_deux_ia(self):
+        for terr in self.state.territories:
+            if terr.owner in (2, 3):
+                terr.owner = self.joueur
+
+    def test_le_serment_tient_a_trois_joueurs_ia_ou_plus(self):
+        self.assertGreaterEqual(regles.count_ai_players_on_map(self.state), 3)
+        self.assertEqual(regles.get_eternal_ally(self.state), self.allie)
+        self.assertEqual(set(regles.get_victory_bloc(self.state, self.joueur)), {self.joueur, self.allie})
+
+    def test_a_deux_joueurs_ia_il_n_y_a_plus_d_allie(self):
+        self.ne_garder_que_deux_ia()
+        self.assertEqual(regles.count_ai_players_on_map(self.state), 2)
+        self.assertIsNone(regles.get_eternal_ally(self.state))
+        self.assertEqual(regles.get_victory_bloc(self.state, self.joueur), (self.joueur,))
+
+    def test_a_deux_joueurs_ia_le_patron_et_l_allie_peuvent_s_attaquer(self):
+        self.ne_garder_que_deux_ia()
+        self.assertFalse(regles.is_attack_blocked_by_alliance(self.state, self.joueur, self.allie))
+        self.assertFalse(regles.is_attack_blocked_by_alliance(self.state, self.allie, self.joueur))
+
+    def test_le_serment_reprend_si_un_troisieme_joueur_ia_reapparait(self):
+        self.ne_garder_que_deux_ia()
+        self.state.territories[self.mien(2).id].owner = 3
+        self.assertEqual(regles.get_eternal_ally(self.state), self.allie)
 
 
 if __name__ == "__main__":
