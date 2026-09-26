@@ -241,6 +241,8 @@ AI_INTEGRATION_MIN_AI_PLAYERS = 3
 # Meme seuil pour le Serment d'Orvane : a deux joueurs IA, l'allie
 # definitif n'en est plus un.
 ETERNAL_ALLY_MIN_AI_PLAYERS = 3
+# Un palier ne scinde pas un empire de moins de trois territoires.
+MILESTONE_SPLIT_MIN_TERRITORIES = 3
 
 AI_PROFILES = ["standard", "aggressive", "defensive", "variable"]
 
@@ -2197,8 +2199,8 @@ def split_empire_after_milestone(
     petit pour se couper en deux.
     """
     owned = [terr for terr in state.territories if terr.owner == player]
-    if len(owned) < 2:
-        # Un territoire unique ne se coupe pas en deux.
+    if len(owned) < MILESTONE_SPLIT_MIN_TERRITORIES:
+        # Un petit empire n'est pas coupe : il y laisserait l'essentiel.
         return None
     secession = choose_farthest_territories_from_capital(state, player, len(owned) // 2)
     if not secession:
@@ -2235,8 +2237,7 @@ def split_all_empires_after_milestone(
     commercante et ONU comprises — laisse partir sa moitie la plus eloignee
     de sa capitale vers un nouveau joueur IA, avec la moitie de son tresor
     et le meme niveau de science. Autant de nouveaux joueurs que d'empires
-    coupes. Seul echappe l'empire d'un seul territoire, qui ne se coupe pas
-    en deux.
+    coupes. Seuls echappent les empires de moins de trois territoires.
 
     Les joueurs nes de la scission ne se scindent pas a leur tour : la liste
     des empires est arretee avant la premiere coupe.

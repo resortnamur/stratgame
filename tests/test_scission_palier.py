@@ -180,6 +180,27 @@ class TestScissionGenerale(BaseScission):
         self.assertNotIn(2, [detail["joueur"] for detail in palier["scissions"]])
         self.assertEqual(len(self.territoires_de(2)), 1)
 
+    def test_un_empire_de_deux_territoires_est_epargne(self):
+        self.repartir([(0, self.seuil), (1, self.total - self.seuil - 2), (2, 2)])
+        nouveaux = regles.register_victory_milestones(self.state, random.Random(7))
+        palier = next(p for p in nouveaux if p["condition"] == "territoires")
+        self.assertNotIn(2, [detail["joueur"] for detail in palier["scissions"]])
+        self.assertEqual(len(self.territoires_de(2)), 2)
+
+    def test_une_ia_de_deux_territoires_est_epargnee_aussi(self):
+        self.state.human_controlled_players.discard(2)
+        self.state.base_ai_players.add(2)
+        self.repartir([(0, self.seuil), (1, self.total - self.seuil - 2), (2, 2)])
+        regles.register_victory_milestones(self.state, random.Random(7))
+        self.assertEqual(len(self.territoires_de(2)), 2)
+
+    def test_un_empire_de_trois_territoires_se_coupe(self):
+        self.repartir([(0, self.seuil), (1, self.total - self.seuil - 3), (2, 3)])
+        nouveaux = regles.register_victory_milestones(self.state, random.Random(7))
+        palier = next(p for p in nouveaux if p["condition"] == "territoires")
+        self.assertIn(2, [detail["joueur"] for detail in palier["scissions"]])
+        self.assertEqual(len(self.territoires_de(2)), 2)
+
     def test_les_nouveaux_joueurs_ne_se_scindent_pas_a_leur_tour(self):
         self.repartir([(0, self.seuil), (1, 10), (2, 9)])
         premier_ne = self.state.num_players
@@ -249,25 +270,27 @@ class TestDecoupeDepuisLaCapitale(BaseScission):
         capitale = regles.get_active_regular_capital_id_for_player(self.state, 0)
         if capitale is None:
             self.skipTest("Le joueur 0 n'a pas de capitale active sur cette carte.")
-        # Un empire compact autour de la capitale, plus une enclave isolee.
+        # Un empire compact autour de la capitale, plus des enclaves isolees
+        # — assez pour atteindre le minimum de trois territoires scindables.
         compact = self._bloc_autour(capitale, 6)
-        enclave = next(
-            (terr.id for terr in self.state.territories
-             if terr.id not in compact
-             and not (set(terr.neighbors) & compact)),
-            None,
-        )
-        if enclave is None:
-            self.skipTest("Cette carte n'offre aucune enclave isolee.")
+        nb_enclaves = max(1, regles.MILESTONE_SPLIT_MIN_TERRITORIES - len(compact))
+        enclaves = [
+            terr.id for terr in self.state.territories
+            if terr.id not in compact
+            and not (set(terr.neighbors) & compact)
+        ][:nb_enclaves]
+        if len(enclaves) < nb_enclaves:
+            self.skipTest("Cette carte n'offre pas assez d'enclaves isolees.")
         for terr in self.state.territories:
             terr.owner = 1
         for tid in compact:
             self.state.territories[tid].owner = 0
-        self.state.territories[enclave].owner = 0
+        for tid in enclaves:
+            self.state.territories[tid].owner = 0
 
         secessionniste = self.state.num_players
         regles.split_empire_after_milestone(self.state, 0, random.Random(7))
-        self.assertEqual(self.state.territories[enclave].owner, secessionniste)
+        self.assertEqual(self.state.territories[enclaves[0]].owner, secessionniste)
         self.assertEqual(self.state.territories[capitale].owner, 0)
 
     def _distances(self, origine, possedes):
