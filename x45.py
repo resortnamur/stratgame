@@ -16,6 +16,7 @@ from moteur import regles as moteur_regles
 from moteur import actions as moteur_actions
 from moteur import achats as moteur_achats
 from moteur import ia as moteur_ia
+from moteur import mise_en_place as moteur_mise_en_place
 
 try:
     import tkinter as tk
@@ -725,6 +726,8 @@ class GraphicalGame:
         self.super_territory_ids = set()
         self.ultra_super_territory_ids = set()
         self.sanctuary_territory_ids = set()
+        self.special_territories = {}
+        self.special_territory_holders = {}
         self.phase = "map_editor"
         self.turn_phase = "attack"
         self.turn_move_count = 0
@@ -761,6 +764,8 @@ class GraphicalGame:
         self.ultra_super_territory_ids = {terr.id for terr in self.territories if terr.reinforcement_bonus == 3}
         self.golden_territory_ids = set()
         self.sanctuary_territory_ids = set()
+        self.special_territories = {}
+        self.special_territory_holders = {}
         self.phase = "map_editor"
         self.turn_phase = "attack"
         self.turn_move_count = 0
@@ -798,6 +803,7 @@ class GraphicalGame:
         self.assign_sanctuary_territories()
         self.reset_economy_state()
         self.assign_initial_economic_structures()
+        self.assign_special_territories()
         self.last_victory_reason = ""
         self.victory_winner = None
         self.victory_summary = {}
@@ -830,6 +836,7 @@ class GraphicalGame:
         self.show_message(f"Debut de la partie - carte {mode_label} - mode {self.get_difficulty_label()}{tribes_label}{simple_label}", 2200)
         self.current_player = 0
         self.turn = 1
+        moteur_regles.sync_special_territory_holders(self)
         self.selected_source = None
         self.selected_target = None
         self.record_replay_snapshot("Debut de la partie", force=True)
@@ -10270,6 +10277,25 @@ class GraphicalGame:
             if remaining is not None:
                 lines.append((f"Mine epuisee dans {remaining} tour(s)", muted))
 
+        for kind in moteur_regles.get_special_territory_kinds(self, territory.id):
+            name = moteur_regles.SPECIAL_TERRITORY_DEFINITIONS[kind]["name"]
+            holding = moteur_regles.get_special_territory_holding_turns(self, kind)
+            if kind == moteur_regles.RALLY_THRONE:
+                interval = moteur_regles.RALLY_THRONE_INTERVAL_TURNS
+                detail = f"prochain ralliement dans {interval - holding % interval} tour(s)"
+            elif kind == moteur_regles.ENDLESS_VEIN:
+                seasoning = moteur_regles.ENDLESS_VEIN_SEASONING_TURNS
+                if holding > seasoning:
+                    detail = f"+{moteur_regles.ENDLESS_VEIN_SEASONED_INCOME} ecus par tour"
+                else:
+                    detail = (
+                        f"+{moteur_regles.ENDLESS_VEIN_INCOME} ecus par tour, "
+                        f"{moteur_regles.ENDLESS_VEIN_SEASONED_INCOME} dans {seasoning + 1 - holding} tour(s)"
+                    )
+            else:
+                detail = "amenagements indestructibles"
+            lines.append((f"{name} : {detail}", good))
+
         statuses: List[str] = []
         if territory.id in self.golden_territory_ids:
             statuses.append("territoire dore")
@@ -10704,6 +10730,14 @@ class GraphicalGame:
         self.geopolitical_panel_visible = False
         self.show_message("Retour au menu principal.", 1600)
 
+    def assign_special_territories(self) -> None:
+        # Trone des Ralliements, Veine inepuisable, Sol inviolable : meme
+        # tirage que la version web (jamais en version simplifiee).
+        self.special_territories = {}
+        self.special_territory_holders = {}
+        if not self.simple_mode:
+            moteur_mise_en_place.assign_special_territories(self)
+
     def restart_game(self) -> None:
         # Recommence sur la carte actuelle. Regenerer ici cassait les cartes personnalisees
         # et pouvait rendre le bouton inoperant selon le mode de carte utilise.
@@ -10757,6 +10791,7 @@ class GraphicalGame:
         self.assign_sanctuary_territories()
         self.reset_economy_state()
         self.assign_initial_economic_structures()
+        self.assign_special_territories()
         self.last_victory_reason = ""
         self.victory_winner = None
         self.victory_summary = {}
@@ -10765,6 +10800,7 @@ class GraphicalGame:
         self.confetti_particles = []
         self.current_player = 0
         self.turn = 1
+        moteur_regles.sync_special_territory_holders(self)
         self.selected_source = None
         self.selected_target = None
         self.phase = "playing"
@@ -11376,6 +11412,25 @@ class GraphicalGame:
         label = self.font_small.render(label_text, True, (20, 20, 20))
         self.screen.blit(label, label.get_rect(center=(x, y)))
 
+    # Sigle et couleurs des territoires aux proprietes particulieres, les
+    # memes que dans le client web.
+    SPECIAL_TERRITORY_BADGES = {
+        "rally_throne": ("TR", (96, 28, 110), (255, 214, 120)),
+        "endless_vein": ("VE", (20, 70, 90), (255, 236, 140)),
+        "inviolable_ground": ("SI", (40, 40, 48), (236, 236, 250)),
+    }
+
+    def draw_special_territory_badge(self, x: int, y: int, kind: str) -> None:
+        label_text, background, symbol_color = self.SPECIAL_TERRITORY_BADGES.get(
+            kind, ("?", (70, 70, 70), (235, 235, 235)),
+        )
+        badge_rect = pygame.Rect(0, 0, 30, 26)
+        badge_rect.center = (x, y)
+        pygame.draw.rect(self.screen, background, badge_rect, border_radius=13)
+        pygame.draw.rect(self.screen, symbol_color, badge_rect, width=2, border_radius=13)
+        label = self.font_small.render(label_text, True, symbol_color)
+        self.screen.blit(label, label.get_rect(center=badge_rect.center))
+
     def draw_capital_badge(self, x: int, y: int, highlighted: bool = False) -> None:
         # Capitale ordinaire active : sigle C visible sur la carte.
         # Pour les nations, le C est volontairement criard : apparemment il faut
@@ -11700,6 +11755,8 @@ class GraphicalGame:
             badges.append("precious_mine")
         if territory.id in self.golden_territory_ids:
             badges.append("golden")
+        for kind in moteur_regles.get_special_territory_kinds(self, territory.id):
+            badges.append(f"special:{kind}")
         if not badges:
             return
         spacing = 32
@@ -11711,6 +11768,8 @@ class GraphicalGame:
                 self.draw_bonus_badge(badge_x, badge_y, territory.reinforcement_bonus)
             elif kind == "precious_mine":
                 self.draw_precious_mineral_mine_badge(badge_x, badge_y)
+            elif kind.startswith("special:"):
+                self.draw_special_territory_badge(badge_x, badge_y, kind.split(":", 1)[1])
             else:
                 pygame.draw.circle(self.screen, (255, 215, 0), (badge_x, badge_y), 12)
                 pygame.draw.circle(self.screen, (120, 90, 0), (badge_x, badge_y), 12, 2)
@@ -11917,6 +11976,8 @@ class GraphicalGame:
                     if terr.id in self.university_territory_ids:
                         special_icon_types.append("university")
 
+                for kind in moteur_regles.get_special_territory_kinds(self, terr.id):
+                    special_icon_types.append(f"special:{kind}")
                 if self.is_active_regular_capital(terr.id):
                     special_icon_types.append("capital")
                 if self.is_vassal_territory(terr.id):
@@ -11952,6 +12013,8 @@ class GraphicalGame:
                         elif icon_type.startswith("holy_site:"):
                             religion_id = int(icon_type.split(":", 1)[1])
                             self.draw_religion_symbol_badge(badge_x, badge_y, religion_id, holy=True)
+                        elif icon_type.startswith("special:"):
+                            self.draw_special_territory_badge(badge_x, badge_y, icon_type.split(":", 1)[1])
                         elif icon_type == "capital":
                             self.draw_capital_badge(badge_x, badge_y, highlighted=self.is_nation_player(terr.owner))
                         elif icon_type == "commercial_money":
