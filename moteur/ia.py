@@ -75,12 +75,16 @@ def ai_attack_score(
     """
     diff = src.regiments - dst.regiments
     priority = 1 if priority_target is not None and dst.owner == priority_target else 0
+    # Les territoires aux proprietes particulieres passent juste apres le
+    # meneur : a attaques egalement permises par le profil, l'IA les vise.
+    special = 1 if regles.is_special_territory(state, dst.id) else 0
     if behavior == "very_aggressive":
         if src.regiments < 2:
             return None
         total_attack = diff >= 2 or src.regiments >= 6
         score = (
             priority,
+            special,
             1 if total_attack else 0,
             src.regiments + max(0, -diff),
             diff,
@@ -93,6 +97,7 @@ def ai_attack_score(
         total_attack = diff >= 6 or (src.regiments >= 8 and rng.random() < 0.18)
         score = (
             priority,
+            special,
             1 if total_attack else 0,
             src.regiments,
             diff,
@@ -111,6 +116,7 @@ def ai_attack_score(
         )
         score = (
             priority,
+            special,
             1 if total_attack else 0,
             diff,
             -enemy_pressure,
@@ -123,6 +129,7 @@ def ai_attack_score(
         total_attack = diff > 10
         score = (
             priority,
+            special,
             1 if total_attack else 0,
             diff,
             src.regiments,
@@ -419,6 +426,14 @@ def compute_ai_move_target(state: GameState, rng=random) -> Optional[Tuple[Terri
 
     if not frontline_enemies:
         return None
+    # Meme preference pour la concentration de fin de tour : s'il y a un
+    # territoire aux proprietes particulieres sur le front, on se masse face a
+    # lui (parmi les cibles deja retenues).
+    special_frontline = [
+        enemy for enemy in frontline_enemies if regles.is_special_territory(state, enemy.id)
+    ]
+    if special_frontline:
+        frontline_enemies = special_frontline
 
     if behavior == "aggressive":
         target_enemy = max(frontline_enemies, key=lambda terr: (

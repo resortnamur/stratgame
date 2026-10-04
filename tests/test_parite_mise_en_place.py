@@ -168,8 +168,11 @@ class TestPariteMiseEnPlace(unittest.TestCase):
                     setup_original_game(self.game, map_payload, **config)
 
                     random.seed(RANDOM_SEED)
+                    # La reference figee ne connait pas les territoires
+                    # aux proprietes particulieres : on ne les pose pas.
                     state = mise_en_place.nouvelle_partie(
                         json.loads(json.dumps(map_payload)), **config,
+                        special_territories=False,
                     )
                     actions.begin_player_turn(state, state.current_player)
 

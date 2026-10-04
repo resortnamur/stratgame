@@ -169,6 +169,11 @@ class GameState:
     golden_territory_ids: Set[int] = field(default_factory=set)
     sanctuary_territory_ids: Set[int] = field(default_factory=set)
     onu_player_id: int = -2
+    # Territoires aux proprietes particulieres (Trone des Ralliements, Veine
+    # inepuisable, Sol inviolable) : sorte -> territoire, et sorte ->
+    # [proprietaire, tour depuis lequel il le tient].
+    special_territories: Dict[str, int] = field(default_factory=dict)
+    special_territory_holders: Dict[str, List[int]] = field(default_factory=dict)
 
     # --- Economie et structures ---
     player_money: Dict[int, int] = field(default_factory=dict)
@@ -593,6 +598,15 @@ class GameState:
         self.golden_territory_ids = {int(x) for x in payload.get("golden_territory_ids", [])}
         self.onu_player_id = int(payload.get("onu_player_id", -2))
         self.sanctuary_territory_ids = {int(x) for x in payload.get("sanctuary_territory_ids", [])}
+        self.special_territories = {
+            str(kind): int(tid)
+            for kind, tid in payload.get("special_territories", {}).items()
+        }
+        self.special_territory_holders = {
+            str(kind): [int(record[0]), int(record[1])]
+            for kind, record in payload.get("special_territory_holders", {}).items()
+            if isinstance(record, (list, tuple)) and len(record) == 2
+        }
 
         # Economie et structures
         self.player_money = {int(k): int(v) for k, v in payload.get("player_money", {}).items()}
@@ -844,6 +858,13 @@ class GameState:
             "ultra_super_territory_ids": sorted(self.ultra_super_territory_ids),
             "golden_territory_ids": sorted(self.golden_territory_ids),
             "sanctuary_territory_ids": sorted(self.sanctuary_territory_ids),
+            "special_territories": {
+                str(kind): int(tid) for kind, tid in sorted(self.special_territories.items())
+            },
+            "special_territory_holders": {
+                str(kind): [int(record[0]), int(record[1])]
+                for kind, record in sorted(self.special_territory_holders.items())
+            },
             "onu_player_id": self.onu_player_id,
             "player_money": {str(k): int(v) for k, v in self.player_money.items()},
             "precious_mineral_mine_ids": sorted(int(tid) for tid in self.precious_mineral_mine_ids),

@@ -354,6 +354,10 @@ class GraphicalGame:
         # territoire -> qui les a faits (cf. moteur.regles).
         self.apocalypse_site_stages: dict[int, int] = {}
         self.apocalypse_site_owners: dict[int, int] = {}
+        # Territoires aux proprietes particulieres (cf. moteur.regles) : x45 ne
+        # les pose pas, mais les conserve d'une sauvegarde a l'autre.
+        self.special_territories: dict[str, int] = {}
+        self.special_territory_holders: dict[str, list[int]] = {}
         # Le joueur lie au Serment d'Orvane, s'il y en a un.
         self.eternal_ally_player: Optional[int] = None
         self.eternal_ally_patron: Optional[int] = None
@@ -1284,6 +1288,14 @@ class GraphicalGame:
             "ultra_super_territory_ids": list(self.ultra_super_territory_ids),
             "golden_territory_ids": list(self.golden_territory_ids),
             "sanctuary_territory_ids": list(self.sanctuary_territory_ids),
+            "special_territories": {
+                str(kind): int(tid)
+                for kind, tid in sorted(getattr(self, "special_territories", {}).items())
+            },
+            "special_territory_holders": {
+                str(kind): [int(record[0]), int(record[1])]
+                for kind, record in sorted(getattr(self, "special_territory_holders", {}).items())
+            },
             "onu_player_id": self.onu_player_id,
             "player_money": {str(k): int(v) for k, v in self.player_money.items()},
             "precious_mineral_mine_ids": sorted(int(tid) for tid in self.precious_mineral_mine_ids),
@@ -1545,6 +1557,15 @@ class GraphicalGame:
         self.golden_territory_ids = set(int(x) for x in payload.get("golden_territory_ids", []))
         self.onu_player_id = int(payload.get("onu_player_id", -2))
         self.sanctuary_territory_ids = set(int(x) for x in payload.get("sanctuary_territory_ids", []))
+        self.special_territories = {
+            str(kind): int(tid)
+            for kind, tid in payload.get("special_territories", {}).items()
+        }
+        self.special_territory_holders = {
+            str(kind): [int(record[0]), int(record[1])]
+            for kind, record in payload.get("special_territory_holders", {}).items()
+            if isinstance(record, (list, tuple)) and len(record) == 2
+        }
         self.player_money = {int(k): int(v) for k, v in payload.get("player_money", {}).items()}
         self.precious_mineral_mine_ids = set(int(x) for x in payload.get("precious_mineral_mine_ids", []))
         self.bonus_5_spawn_turns = {

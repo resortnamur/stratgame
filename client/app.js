@@ -52,6 +52,32 @@ function toursRestantsRessource(etat, tid, sorte) {
   return Math.max(0, DUREE_RESSOURCE_TARDIVE - (etat.turn - Number(depart)));
 }
 
+// Les trois territoires aux propriétés particulières (moteur/regles.py) :
+// nom, sigle et couleurs du badge, toujours visible sur la carte.
+const TERRITOIRES_PARTICULIERS = {
+  rally_throne: { nom: "Trône des Ralliements", sigle: "TR", fond: "rgb(96,28,110)", symbole: "rgb(255,214,120)" },
+  endless_vein: { nom: "Veine inépuisable", sigle: "VE", fond: "rgb(20,70,90)", symbole: "rgb(255,236,140)" },
+  inviolable_ground: { nom: "Sol inviolable", sigle: "SI", fond: "rgb(40,40,48)", symbole: "rgb(236,236,250)" },
+};
+const INTERVALLE_TRONE = 10;
+const MURISSEMENT_VEINE = 10;
+
+function sortesParticulieres(etat, tid) {
+  return Object.entries(etat.special_territories || {})
+    .filter(([, id]) => id === tid).map(([sorte]) => sorte);
+}
+
+function toursDePossession(etat, sorte) {
+  // Miroir de get_special_territory_holding_turns : le compteur ne vaut que
+  // pour le propriétaire noté, il repart de zéro au changement de mains.
+  const tid = (etat.special_territories || {})[sorte];
+  const registre = (etat.special_territory_holders || {})[sorte];
+  if (tid === undefined || !registre) return 0;
+  const situation = etat.territories_state[tid];
+  if (!situation || situation.owner !== registre[0]) return 0;
+  return Math.max(0, etat.turn - registre[1]);
+}
+
 // Les vues de carte de x45, dans l'ordre du bouton : les forteresses
 // seules, puis les forteresses avec les merveilles, puis tous les autres
 // aménagements — et enfin l'influence religieuse.
@@ -2245,6 +2271,21 @@ function afficherDetailTerritoire() {
       `${etapesApocalypse}/${ETAPES_APOCALYPSE}</strong>`,
     );
   }
+  for (const sorte of sortesParticulieres(etat, id)) {
+    const possession = toursDePossession(etat, sorte);
+    let detail = "";
+    if (sorte === "rally_throne") {
+      const reste = INTERVALLE_TRONE - (possession % INTERVALLE_TRONE);
+      detail = `prochain ralliement dans ${reste} tour(s)`;
+    } else if (sorte === "endless_vein") {
+      detail = possession > MURISSEMENT_VEINE
+        ? "100 écus par tour"
+        : `50 écus par tour, 100 dans ${MURISSEMENT_VEINE + 1 - possession} tour(s)`;
+    } else {
+      detail = "aménagements indestructibles";
+    }
+    lignes.push(`<strong>${TERRITOIRES_PARTICULIERS[sorte].nom}</strong> : ${detail}`);
+  }
   const etiquettes = [];
   const capitales = Object.entries(etat.player_capital_ids)
     .filter(([, tid]) => tid === id).map(([j]) => Number(j));
@@ -2792,6 +2833,11 @@ function dessinerBadge(ctx, type, x, y, etat, tid) {
       || ["rgb(70,70,70)", "rgb(235,235,235)", "?"];
     fondBadge(ctx, x, y, 30, 26, fond, symbole, 7);
     glypheBadge(ctx, x, y, lettre, symbole, lettre.length > 1 ? 11 : 13);
+  } else if (type.startsWith("special:")) {
+    const def = TERRITOIRES_PARTICULIERS[type.split(":")[1]];
+    if (!def) return;
+    fondBadge(ctx, x, y, 30, 26, def.fond, def.symbole, 13);
+    glypheBadge(ctx, x, y, def.sigle, def.symbole, 11);
   } else if (type === "factory") {
     fondBadge(ctx, x, y, 28, 24, "rgb(133,193,233)", "rgb(44,62,80)");
     ctx.fillStyle = "rgb(28,42,56)";
@@ -3038,6 +3084,7 @@ function dessinerEtiquettes(contexte, etat, largeurCellule, hauteurCellule) {
       if ((etat.ruin_territory_ids || []).includes(tid)) badges.push("ruin");
       if (etat.university_territory_ids.includes(tid)) badges.push("university");
     }
+    for (const sorte of sortesParticulieres(etat, tid)) badges.push(`special:${sorte}`);
     const capitale = capitaleActive(etat, tid);
     if (capitale) badges.push(capitale.nation ? "capital_nation" : "capital");
     if (capitalesPF.has(tid)) {
@@ -3065,6 +3112,7 @@ function dessinerRessourcesVueReligion(contexte, etat, tid, cx, cy) {
   if (situation && situation.reinforcement_bonus > 1) badges.push("bonus");
   if (etat.precious_mineral_mine_ids.includes(tid)) badges.push("precious_mine");
   if (etat.golden_territory_ids.includes(tid)) badges.push("golden");
+  for (const sorte of sortesParticulieres(etat, tid)) badges.push(`special:${sorte}`);
   if (!badges.length) return;
   const espacement = 32;
   const debut = cx - (badges.length - 1) * (espacement / 2);
@@ -3082,8 +3130,8 @@ function dessinerRessourcesVueReligion(contexte, etat, tid, cx, cy) {
       contexte.strokeStyle = "rgb(44,62,80)";
       contexte.stroke();
       glypheBadge(contexte, x, y, `+${situation.reinforcement_bonus}`, "rgb(20,20,20)");
-    } else if (type === "precious_mine") {
-      dessinerBadge(contexte, "precious_mine", x, y, etat, tid);
+    } else if (type === "precious_mine" || type.startsWith("special:")) {
+      dessinerBadge(contexte, type, x, y, etat, tid);
     } else {
       for (const [rayon, couleur] of [
         [12, "rgb(255,215,0)"], [8, "rgb(255,235,120)"], [4, "rgb(255,250,210)"],

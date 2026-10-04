@@ -41,6 +41,7 @@ def nouvelle_partie(
     tribes_mode: bool = False,
     simple_mode: bool = False,
     rng=random,
+    special_territories: bool = True,
 ) -> GameState:
     """Cree une partie prete a jouer depuis une carte sauvegardee.
 
@@ -54,6 +55,10 @@ def nouvelle_partie(
     commercante, ni capitale, ni industrie ou centre culturel — seules les
     forteresses restent parmi les structures initiales. Les bonus +3, les
     territoires dores et les sanctuaires ONU sont poses comme d'habitude.
+
+    ``special_territories`` pose les trois territoires aux proprietes
+    particulieres (jamais en version simplifiee). Les tests de parite contre
+    x45-original le coupent : la reference figee ne les connait pas.
     """
     if not (2 <= num_players <= 10):
         raise ValueError("Nombre de joueurs invalide (2-10).")
@@ -108,6 +113,8 @@ def nouvelle_partie(
     assign_sanctuary_territories(state, rng)
     reset_economy_state(state)
     assign_initial_economic_structures(state, rng)
+    if special_territories and not state.simple_mode:
+        assign_special_territories(state, rng)
     state.victory_milestones = []
     state.replay_history = []
     state.phase = "playing"
@@ -117,6 +124,7 @@ def nouvelle_partie(
     regles.snapshot_tax_haven_turn_start_territory_counts(state)
     state.current_player = 0
     state.turn = 1
+    regles.sync_special_territory_holders(state)
     regles.record_replay_snapshot(state, "Debut de la partie", force=True)
     return state
 
@@ -431,6 +439,25 @@ def assign_random_bonus_territories(state: GameState, rng=random) -> None:
     for tid in ultra_ids:
         state.territories[tid].reinforcement_bonus = 3
     state.ultra_super_territory_ids = set(ultra_ids)
+
+
+def assign_special_territories(state: GameState, rng=random) -> None:
+    """Pose le Trone des Ralliements, la Veine inepuisable et le Sol
+    inviolable sur trois territoires distincts tires au hasard, jamais sur un
+    +3 ni sur un territoire dore (une capitale ou un sanctuaire ONU, oui).
+    """
+    state.special_territories = {}
+    state.special_territory_holders = {}
+    candidates = sorted(
+        terr.id for terr in state.territories
+        if terr.id not in state.ultra_super_territory_ids
+        and terr.id not in state.golden_territory_ids
+    )
+    kinds = list(regles.SPECIAL_TERRITORY_KINDS)
+    if len(candidates) < len(kinds):
+        return
+    for kind, territory_id in zip(kinds, rng.sample(candidates, len(kinds))):
+        state.special_territories[kind] = territory_id
 
 
 def compute_territory_distances(state: GameState, start_id: int) -> Dict[int, int]:

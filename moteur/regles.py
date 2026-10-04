@@ -1267,6 +1267,7 @@ def sanitize_after_load(state: GameState, rng=random, phase_before_load: str = "
     state.last_stand_bonus_territory = saved_last_stand_bonus_territory
     refresh_last_stand_bonus_state(state)
     sanitize_religion_state(state)
+    sanitize_special_territories(state)
     if not state.tax_haven_turn_start_territory_counts:
         snapshot_tax_haven_turn_start_territory_counts(state)
     state.phase = "playing"
@@ -1563,6 +1564,8 @@ def calculate_player_income(state: GameState, player: int) -> int:
         income //= APOCALYPSE_DIVISOR
         income += get_apocalypse_income_bonus(state, player)
         income += get_post_apocalypse_mine_income(state, player)
+    # La Veine inepuisable echappe a tout, y compris a l'age de tenebres.
+    income += get_endless_vein_income(state, player)
     return income
 
 
@@ -2867,9 +2870,12 @@ def destroy_all_amenities(state: GameState, territory_id: int) -> List[str]:
 
     Les merveilles resistent : elles ne sont pas des amenagements. La ruine
     aussi, puisque rien ne la detruit jamais — et un centre culturel rase
-    ici en laisse une, comme n'importe quelle destruction de centre.
+    ici en laisse une, comme n'importe quelle destruction de centre. Le Sol
+    inviolable ne perd rien.
     """
     destroyed: List[str] = []
+    if is_inviolable_ground(state, territory_id):
+        return destroyed
     if remove_fortress(state, territory_id):
         destroyed.append("forteresse")
     industrial_count = remove_all_industrial_structures(state, territory_id)
@@ -2889,6 +2895,9 @@ def destroy_all_amenities(state: GameState, territory_id: int) -> List[str]:
 
 def register_special_capture(state: GameState, territory_id: int) -> List[str]:
     messages: List[str] = []
+    if is_inviolable_ground(state, territory_id):
+        # Les captures n'usent rien sur le Sol inviolable : pas de compteur.
+        return messages
     terr_name = state.territories[territory_id].name
     if territory_id in state.fortress_territory_ids:
         count = state.fortress_capture_counts.get(territory_id, 0) + 1
@@ -7726,3 +7735,188 @@ def execute_ai_economic_actions(
     if actions > 0:
         refresh_nation_states(state, trigger_player=player)
     return actions
+
+
+# ----------------------------------------------------------------------
+# Territoires aux proprietes particulieres
+# ----------------------------------------------------------------------
+#
+# Trois territoires tires au hasard a la mise en place, chacun avec une
+# propriete qui le rend digne d'etre conquis. Le Trone des Ralliements et la
+# Veine inepuisable recompensent la duree de possession : le compteur repart
+# de zero a chaque changement de proprietaire. Les registres sont lus par
+# ``getattr`` : x45 applique ces regles par duck typing a GraphicalGame, qui
+# ne porte pas ces attributs.
+
+RALLY_THRONE = "rally_throne"
+ENDLESS_VEIN = "endless_vein"
+INVIOLABLE_GROUND = "inviolable_ground"
+SPECIAL_TERRITORY_KINDS = (RALLY_THRONE, ENDLESS_VEIN, INVIOLABLE_GROUND)
+SPECIAL_TERRITORY_DEFINITIONS = {
+    RALLY_THRONE: {
+        "name": "Trone des Ralliements",
+        "effect": (
+            "Tous les 10 tours de possession, un territoire tire au hasard sur "
+            "la carte se rallie a son proprietaire, avec sa garnison"
+        ),
+    },
+    ENDLESS_VEIN: {
+        "name": "Veine inepuisable",
+        "effect": (
+            "Rapporte 50 ecus par tour a son proprietaire, 100 au-dela de 10 tours "
+            "de possession ; ne s'epuise jamais"
+        ),
+    },
+    INVIOLABLE_GROUND: {
+        "name": "Sol inviolable",
+        "effect": "Les amenagements construits sur ce territoire ne peuvent jamais etre detruits",
+    },
+}
+RALLY_THRONE_INTERVAL_TURNS = 10
+# Un montant fixe, comme les mines et les ruines : ni multiplie par une
+# capitale, ni divise par le statut de nation ou par l'age de tenebres.
+ENDLESS_VEIN_INCOME = 50
+ENDLESS_VEIN_SEASONED_INCOME = 100
+ENDLESS_VEIN_SEASONING_TURNS = 10
+
+
+def get_special_territories(state) -> Dict[str, int]:
+    return getattr(state, "special_territories", None) or {}
+
+
+def get_special_territory_id(state, kind: str) -> Optional[int]:
+    territory_id = get_special_territories(state).get(kind)
+    if territory_id is None or not (0 <= territory_id < len(state.territories)):
+        return None
+    return territory_id
+
+
+def sanitize_special_territories(state) -> None:
+    """Oublie les sortes inconnues et les territoires hors de la carte."""
+    territories = getattr(state, "special_territories", None)
+    if territories is None:
+        return
+    state.special_territories = {
+        kind: int(tid) for kind, tid in territories.items()
+        if kind in SPECIAL_TERRITORY_KINDS and 0 <= int(tid) < len(state.territories)
+    }
+    state.special_territory_holders = {
+        kind: record for kind, record in state.special_territory_holders.items()
+        if kind in state.special_territories
+    }
+
+
+def get_special_territory_kinds(state, territory_id: int) -> List[str]:
+    return [
+        kind for kind in SPECIAL_TERRITORY_KINDS
+        if get_special_territory_id(state, kind) == territory_id
+    ]
+
+
+def is_special_territory(state, territory_id: int) -> bool:
+    return territory_id in get_special_territories(state).values()
+
+
+def is_inviolable_ground(state, territory_id: int) -> bool:
+    return get_special_territory_id(state, INVIOLABLE_GROUND) == territory_id
+
+
+def sync_special_territory_holders(state) -> None:
+    """Note qui tient chaque territoire particulier, et depuis quel tour.
+
+    Appelee a chaque fin de tour de joueur : un territoire pris pendant le
+    tour T est tenu depuis T, et repris par son ancien maitre au tour d'un
+    autre joueur, son compteur repart quand meme de zero.
+    """
+    holders = getattr(state, "special_territory_holders", None)
+    if holders is None:
+        return
+    for kind in SPECIAL_TERRITORY_KINDS:
+        territory_id = get_special_territory_id(state, kind)
+        if territory_id is None:
+            holders.pop(kind, None)
+            continue
+        owner = state.territories[territory_id].owner
+        record = holders.get(kind)
+        if record is None or record[0] != owner:
+            holders[kind] = [owner, state.turn]
+
+
+def get_special_territory_holding_turns(state, kind: str) -> int:
+    """Nombre de tours depuis lesquels le proprietaire actuel le tient."""
+    territory_id = get_special_territory_id(state, kind)
+    if territory_id is None:
+        return 0
+    record = (getattr(state, "special_territory_holders", None) or {}).get(kind)
+    if record is None or record[0] != state.territories[territory_id].owner:
+        return 0
+    return max(0, state.turn - record[1])
+
+
+def get_endless_vein_income(state, player: int) -> int:
+    territory_id = get_special_territory_id(state, ENDLESS_VEIN)
+    if territory_id is None or state.territories[territory_id].owner != player:
+        return 0
+    if get_special_territory_holding_turns(state, ENDLESS_VEIN) > ENDLESS_VEIN_SEASONING_TURNS:
+        return ENDLESS_VEIN_SEASONED_INCOME
+    return ENDLESS_VEIN_INCOME
+
+
+def get_rally_throne_target_ids(state, player: int) -> List[int]:
+    """Les territoires que le Trone peut rallier : tous ceux des autres,
+    sauf les capitales, les territoires dores et ceux de l'ONU."""
+    return [
+        terr.id for terr in state.territories
+        if terr.owner != player
+        and not is_onu_player(state, terr.owner)
+        and not is_sanctuary_territory(state, terr.id)
+        and not is_any_capital_territory(state, terr.id)
+        and terr.id not in state.golden_territory_ids
+    ]
+
+
+def maybe_trigger_rally_throne(state, rng=random) -> Optional[str]:
+    """Au debut d'un tour global : tous les dix tours de possession, un
+    territoire tire au hasard se rallie au maitre du Trone, garnison comprise.
+
+    Rien n'est tire hors echeance : le hasard d'une partie ou personne
+    n'atteint l'echeance ne bouge pas d'un cran.
+    """
+    throne_id = get_special_territory_id(state, RALLY_THRONE)
+    if throne_id is None:
+        return None
+    player = state.territories[throne_id].owner
+    if player < 0 or is_onu_player(state, player):
+        return None
+    holding = get_special_territory_holding_turns(state, RALLY_THRONE)
+    if holding <= 0 or holding % RALLY_THRONE_INTERVAL_TURNS != 0:
+        return None
+    candidates = get_rally_throne_target_ids(state, player)
+    if not candidates:
+        return None
+    territory_id = rng.choice(sorted(candidates))
+    territory = state.territories[territory_id]
+    previous_owner = territory.owner
+    territory.owner = player
+    # Un ralliement, pas une capture : la garnison et les constructions
+    # restent, les statuts de territoire soumis tombent.
+    state.submitted_territory_ids.discard(territory_id)
+    state.submitted_territory_overlords.pop(territory_id, None)
+    state.submitted_territory_created_turns.pop(territory_id, None)
+    for territory_ids in state.integrated_submitted_territories.values():
+        territory_ids.discard(territory_id)
+    refresh_last_stand_bonus_state(state)
+    enforce_last_stand_bonus_limits(state)
+    refresh_destroyed_commercial_cities(state)
+    refresh_eliminated_human_players(state)
+    refresh_nation_states(state, trigger_player=player)
+    throne_name = SPECIAL_TERRITORY_DEFINITIONS[RALLY_THRONE]["name"]
+    previous_label = f"J{previous_owner + 1}" if previous_owner >= 0 else "aucun joueur"
+    message = (
+        f"Tour {state.turn}: {throne_name} ({state.territories[throne_id].name}) : "
+        f"{territory.name} quitte {previous_label} et se rallie a J{player + 1}, "
+        f"avec ses {territory.regiments} regiment(s)."
+    )
+    record_major_event(state, message)
+    record_replay_snapshot(state, message, force=True)
+    return message

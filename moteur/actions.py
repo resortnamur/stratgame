@@ -152,6 +152,7 @@ def advance_turn(
     state.turn_phase = "attack"
     state.turn_move_count = 0
     regles.cleanup_expired_alliances(state)
+    regles.sync_special_territory_holders(state)
     previous_player = state.current_player
     if not simple:
         regles.execute_ai_economic_actions(state, previous_player, rng, cell_width, cell_height)
@@ -188,6 +189,9 @@ def advance_turn(
             fortress_message = regles.maybe_spawn_random_fortress(state, rng)
             if fortress_message:
                 resource_messages.append(fortress_message)
+            rally_message = regles.maybe_trigger_rally_throne(state, rng)
+            if rally_message:
+                resource_messages.append(rally_message)
             report.resource_messages = resource_messages
             if not simple:
                 religion_notes = regles.expand_religious_influences_if_due(state)

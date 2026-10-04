@@ -323,9 +323,15 @@ def construire_forteresse(state: GameState, terr: Territory) -> AchatResult:
     return _succes(f"Forteresse construite sur {terr.name} pour {regles.FORTRESS_COST} ecu(s).")
 
 
+# Ni le proprietaire ni personne d'autre : ce qui est bati la y reste.
+_REFUS_SOL_INVIOLABLE = "Sol inviolable : ses amenagements ne peuvent jamais etre detruits."
+
+
 def detruire_forteresse(state: GameState, terr: Territory) -> AchatResult:
     if terr.id not in state.fortress_territory_ids:
         return _refus("Aucune forteresse a detruire sur ce territoire.")
+    if regles.is_inviolable_ground(state, terr.id):
+        return _refus(_REFUS_SOL_INVIOLABLE)
     if not spend_player_money(state, state.current_player, DESTROY_FORTRESS_COST):
         return _refus("Pas assez d'ecus pour detruire cette forteresse.")
     state.fortress_territory_ids.discard(terr.id)
@@ -445,6 +451,8 @@ def construire_universite(state: GameState, terr: Territory) -> AchatResult:
 def detruire_universite(state: GameState, terr: Territory) -> AchatResult:
     if not regles.has_university(state, terr.id):
         return _refus("Aucune universite a detruire sur ce territoire.")
+    if regles.is_inviolable_ground(state, terr.id):
+        return _refus(_REFUS_SOL_INVIOLABLE)
     if not spend_player_money(state, state.current_player, regles.UNIVERSITY_COST):
         return _refus(f"Pas assez d'ecus pour detruire cette universite : {regles.UNIVERSITY_COST} requis.")
     regles.remove_university(state, terr.id)
@@ -767,10 +775,13 @@ def tirer_missile_detaille(
         return _succes(strike.message), strike
 
     strike.destroyed = regles.destroy_all_amenities(state, terr.id)
-    damage_note = (
-        " Rase : " + ", ".join(strike.destroyed) + "." if strike.destroyed
-        else " Aucun amenagement a raser."
-    )
+    if regles.is_inviolable_ground(state, terr.id):
+        damage_note = " Sol inviolable : ses amenagements restent debout."
+    else:
+        damage_note = (
+            " Rase : " + ", ".join(strike.destroyed) + "." if strike.destroyed
+            else " Aucun amenagement a raser."
+        )
     strike.message = (
         f"Missile a pleine puissance sur {terr.name} pour {MISSILE_COST} ecu(s) : "
         f"{losses} regiment(s) aneanti(s) sur {regiments_before}, il n'en reste qu'{terr.regiments}."
