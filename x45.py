@@ -1779,7 +1779,7 @@ class GraphicalGame:
             return
         territory_ids = list(range(len(self.territories)))
         random.shuffle(territory_ids)
-        ultra_count = min(4, len(territory_ids))
+        ultra_count = min(moteur_mise_en_place.INITIAL_ULTRA_BONUS_COUNT, len(territory_ids))
         ultra_ids = territory_ids[:ultra_count]
         for tid in ultra_ids:
             self.territories[tid].reinforcement_bonus = 3

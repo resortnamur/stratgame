@@ -17,6 +17,7 @@ import os
 import random
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
@@ -170,10 +171,12 @@ class TestPariteMiseEnPlace(unittest.TestCase):
                     random.seed(RANDOM_SEED)
                     # La reference figee ne connait pas les territoires
                     # aux proprietes particulieres : on ne les pose pas.
-                    state = mise_en_place.nouvelle_partie(
-                        json.loads(json.dumps(map_payload)), **config,
-                        special_territories=False,
-                    )
+                    # Elle pose aussi quatre +3, contre deux desormais.
+                    with mock.patch.object(mise_en_place, "INITIAL_ULTRA_BONUS_COUNT", 4):
+                        state = mise_en_place.nouvelle_partie(
+                            json.loads(json.dumps(map_payload)), **config,
+                            special_territories=False,
+                        )
                     actions.begin_player_turn(state, state.current_player)
 
                     self.assertEqual(

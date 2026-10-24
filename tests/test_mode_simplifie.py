@@ -93,11 +93,11 @@ class TestMiseEnPlaceSimplifiee(unittest.TestCase):
         self.assertEqual(self.state.wonder_territories, {})
 
     def test_bonus_dores_et_sanctuaires_restent(self):
-        self.assertEqual(len(self.state.ultra_super_territory_ids), 4)
+        self.assertEqual(len(self.state.ultra_super_territory_ids), 2)
         self.assertEqual(len(self.state.golden_territory_ids), 4)
         self.assertEqual(len(self.state.sanctuary_territory_ids), 3)
         self.assertEqual(
-            sum(1 for terr in self.state.territories if terr.reinforcement_bonus == 3), 4,
+            sum(1 for terr in self.state.territories if terr.reinforcement_bonus == 3), 2,
         )
 
     def test_mode_tribus_toujours_disponible(self):
@@ -457,7 +457,9 @@ class TestForteressesFideles(unittest.TestCase):
 class TestPartieSimplifieeAutonome(unittest.TestCase):
     def test_le_moteur_joue_seul_en_version_simplifiee(self):
         """Soixante tours complets : IA au moteur, humains au vocabulaire d'actions."""
-        state, rng = nouvelle_partie_simple()
+        # Germe propre a ce scenario : depuis le passage a deux +3, le germe
+        # commun ne fait plus tomber aucune forteresse en 60 tours.
+        state, rng = nouvelle_partie_simple(germe=3)
         cw, ch = dimensions(state)
         actions.begin_player_turn(state, state.current_player, rng)
 

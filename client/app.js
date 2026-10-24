@@ -53,11 +53,12 @@ function toursRestantsRessource(etat, tid, sorte) {
 }
 
 // Les trois territoires aux propriétés particulières (moteur/regles.py) :
-// nom, sigle et couleurs du badge, toujours visible sur la carte.
+// nom et couleur de la pastille ronde (même gabarit que les +3), toujours
+// visible sur la carte ; le symbole est dessiné par dessinerSymboleParticulier.
 const TERRITOIRES_PARTICULIERS = {
-  rally_throne: { nom: "Trône des Ralliements", sigle: "TR", fond: "rgb(96,28,110)", symbole: "rgb(255,214,120)" },
-  endless_vein: { nom: "Veine inépuisable", sigle: "VE", fond: "rgb(20,70,90)", symbole: "rgb(255,236,140)" },
-  inviolable_ground: { nom: "Sol inviolable", sigle: "SI", fond: "rgb(40,40,48)", symbole: "rgb(236,236,250)" },
+  rally_throne: { nom: "Trône des Ralliements", fond: "rgb(142,68,173)" },
+  endless_vein: { nom: "Veine inépuisable", fond: "rgb(39,150,110)" },
+  inviolable_ground: { nom: "Sol inviolable", fond: "rgb(127,140,141)" },
 };
 const INTERVALLE_TRONE = 10;
 const MURISSEMENT_VEINE = 10;
@@ -2777,6 +2778,57 @@ function glypheBadge(ctx, x, y, texte, couleur, taille = 10) {
   ctx.fillText(texte, x - ctx.measureText(texte).width / 2, y + 1);
 }
 
+function dessinerSymboleParticulier(ctx, sorte, x, y) {
+  // Trône : couronne d'or. Veine : pile de trois pièces (les 50 écus).
+  // Sol inviolable : bouclier blanc.
+  const trait = "rgb(20,20,20)";
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = trait;
+  if (sorte === "rally_throne") {
+    ctx.beginPath();
+    ctx.moveTo(x - 7, y + 5);
+    ctx.lineTo(x - 7, y - 5);
+    ctx.lineTo(x - 3.5, y);
+    ctx.lineTo(x, y - 6);
+    ctx.lineTo(x + 3.5, y);
+    ctx.lineTo(x + 7, y - 5);
+    ctx.lineTo(x + 7, y + 5);
+    ctx.closePath();
+    ctx.fillStyle = "rgb(255,214,60)";
+    ctx.fill();
+    ctx.stroke();
+  } else if (sorte === "endless_vein") {
+    for (const dy of [5, 1, -3]) {
+      ctx.fillStyle = "rgb(255,214,60)";
+      ctx.fillRect(x - 6, y + dy - 1.5, 12, 3);
+      ctx.strokeRect(x - 6, y + dy - 1.5, 12, 3);
+      ctx.beginPath();
+      ctx.ellipse(x, y + dy - 1.5, 6, 2.2, 0, 0, 2 * Math.PI);
+      ctx.fillStyle = "rgb(255,236,140)";
+      ctx.fill();
+      ctx.stroke();
+    }
+  } else if (sorte === "inviolable_ground") {
+    ctx.beginPath();
+    ctx.moveTo(x - 6, y - 6);
+    ctx.lineTo(x + 6, y - 6);
+    ctx.lineTo(x + 6, y);
+    ctx.quadraticCurveTo(x + 6, y + 5, x, y + 7.5);
+    ctx.quadraticCurveTo(x - 6, y + 5, x - 6, y);
+    ctx.closePath();
+    ctx.fillStyle = "rgb(245,245,250)";
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y - 6);
+    ctx.lineTo(x, y + 7);
+    ctx.moveTo(x - 6, y - 1);
+    ctx.lineTo(x + 6, y - 1);
+    ctx.strokeStyle = "rgb(127,140,141)";
+    ctx.stroke();
+  }
+}
+
 function dessinerBadge(ctx, type, x, y, etat, tid) {
   const g = (gauche) => x - 14 + gauche;   // repère local du badge 28x24
   const h = (haut) => y - 12 + haut;
@@ -2834,10 +2886,17 @@ function dessinerBadge(ctx, type, x, y, etat, tid) {
     fondBadge(ctx, x, y, 30, 26, fond, symbole, 7);
     glypheBadge(ctx, x, y, lettre, symbole, lettre.length > 1 ? 11 : 13);
   } else if (type.startsWith("special:")) {
-    const def = TERRITOIRES_PARTICULIERS[type.split(":")[1]];
+    const sorte = type.split(":")[1];
+    const def = TERRITOIRES_PARTICULIERS[sorte];
     if (!def) return;
-    fondBadge(ctx, x, y, 30, 26, def.fond, def.symbole, 13);
-    glypheBadge(ctx, x, y, def.sigle, def.symbole, 11);
+    ctx.beginPath();
+    ctx.arc(x, y, 11, 0, 2 * Math.PI);
+    ctx.fillStyle = def.fond;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = "rgb(44,62,80)";
+    ctx.stroke();
+    dessinerSymboleParticulier(ctx, sorte, x, y);
   } else if (type === "factory") {
     fondBadge(ctx, x, y, 28, 24, "rgb(133,193,233)", "rgb(44,62,80)");
     ctx.fillStyle = "rgb(28,42,56)";

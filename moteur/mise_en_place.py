@@ -425,8 +425,13 @@ def assign_initial_player_capitals(state: GameState, rng=random) -> None:
 # Territoires speciaux
 # ----------------------------------------------------------------------
 
+# Deux +3 seulement en debut de partie, pour que ces ressources soient
+# disputees (il y en avait quatre, comme les territoires dores).
+INITIAL_ULTRA_BONUS_COUNT = 2
+
+
 def assign_random_bonus_territories(state: GameState, rng=random) -> None:
-    """Miroir de assign_random_bonus_territories (x45) : 4 territoires +3."""
+    """Miroir de assign_random_bonus_territories (x45) : 2 territoires +3."""
     state.super_territory_ids = set()
     state.ultra_super_territory_ids = set()
     for terr in state.territories:
@@ -435,7 +440,7 @@ def assign_random_bonus_territories(state: GameState, rng=random) -> None:
         return
     territory_ids = list(range(len(state.territories)))
     rng.shuffle(territory_ids)
-    ultra_ids = territory_ids[:min(4, len(territory_ids))]
+    ultra_ids = territory_ids[:min(INITIAL_ULTRA_BONUS_COUNT, len(territory_ids))]
     for tid in ultra_ids:
         state.territories[tid].reinforcement_bonus = 3
     state.ultra_super_territory_ids = set(ultra_ids)
