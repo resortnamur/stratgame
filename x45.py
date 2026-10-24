@@ -11412,24 +11412,40 @@ class GraphicalGame:
         label = self.font_small.render(label_text, True, (20, 20, 20))
         self.screen.blit(label, label.get_rect(center=(x, y)))
 
-    # Sigle et couleurs des territoires aux proprietes particulieres, les
-    # memes que dans le client web.
+    # Couleur de la pastille ronde des territoires aux proprietes
+    # particulieres (gabarit des +3), la meme que dans le client web.
     SPECIAL_TERRITORY_BADGES = {
-        "rally_throne": ("TR", (96, 28, 110), (255, 214, 120)),
-        "endless_vein": ("VE", (20, 70, 90), (255, 236, 140)),
-        "inviolable_ground": ("SI", (40, 40, 48), (236, 236, 250)),
+        "rally_throne": (142, 68, 173),
+        "endless_vein": (39, 150, 110),
+        "inviolable_ground": (127, 140, 141),
     }
 
     def draw_special_territory_badge(self, x: int, y: int, kind: str) -> None:
-        label_text, background, symbol_color = self.SPECIAL_TERRITORY_BADGES.get(
-            kind, ("?", (70, 70, 70), (235, 235, 235)),
-        )
-        badge_rect = pygame.Rect(0, 0, 30, 26)
-        badge_rect.center = (x, y)
-        pygame.draw.rect(self.screen, background, badge_rect, border_radius=13)
-        pygame.draw.rect(self.screen, symbol_color, badge_rect, width=2, border_radius=13)
-        label = self.font_small.render(label_text, True, symbol_color)
-        self.screen.blit(label, label.get_rect(center=badge_rect.center))
+        # Trone : couronne d'or. Veine : pile de trois pieces (les 50 ecus).
+        # Sol inviolable : bouclier blanc.
+        background = self.SPECIAL_TERRITORY_BADGES.get(kind, (70, 70, 70))
+        pygame.draw.circle(self.screen, background, (x, y), 11)
+        pygame.draw.circle(self.screen, (44, 62, 80), (x, y), 11, 2)
+        outline = (20, 20, 20)
+        if kind == "rally_throne":
+            crown = [(x - 7, y + 5), (x - 7, y - 5), (x - 3, y), (x, y - 6),
+                     (x + 3, y), (x + 7, y - 5), (x + 7, y + 5)]
+            pygame.draw.polygon(self.screen, (255, 214, 60), crown)
+            pygame.draw.polygon(self.screen, outline, crown, 1)
+        elif kind == "endless_vein":
+            for dx, dy in ((-1, 4), (1, 0), (-1, -4)):
+                coin = pygame.Rect(x - 7 + dx, y + dy - 3, 14, 6)
+                pygame.draw.ellipse(self.screen, (255, 214, 60), coin)
+                pygame.draw.ellipse(self.screen, outline, coin, 1)
+                pygame.draw.line(self.screen, (255, 245, 190),
+                                 (coin.left + 4, coin.centery - 1), (coin.right - 5, coin.centery - 1))
+        elif kind == "inviolable_ground":
+            shield = [(x - 6, y - 6), (x + 6, y - 6), (x + 6, y), (x + 5, y + 3),
+                      (x + 2, y + 6), (x, y + 7), (x - 2, y + 6), (x - 5, y + 3), (x - 6, y)]
+            pygame.draw.polygon(self.screen, (245, 245, 250), shield)
+            pygame.draw.polygon(self.screen, outline, shield, 1)
+            pygame.draw.line(self.screen, background, (x, y - 5), (x, y + 6))
+            pygame.draw.line(self.screen, background, (x - 5, y - 1), (x + 5, y - 1))
 
     def draw_capital_badge(self, x: int, y: int, highlighted: bool = False) -> None:
         # Capitale ordinaire active : sigle C visible sur la carte.
