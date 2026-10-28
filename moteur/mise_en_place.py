@@ -450,6 +450,8 @@ def assign_special_territories(state: GameState, rng=random) -> None:
     """Pose le Trone des Ralliements, la Veine inepuisable et le Sol
     inviolable sur trois territoires distincts tires au hasard, jamais sur un
     +3 ni sur un territoire dore (une capitale ou un sanctuaire ONU, oui).
+
+    Le Sol inviolable commence la partie avec une forteresse et une ruine.
     """
     state.special_territories = {}
     state.special_territory_holders = {}
@@ -463,6 +465,9 @@ def assign_special_territories(state: GameState, rng=random) -> None:
         return
     for kind, territory_id in zip(kinds, rng.sample(candidates, len(kinds))):
         state.special_territories[kind] = territory_id
+    inviolable_id = state.special_territories[regles.INVIOLABLE_GROUND]
+    state.fortress_territory_ids.add(inviolable_id)
+    state.ruin_territory_ids.add(inviolable_id)
 
 
 def compute_territory_distances(state: GameState, start_id: int) -> Dict[int, int]:

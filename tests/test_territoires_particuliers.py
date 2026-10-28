@@ -96,6 +96,13 @@ class TestPlacement(unittest.TestCase):
                 break
         self.assertEqual(vus, {"capitale", "onu"})
 
+    def test_sol_inviolable_fortifie_et_en_ruine_au_depart(self):
+        for graine in range(20):
+            state = partie_neuve(graine)
+            tid = state.special_territories[regles.INVIOLABLE_GROUND]
+            self.assertIn(tid, state.fortress_territory_ids)
+            self.assertTrue(regles.has_ruin(state, tid))
+
     def test_compteurs_cales_au_premier_tour(self):
         state = partie_neuve()
         for sorte, tid in state.special_territories.items():
