@@ -9,7 +9,10 @@ Trois durcissements de l'IA reguliere, testes ici :
   l'empire ;
 * les universites et les centres culturels ne sont plus limites a un par
   bloc national, ce qui ouvre enfin aux IA les paliers de science et les
-  annexations culturelles.
+  annexations culturelles ;
+* l'industrie s'etend a tous les territoires controles, et l'IA met de cote
+  une part de son revenu pour son prochain amenagement au lieu de tout
+  lever en mercenaires.
 
 Lancement, depuis le dossier "Jeux Strat" :
     python -m unittest discover -s tests -v
@@ -205,7 +208,11 @@ class TestSuperfluDesIa(unittest.TestCase):
         )
         state.player_capital_ids[0] = 0
         regles.add_regular_ai_fortress(state, 0)
-        return state, [terr for terr in state.territories if terr.owner == 0]
+        owned = [terr for terr in state.territories if terr.owner == 0]
+        # L'industrie au complet : seuls murs et savoir restent en lice.
+        for terr in owned:
+            regles.add_industrial_structure(state, terr.id, "factory")
+        return state, owned
 
     def test_les_murs_passent_devant_quand_le_savoir_a_de_l_avance(self):
         state, owned = self.build()
@@ -287,6 +294,126 @@ class TestExpansionDuSavoir(unittest.TestCase):
         avec_une = regles.calculate_player_science_income(self.state, 0)
         regles.add_university(self.state, 2)
         self.assertEqual(regles.calculate_player_science_income(self.state, 0), 2 * avec_une)
+
+
+
+class TestAmenagementsIndustriels(unittest.TestCase):
+    """L'IA equipe d'industrie tout ce qu'elle controle."""
+
+    def build(self, money=20 * regles.UNIVERSITY_COST):
+        state = build_state(
+            owners=(0,) * 6 + (1,), regiments=(1,) * 6 + (20,), money=money,
+        )
+        state.player_capital_ids[0] = 0
+        regles.add_regular_ai_fortress(state, 0)
+        return state, [terr for terr in state.territories if terr.owner == 0]
+
+    def test_le_quota_couvre_chaque_territoire(self):
+        state, _ = self.build()
+        self.assertEqual(regles.get_ai_industry_quota(state, 0, 6), 6)
+        # J3 est conquerant (cf. AI_DOCTRINES_ORDER) : un territoire sur deux.
+        self.assertEqual(regles.get_ai_industry_quota(state, 3, 6), 3)
+
+    def test_l_industrie_passe_devant_quand_elle_est_en_retard(self):
+        state, owned = self.build()
+        regles.add_university(state, 1)
+        regles.add_cultural_center(state, 2)
+        action = regles.find_regular_ai_surplus_development(state, 0, owned, random.Random(1))
+        self.assertIsNotNone(action)
+        action[1]()
+        self.assertEqual(
+            sum(1 for terr in owned if regles.get_industrial_structure_count(state, terr.id)), 1,
+        )
+
+    def test_le_territoire_le_plus_riche_est_equipe_d_abord(self):
+        """La capitale double son revenu : c'est elle qui recoit l'usine."""
+        state, owned = self.build()
+        action = regles.find_regular_ai_industrial_expansion(state, 0, owned, random.Random(1))
+        self.assertIsNotNone(action)
+        action[1]()
+        self.assertEqual(regles.get_industrial_structure_count(state, 0), 1)
+
+    def test_hors_du_bloc_national_aussi(self):
+        """Le chantier industriel porte sur all_owned, pas sur le seul bloc."""
+        state, owned = self.build()
+        for terr in owned[:3]:
+            regles.add_industrial_structure(state, terr.id, "factory")
+        regles.add_university(state, 1)
+        regles.add_cultural_center(state, 2)
+        bloc = owned[:3]
+        action = regles.find_regular_ai_surplus_development(
+            state, 0, bloc, random.Random(1), all_owned=owned,
+        )
+        self.assertIsNotNone(action)
+        action[1]()
+        equipes = [terr.id for terr in owned if regles.get_industrial_structure_count(state, terr.id)]
+        self.assertEqual(len(equipes), 4)
+
+    def test_rien_a_equiper_rien_a_payer(self):
+        state, owned = self.build()
+        for terr in owned:
+            regles.add_industrial_structure(state, terr.id, "port")
+        self.assertIsNone(
+            regles.find_regular_ai_industrial_expansion(state, 0, owned, random.Random(1))
+        )
+
+
+class TestEpargneDeConstruction(unittest.TestCase):
+    """L'IA ne rase plus la caisse quand un chantier l'attend."""
+
+    def build(self, money):
+        state = build_state(
+            owners=(0,) * 6 + (1,), regiments=(1,) * 6 + (20,), money=money,
+        )
+        state.player_capital_ids[0] = 0
+        regles.add_regular_ai_fortress(state, 0)
+        return state, [terr for terr in state.territories if terr.owner == 0]
+
+    def test_une_part_du_revenu_va_toujours_aux_mercenaires(self):
+        state, owned = self.build(money=100)
+        revenu = regles.calculate_player_income(state, 0)
+        epargne = regles.get_ai_construction_savings(state, 0, owned, owned)
+        self.assertEqual(epargne, 100 - revenu * 50 // 100)
+
+    def test_au_dela_du_chantier_tout_repart_en_regiments(self):
+        state, owned = self.build(money=1000)
+        cible = regles.FACTORY_COST + regles.get_ai_development_reserve(state, 0)
+        self.assertEqual(regles.get_ai_construction_savings(state, 0, owned, owned), cible)
+
+    def test_plus_rien_a_batir_plus_d_epargne(self):
+        state, owned = self.build(money=100)
+        for terr in owned:
+            regles.add_industrial_structure(state, terr.id, "factory")
+            regles.add_regular_ai_fortress(state, terr.id)
+            regles.add_university(state, terr.id)
+            regles.add_cultural_center(state, terr.id)
+        self.assertEqual(regles.get_ai_construction_savings(state, 0, owned, owned), 0)
+
+    def test_un_petit_revenu_finit_par_batir(self):
+        """Revenu trop maigre pour payer un chantier d'un coup : l'IA epargne
+        tour apres tour, batit, et continue de lever des regiments."""
+        state, owned = self.build(money=0)
+        regles.add_temple(state, 1)
+        regles.add_cultural_center(state, 2)
+        regles.add_university(state, 3)
+        for terr, kind in zip(owned[3:], ("factory", "airport", "port")):
+            regles.add_industrial_structure(state, terr.id, kind)
+        def amenagements():
+            return sum(
+                1 for terr in owned if regles.get_industrial_structure_count(state, terr.id)
+            ) + regles.count_component_universities(state, [t.id for t in owned]) + (
+                regles.count_component_cultural_centers(state, [t.id for t in owned])
+            )
+        avant = amenagements()
+        regiments_avant = sum(terr.regiments for terr in owned)
+        revenu = regles.calculate_player_income(state, 0)
+        self.assertLess(revenu, regles.FACTORY_COST + regles.get_ai_development_reserve(state, 0))
+        rng = random.Random(3)
+        for _ in range(40):
+            state.player_money[0] += regles.calculate_player_income(state, 0)
+            regles.execute_ai_economic_actions(state, 0, rng)
+        self.assertGreater(amenagements(), avant)
+        self.assertGreater(sum(terr.regiments for terr in owned), regiments_avant)
 
 
 if __name__ == "__main__":

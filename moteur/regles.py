@@ -25,6 +25,7 @@ from __future__ import annotations
 import math
 import random
 from dataclasses import dataclass
+from functools import cmp_to_key
 from typing import Dict, List, Optional, Set, Tuple
 
 from .etat import GameState, MAX_REPLAY_SNAPSHOTS, Territory, sanitize_major_event_modal
@@ -365,6 +366,11 @@ AI_DOCTRINE_SETTINGS = {
         "territories_per_fortress": 5,
         "territories_per_knowledge_building": 4,
         "development_reserve": 200,
+        # Une usine, un aeroport ou un port par territoire controle (un sur
+        # deux pour le conquerant), et la part du revenu mise de cote pour le
+        # prochain chantier au lieu de partir en mercenaires.
+        "territories_per_industry": 1,
+        "construction_savings_percent": 50,
         "war_chest": MISSILE_COST,
         "fires_missiles": True,
         "missile_denominator": 2,
@@ -379,6 +385,8 @@ AI_DOCTRINE_SETTINGS = {
         "territories_per_fortress": 6,
         "territories_per_knowledge_building": 3,
         "development_reserve": 200,
+        "territories_per_industry": 1,
+        "construction_savings_percent": 50,
         "war_chest": 2 * MISSILE_COST,
         "fires_missiles": True,
         "missile_denominator": 1,
@@ -394,6 +402,8 @@ AI_DOCTRINE_SETTINGS = {
         "territories_per_fortress": 3,
         "territories_per_knowledge_building": 3,
         "development_reserve": 100,
+        "territories_per_industry": 1,
+        "construction_savings_percent": 75,
         "war_chest": MISSILE_COST,
         "fires_missiles": True,
         "missile_denominator": 3,
@@ -409,6 +419,8 @@ AI_DOCTRINE_SETTINGS = {
         "territories_per_fortress": 8,
         "territories_per_knowledge_building": 8,
         "development_reserve": 400,
+        "territories_per_industry": 2,
+        "construction_savings_percent": 25,
         "war_chest": MISSILE_COST,
         "fires_missiles": True,
         "missile_denominator": 4,
@@ -7318,18 +7330,126 @@ def find_regular_ai_industrial_purchase(
     return cost, lambda terr=target, structure_type=structure_type: add_industrial_structure(state, terr.id, structure_type)
 
 
-def find_regular_ai_mercenary_purchase(state: GameState, player: int, owned: List[Territory], rng=random):
+def get_ai_industry_quota(state: GameState, player: int, territory_count: int) -> int:
+    """Combien de territoires une IA equipe d'une usine, d'un aeroport ou d'un port."""
+    return territory_count // max(1, get_ai_doctrine_setting(state, player, "territories_per_industry"))
+
+
+def find_regular_ai_industrial_expansion(
+    state: GameState, player: int, owned: List[Territory], rng=random,
+):
+    """Un amenagement industriel de plus, la ou il rapportera le plus.
+
+    Un territoire n'en porte qu'un, et il double son revenu : l'IA equipe
+    donc d'abord ses territoires les plus riches (capitale, carrefours), sur
+    tout ce qu'elle controle et non plus sur son seul bloc national. Elle
+    vise le type qui lui manque encore, sinon n'importe lequel. Paye sur le
+    superflu, comme les autres chantiers.
+    """
+    if not owned:
+        return None
+    built = sum(1 for terr in owned if get_industrial_structure_count(state, terr.id) > 0)
+    if built >= get_ai_industry_quota(state, player, len(owned)):
+        return None
+    if state.player_money.get(player, 0) < FACTORY_COST + get_ai_development_reserve(state, player):
+        return None
+    candidates = [
+        terr for terr in owned
+        if get_industrial_structure_count(state, terr.id) == 0
+        and not is_sanctuary_territory(state, terr.id)
+    ]
+    if not candidates:
+        return None
+    structure_types = get_missing_player_industrial_types(state, player, rng) or ["factory", "airport", "port"]
+    structure_type = rng.choice(structure_types)
+    cost = {"factory": FACTORY_COST, "airport": AIRPORT_COST, "port": PORT_COST}[structure_type]
+    target = max(candidates, key=lambda terr: (
+        calculate_territory_income(state, terr), len(terr.neighbors), -terr.id,
+    ))
+    return cost, lambda terr=target, structure_type=structure_type: add_industrial_structure(state, terr.id, structure_type)
+
+
+def get_ai_pending_construction_cost(
+    state: GameState, player: int, development_owned: List[Territory], owned: List[Territory],
+) -> int:
+    """Le prix du chantier le moins cher qu'une IA a encore devant elle.
+
+    Memes quotas que ``find_regular_ai_surplus_development``, sans regarder
+    la caisse : zero quand il n'y a plus rien a batir.
+    """
+    costs = []
+    industry_candidates = [
+        terr for terr in owned
+        if get_industrial_structure_count(state, terr.id) == 0
+        and not is_sanctuary_territory(state, terr.id)
+    ]
+    industry_built = len(owned) - sum(1 for terr in owned if get_industrial_structure_count(state, terr.id) == 0)
+    if industry_candidates and industry_built < get_ai_industry_quota(state, player, len(owned)):
+        costs.append(FACTORY_COST)
+    if development_owned:
+        territory_ids = [terr.id for terr in development_owned]
+        fortresses = sum(1 for terr in development_owned if terr.id in state.fortress_territory_ids)
+        if 0 < fortresses < get_ai_player_fortress_quota(state, player, len(development_owned)) and any(
+            terr.id not in state.fortress_territory_ids and get_ai_territory_threat(state, terr, player) > 0
+            for terr in development_owned
+        ):
+            costs.append(FORTRESS_COST)
+        knowledge_quota = get_ai_player_knowledge_quota(state, player, len(development_owned))
+        if count_component_universities(state, territory_ids) < knowledge_quota and any(
+            can_add_university(state, terr.id) for terr in development_owned
+        ):
+            costs.append(UNIVERSITY_COST)
+        if count_component_cultural_centers(state, territory_ids) < knowledge_quota and any(
+            can_add_cultural_center(state, terr.id) for terr in development_owned
+        ):
+            costs.append(CULTURAL_CENTER_COST)
+    return min(costs) if costs else 0
+
+
+def get_ai_construction_savings(
+    state: GameState, player: int, development_owned: List[Territory], owned: List[Territory],
+) -> int:
+    """Ce qu'une IA garde en caisse pour son prochain amenagement.
+
+    Sans cette epargne, les mercenaires raflaient chaque tour tout le revenu
+    et l'IA ne batissait que les tours ou un seul revenu couvrait le prix et
+    la reserve. Elle met desormais de cote une part de son revenu (selon sa
+    doctrine) jusqu'a reunir le prix du chantier et sa reserve ; le reste
+    du revenu continue de payer des regiments.
+    """
+    cost = get_ai_pending_construction_cost(state, player, development_owned, owned)
+    if cost <= 0:
+        return 0
+    available = max(0, state.player_money.get(player, 0) - get_ai_war_chest_target(state, player))
+    target = cost + get_ai_development_reserve(state, player)
+    share = get_ai_doctrine_setting(state, player, "construction_savings_percent")
+    mercenary_floor = calculate_player_income(state, player) * (100 - share) // 100
+    mercenary_budget = min(available, max(available - target, mercenary_floor))
+    return available - mercenary_budget
+
+
+def find_regular_ai_mercenary_purchase(
+    state: GameState, player: int, owned: List[Territory], rng=random, savings: int = 0,
+):
     """Convertit en mercenaires tout ce qui depasse le magot d'operations.
 
     Les mercenaires sont le puits sans fond des achats IA : c'est donc ici
     que l'epargne dirigee se joue. Ce que ``get_ai_war_chest_target`` met
-    de cote reste en caisse pour un missile ; le reste part en regiments.
+    de cote reste en caisse pour un missile, ``savings`` pour le prochain
+    amenagement ; le reste part en regiments.
     """
-    disponible = state.player_money[player] - get_ai_war_chest_target(state, player)
+    disponible = state.player_money[player] - get_ai_war_chest_target(state, player) - max(0, savings)
     quantity = disponible // MERCENARY_COST
     if quantity <= 0:
         return None
-    return quantity * MERCENARY_COST, lambda quantity=quantity, owned=list(owned): add_regular_ai_mercenaries(state, owned, quantity, rng)
+
+    def recruit(quantity=quantity, owned=list(owned)):
+        add_regular_ai_mercenaries(state, owned, quantity, rng)
+
+    # La levee clot les achats du tour : relancee, elle reprendrait sa part
+    # du revenu sur l'epargne du chantier.
+    recruit.ends_purchases = True
+    return quantity * MERCENARY_COST, recruit
 
 
 def find_ai_wonder_purchase(
@@ -7478,33 +7598,48 @@ def find_regular_ai_knowledge_expansion(
 
 def find_regular_ai_surplus_development(
     state: GameState, player: int, owned: List[Territory], rng=random,
+    all_owned: Optional[List[Territory]] = None,
 ):
     """Ce qu'une IA fait de son superflu une fois son bloc national equipe.
 
-    Deux chantiers se disputent l'argent qui reste : fortifier une
-    frontiere de plus, ou pousser la science et la culture. Celui qui est
-    le plus en retard sur son quota passe devant, si bien qu'aucun des
-    deux n'etouffe l'autre. Ce qu'ils laissent part en mercenaires.
+    Trois chantiers se disputent l'argent qui reste : fortifier une
+    frontiere de plus, pousser la science et la culture, ou equiper
+    d'industrie un territoire de plus (sur ``all_owned``, tout ce que l'IA
+    controle). Celui qui est le plus en retard sur son quota passe devant,
+    si bien qu'aucun n'etouffe les autres. Ce qu'ils laissent part en
+    mercenaires, moins l'epargne de ``get_ai_construction_savings``.
     """
     if not owned:
         return None
+    all_owned = all_owned if all_owned is not None else owned
     territory_ids = [terr.id for terr in owned]
     fortress_quota = get_ai_player_fortress_quota(state, player, len(owned))
     knowledge_quota = 2 * get_ai_player_knowledge_quota(state, player, len(owned))
+    industry_quota = get_ai_industry_quota(state, player, len(all_owned))
     fortresses = sum(1 for terr in owned if terr.id in state.fortress_territory_ids)
     knowledge = (
         count_component_universities(state, territory_ids)
         + count_component_cultural_centers(state, territory_ids)
     )
-    # Comparaison des deux avancements sans division : fortresses /
-    # fortress_quota face a knowledge / knowledge_quota.
-    order = (
-        (find_regular_ai_extra_fortress_purchase, find_regular_ai_knowledge_expansion)
-        if fortresses * knowledge_quota <= knowledge * fortress_quota
-        else (find_regular_ai_knowledge_expansion, find_regular_ai_extra_fortress_purchase)
-    )
-    for build in order:
-        action = build(state, player, owned, rng)
+    industry = sum(1 for terr in all_owned if get_industrial_structure_count(state, terr.id) > 0)
+    projects = [
+        (fortresses, fortress_quota, 0, lambda: find_regular_ai_extra_fortress_purchase(state, player, owned, rng)),
+        (knowledge, knowledge_quota, 1, lambda: find_regular_ai_knowledge_expansion(state, player, owned, rng)),
+    ]
+    if industry_quota > 0:
+        projects.append(
+            (industry, industry_quota, 2, lambda: find_regular_ai_industrial_expansion(state, player, all_owned, rng)),
+        )
+    # Le plus en retard d'abord : avancement = bati / quota, compare sans
+    # division ; a egalite, l'ordre historique (murs, savoir, industrie).
+    def compare(a, b):
+        left, right = a[0] * b[1], b[0] * a[1]
+        if left != right:
+            return -1 if left < right else 1
+        return a[2] - b[2]
+
+    for _, _, _, build in sorted(projects, key=cmp_to_key(compare)):
+        action = build()
         if action is not None:
             return action
     return None
@@ -7568,11 +7703,12 @@ def find_next_regular_ai_purchase(state: GameState, player: int, rng=random):
             return action
         return find_regular_ai_mercenary_purchase(state, player, owned, rng)
 
-    surplus_action = find_regular_ai_surplus_development(state, player, development_owned, rng)
+    surplus_action = find_regular_ai_surplus_development(state, player, development_owned, rng, owned)
     if surplus_action is not None:
         return surplus_action
 
-    return find_regular_ai_mercenary_purchase(state, player, owned, rng)
+    savings = get_ai_construction_savings(state, player, development_owned, owned)
+    return find_regular_ai_mercenary_purchase(state, player, owned, rng, savings)
 
 
 def find_next_commercial_city_purchase(state: GameState, player: int, rng=random):
@@ -7722,6 +7858,8 @@ def execute_ai_economic_actions(
         state.player_money[player] -= cost
         callback()
         actions += 1
+        if getattr(callback, "ends_purchases", False):
+            break
     if actions > 0:
         refresh_nation_states(state, trigger_player=player)
     return actions
