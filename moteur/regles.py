@@ -1928,7 +1928,7 @@ def find_domination_candidate(
 # Paliers de victoire
 # ----------------------------------------------------------------------
 
-# Les sept conditions de victoire, devenues des paliers : chacune ne se
+# Les six conditions de victoire, devenues des paliers : chacune ne se
 # franchit qu'une fois dans la partie, donne un point de victoire a son
 # auteur, puis se ferme definitivement.
 VICTORY_CONDITIONS = (
@@ -1936,20 +1936,19 @@ VICTORY_CONDITIONS = (
     "religion",
     "culture",
     "science",
-    "conquete",
     "territoires",
     "dores",
 )
-# Deux paliers rapportent leur point comme les autres, mais ne conditionnent
-# pas la fin de la partie : on peut fort bien ne jamais les voir tomber.
+# La religion rapporte son point comme les autres, mais ne conditionne pas
+# la fin de la partie : on peut fort bien ne jamais la voir tomber. Une
+# religion conquerante finit par recouvrir les religions nationales : passe
+# un certain point, plus aucune ne peut esperer les neuf dixiemes de la
+# carte. L'exiger, c'etait condamner la partie a ne jamais s'achever.
 #
-# La religion, parce qu'une religion conquerante finit par recouvrir les
-# religions nationales : passe un certain point, plus aucune ne peut esperer
-# les neuf dixiemes de la carte. La conquete totale, parce qu'elle demande la
-# carte entiere, sanctuaires ONU compris, ce qui n'arrive presque jamais.
-#
-# Les exiger, c'etait condamner la partie a ne jamais s'achever.
-OPTIONAL_VICTORY_CONDITIONS = ("religion", "conquete")
+# La conquete totale n'est plus un palier : les trois quarts des territoires
+# en sont deja un, et tenir toute la carte acheve de toute facon la partie
+# (cf. evaluate_winner).
+OPTIONAL_VICTORY_CONDITIONS = ("religion",)
 REQUIRED_VICTORY_CONDITIONS = tuple(
     condition for condition in VICTORY_CONDITIONS
     if condition not in OPTIONAL_VICTORY_CONDITIONS
@@ -2095,15 +2094,6 @@ def find_satisfied_victory_conditions(state: GameState) -> List[Tuple[str, int, 
             + bloc_note(get_victory_bloc(state, owner)),
         ))
 
-    for owner in sorted(candidates):
-        bloc = get_victory_bloc(state, owner)
-        if all(terr.owner in bloc for terr in state.territories):
-            satisfied.append((
-                "conquete", owner,
-                "a conquis tous les territoires, sanctuaires ONU compris" + bloc_note(bloc),
-            ))
-            break
-
     total_territories = len(state.territories)
     threshold = math.ceil(total_territories * 0.75)
     for owner in sorted(candidates):
@@ -2194,13 +2184,13 @@ def choose_farthest_territories_from_capital(
 def split_empire_after_milestone(
     state: GameState, player: int, rng=random,
 ) -> Optional[dict]:
-    """Coupe en deux l'empire d'un joueur, quand un palier vient de tomber.
+    """Ampute d'un tiers l'empire d'un joueur, quand un palier vient de tomber.
 
     Un premier palier franchi lancait son auteur vers tous les suivants :
     l'avance qui l'avait porte la ne faisait que grandir. Desormais elle se
     paie, et toute la carte avec lui (cf.
-    ``split_all_empires_after_milestone``). La moitie de l'empire la plus
-    eloignee de la capitale fait secession et passe a un nouveau joueur IA,
+    ``split_all_empires_after_milestone``). Le tiers de l'empire le plus
+    eloigne de la capitale fait secession et passe a un nouveau joueur IA,
     qui emporte la moitie du tresor — autant de perdu pour son ancien
     maitre — et le meme niveau de science, que l'ancien maitre conserve
     aussi. La culture ne se partage
@@ -2210,13 +2200,13 @@ def split_empire_after_milestone(
     Le point de victoire, lui, reste acquis a celui qui l'a decroche.
 
     Retourne le detail de la scission, ou ``None`` si l'empire etait trop
-    petit pour se couper en deux.
+    petit pour se couper.
     """
     owned = [terr for terr in state.territories if terr.owner == player]
     if len(owned) < MILESTONE_SPLIT_MIN_TERRITORIES:
         # Un petit empire n'est pas coupe : il y laisserait l'essentiel.
         return None
-    secession = choose_farthest_territories_from_capital(state, player, len(owned) // 2)
+    secession = choose_farthest_territories_from_capital(state, player, len(owned) // 3)
     if not secession:
         return None
 
@@ -2244,11 +2234,11 @@ def split_empire_after_milestone(
 def split_all_empires_after_milestone(
     state: GameState, author: int, rng=random,
 ) -> List[dict]:
-    """Coupe en deux tous les empires de la carte, celui de l'auteur d'abord.
+    """Ampute d'un tiers tous les empires de la carte, celui de l'auteur d'abord.
 
     Un palier franchi ne coute plus seulement a celui qui le decroche : il
     rebat la carte entiere. Chaque empire — humain, IA, nation, Cite
-    commercante et ONU comprises — laisse partir sa moitie la plus eloignee
+    commercante et ONU comprises — laisse partir son tiers le plus eloigne
     de sa capitale vers un nouveau joueur IA, avec la moitie de son tresor
     et le meme niveau de science. Autant de nouveaux joueurs que d'empires
     coupes. Seuls echappent les empires de moins de trois territoires.
@@ -2273,7 +2263,7 @@ def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
     Un palier deja franchi ne se rejoue jamais : que le meme joueur ou un
     autre remplisse a nouveau la condition ne change plus rien.
 
-    Chaque palier franchi coupe en deux tous les empires de la carte, sauf
+    Chaque palier franchi ampute d'un tiers tous les empires de la carte, sauf
     celui qui met fin a la partie : voir
     ``split_all_empires_after_milestone``.
     """
@@ -2312,7 +2302,7 @@ def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
             + suite
         ))
         # La partie continue : le palier se paie d'une scission generale.
-        # Inutile de couper en deux la carte de celui qui vient de gagner,
+        # Inutile d'amputer la carte de celui qui vient de gagner,
         # ni celle d'un bloc qui tient tout — la partie s'acheve dans les
         # deux cas.
         if restants and get_bloc_owning_everything(state) is None:
@@ -2326,7 +2316,7 @@ def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
                 palier["scission"] = scission
                 record_major_event(state, (
                     f"Tour {state.turn}: SCISSION DE L'EMPIRE de J{owner + 1} apres son palier. "
-                    f"{scission['territoires']} territoire(s), la moitie la plus eloignee de sa "
+                    f"{scission['territoires']} territoire(s), le tiers le plus eloigne de sa "
                     f"capitale, font secession et forment J{scission['nouveau_joueur'] + 1} (IA), "
                     f"qui emporte {scission['argent']} ecu(s) et le meme niveau de science "
                     f"({scission['science']}). J{owner + 1} garde sa capitale, "
@@ -2343,7 +2333,7 @@ def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
                 )
                 record_major_event(state, (
                     f"Tour {state.turn}: SCISSION GENERALE dans la foulee du palier : "
-                    f"tous les autres empires se coupent aussi en deux, chacun donnant "
+                    f"tous les autres empires perdent aussi un tiers de leurs territoires, chacun donnant "
                     f"naissance a un joueur IA. {detail_texte}"
                 ))
     return nouveaux
@@ -2395,7 +2385,7 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
     Les conditions de victoire sont des paliers : chacune se franchit une
     seule fois, donne un point de victoire, puis se ferme. La partie se
     poursuit tant qu'il reste un palier *necessaire* a prendre — la religion
-    et la conquete totale rapportent leur point sans rien exiger — ou tant
+    rapporte son point sans rien exiger — ou tant
     qu'il reste plus d'un bloc sur la carte. Le vainqueur est celui qui
     compte le plus de points de victoire.
 

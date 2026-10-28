@@ -114,6 +114,12 @@ const client = {
   replay: null,  // {histoire, index, enPause, minuterie} pendant un replay
   bilans: null,  // dernier état des lieux par joueur (GET /bilans)
   victoire: null,  // {vainqueur, raison} une fois la partie gagnée
+  // Nombre de paliers de victoire déjà connus : un palier au-delà est neuf
+  // et s'annonce par une animation. null tant que l'état n'est pas reçu.
+  paliersVus: null,
+  // Promesse de la file d'annonces de paliers en cours (ou null) : l'écran
+  // de victoire attend la fin des annonces.
+  annoncesPaliers: null,
   fermetureVoulue: false,
   // Expédition maritime : {annulee} pendant l'animation de la traversée et
   // du débarquement — bloque les actions et s'annule si un état plus
@@ -582,6 +588,7 @@ function entrerEnPartie(partieId) {
   client.monSiege = null;
   client.selection = null;
   client.victoire = null;
+  client.paliersVus = null;
   location.hash = "partie=" + partieId;
   $("messages-chat").textContent = "";
   $("journal").textContent = "";
@@ -739,6 +746,7 @@ function traiterMessage(message) {
       fermerQuestionSoumission();
       client.monSiege = message.joueur;
       client.etat = message.etat;
+      client.paliersVus = null;  // les paliers déjà franchis ne s'annoncent pas
       client.actionDepuis = null;
       // La présence détaillée suit immédiatement ; en attendant on connaît
       // au moins les réservations.
@@ -925,7 +933,8 @@ function traiterMessage(message) {
       break;
     case "victoire":
       client.victoire = { vainqueur: message.vainqueur, raison: message.raison };
-      afficherVictoire();
+      // Le dernier palier s'annonce d'abord, la victoire ensuite.
+      Promise.resolve(client.annoncesPaliers).then(afficherVictoire);
       break;
     default:
       break;
@@ -1003,6 +1012,7 @@ function toutRafraichir() {
   afficherSituation();
   afficherDetailTerritoire();
   dessinerCarte();
+  annoncerNouveauxPaliers();
 }
 
 // ---------------------------------------------------------------------------
@@ -1189,7 +1199,6 @@ const LIBELLES_MENACES = {
   religion: "Religion",
   culture: "Culture",
   science: "Science",
-  conquete: "Conquête totale",
 };
 
 function afficherMenacesVictoire() {
@@ -1200,10 +1209,10 @@ function afficherMenacesVictoire() {
     return;
   }
   const paliers = donnees.paliers || [];
-  const total = donnees.nb_conditions || 7;
-  // Deux paliers rapportent leur point sans conditionner la fin de la partie :
-  // la religion et la conquête totale, qu'on peut fort bien ne jamais voir
-  // tomber. Seuls les autres décident de la fin.
+  const total = donnees.nb_conditions || 6;
+  // La religion rapporte son point sans conditionner la fin de la partie :
+  // on peut fort bien ne jamais la voir tomber. Seuls les autres décident
+  // de la fin.
   const facultatives = donnees.conditions_facultatives || [];
   const requisesRestantes = donnees.conditions_requises_restantes || [];
   const bonus = (condition) => facultatives.includes(condition) ? " <em>(bonus)</em>" : "";
@@ -1215,8 +1224,8 @@ function afficherMenacesVictoire() {
     const franchis = paliers.map((palier) => {
       const pion = `<span class="pion" style="background:${rgb(couleurJoueur(palier.joueur))}"></span>`;
       const moyen = LIBELLES_MENACES[palier.condition] || palier.condition;
-      // Chaque palier franchi coupe en deux TOUS les empires de la carte,
-      // sauf le dernier : chacun laisse sa moitié la plus lointaine à un
+      // Chaque palier franchi ampute TOUS les empires de la carte, sauf le
+      // dernier : chacun laisse son tiers le plus lointain à un
       // nouveau joueur IA. Le détail affiché est celui de l'auteur.
       const autres = (palier.scissions || []).filter(
         (detail) => detail.joueur !== palier.joueur,
@@ -2103,6 +2112,90 @@ function lancerConfettis(conteneur) {
     confettis.append(piece);
   }
   conteneur.append(confettis);
+}
+
+// ---------------------------------------------------------------------------
+// Annonce d'un palier de victoire : une courte animation par-dessus la carte,
+// avant que la partie continue (ou que l'écran de victoire prenne le relais).
+// ---------------------------------------------------------------------------
+
+const ANNONCE_PALIER_MS = 3800;
+
+function annoncerNouveauxPaliers() {
+  const paliers = (client.etat && client.etat.victory_milestones) || [];
+  const vus = client.paliersVus;
+  client.paliersVus = paliers.length;
+  if (vus === null || paliers.length <= vus || client.replay) return;
+  for (const palier of paliers.slice(vus)) {
+    client.annoncesPaliers = Promise.resolve(client.annoncesPaliers)
+      .then(() => jouerAnnoncePalier(palier));
+  }
+  const file = client.annoncesPaliers;
+  file.then(() => {
+    if (client.annoncesPaliers === file) client.annoncesPaliers = null;
+  });
+}
+
+function jouerAnnoncePalier(palier) {
+  return new Promise((terminer) => {
+    const zone = $("annonce-palier");
+    zone.textContent = "";
+    const couleur = rgb(couleurJoueur(palier.joueur));
+    const carte = document.createElement("div");
+    carte.className = "carte-palier";
+    carte.style.setProperty("--couleur-joueur", couleur);
+    const onde = document.createElement("div");
+    onde.className = "onde-palier";
+    const medaille = document.createElement("div");
+    medaille.className = "medaille-palier";
+    medaille.textContent = "🏅";
+    const titre = document.createElement("div");
+    titre.className = "titre-palier";
+    titre.textContent = "PALIER DE VICTOIRE";
+    const auteur = document.createElement("div");
+    auteur.className = "auteur-palier";
+    // Texte clair et pastille de couleur : certaines couleurs de joueur
+    // (gris foncé) seraient illisibles sur le fond de la carte.
+    const pastille = document.createElement("span");
+    pastille.className = "pion";
+    pastille.style.background = couleur;
+    auteur.append(pastille, palier.joueur === client.monSiege
+      ? "Tu franchis le palier !"
+      : nomDuJoueur(palier.joueur));
+    const moyen = document.createElement("div");
+    moyen.className = "moyen-palier";
+    moyen.textContent = (LIBELLES_MENACES[palier.condition] || palier.condition)
+      + " — +1 point de victoire";
+    carte.append(onde, medaille, titre, auteur, moyen);
+    const scissions = (palier.scissions || []).length;
+    if (scissions) {
+      const suite = document.createElement("div");
+      suite.className = "suite-palier";
+      suite.textContent = scissions === 1
+        ? "Un empire perd un tiers de ses territoires : un nouveau joueur entre en jeu."
+        : `${scissions} empires perdent un tiers de leurs territoires : `
+          + "autant de nouveaux joueurs entrent en jeu.";
+      carte.append(suite);
+    }
+    zone.append(carte);
+    zone.classList.remove("disparition");
+    zone.hidden = false;
+
+    let fini = false;
+    const fermer = () => {
+      if (fini) return;
+      fini = true;
+      zone.classList.add("disparition");
+      setTimeout(() => {
+        zone.hidden = true;
+        zone.classList.remove("disparition");
+        zone.textContent = "";
+        terminer();
+      }, 350);
+    };
+    zone.onclick = fermer;  // un clic écourte l'annonce
+    setTimeout(fermer, ANNONCE_PALIER_MS);
+  });
 }
 
 function afficherVictoire() {

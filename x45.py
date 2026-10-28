@@ -249,7 +249,6 @@ class GraphicalGame:
         "religion": "religion",
         "culture": "culture",
         "science": "science",
-        "conquete": "conquete totale",
         "territoires": "territoires (3/4)",
         "dores": "territoires dores",
     }
@@ -454,6 +453,9 @@ class GraphicalGame:
         self.replay_finished = False
         self.replay_restore_state: Optional[dict] = None
         self.confetti_particles: list[dict] = []
+        # Paliers de victoire tout juste franchis, annonces un par un par une
+        # courte animation avant que la partie reprenne (ou s'acheve).
+        self.milestone_announcements: list[dict] = []
         self.last_special_conquest_message = ""
         self.last_empire_event_turn = 0
 
@@ -810,6 +812,7 @@ class GraphicalGame:
         self.replay_history = []
         self.replay_restore_state = None
         self.confetti_particles = []
+        self.milestone_announcements = []
         self.phase = "playing"
         self.turn_phase = "attack"
         self.turn_move_count = 0
@@ -1736,6 +1739,7 @@ class GraphicalGame:
         self.victory_winner = None
         self.victory_summary = {}
         self.confetti_particles = []
+        self.milestone_announcements = []
         self.geopolitical_panel_visible = False
         self.geopolitical_panel_page = 0
         self.empire_panel_visible = False
@@ -8372,6 +8376,100 @@ class GraphicalGame:
         footer = self.font_small.render(footer_text, True, (180, 190, 200))
         self.screen.blit(footer, footer.get_rect(centerx=panel.centerx, bottom=panel.bottom - 22))
 
+    MILESTONE_ANNOUNCEMENT_MS = 3800
+
+    def draw_milestone_announcement(self) -> None:
+        """Le palier de victoire qu'on vient de franchir : medaille, onde, carton."""
+        if not self.milestone_announcements:
+            return
+        annonce = self.milestone_announcements[0]
+        palier = annonce["palier"]
+        debut = annonce["debut"]
+        elapsed = 0 if debut is None else pygame.time.get_ticks() - debut
+        total = self.MILESTONE_ANNOUNCEMENT_MS
+        # Fondu d'entree et de sortie de l'ensemble.
+        fade = min(1.0, elapsed / 250, max(0.0, (total - elapsed) / 350))
+
+        overlay = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
+        overlay.fill((10, 18, 32, int(140 * fade)))
+        self.screen.blit(overlay, (0, 0))
+
+        gold = (244, 208, 63)
+        joueur = int(palier.get("joueur", 0))
+        couleur = self.PLAYER_COLORS[joueur % len(self.PLAYER_COLORS)]
+        center = (self.WIDTH // 2, self.HEIGHT // 2)
+
+        # Deux ondes a la couleur du joueur, qui s'elargissent et s'eteignent.
+        for offset in (150, 1450):
+            t = (elapsed - offset) / 1300
+            if 0 <= t <= 1:
+                ring = pygame.Surface((self.WIDTH, self.HEIGHT), pygame.SRCALPHA)
+                pygame.draw.circle(
+                    ring, (*couleur, int(230 * (1 - t) * fade)), center,
+                    int(60 + 420 * t), width=5,
+                )
+                self.screen.blit(ring, (0, 0))
+
+        width, height = 600, 236
+        card = pygame.Surface((width, height), pygame.SRCALPHA)
+        pygame.draw.rect(card, (30, 45, 68), card.get_rect(), border_radius=14)
+        pygame.draw.rect(card, gold, card.get_rect(), width=3, border_radius=14)
+
+        # La medaille tombe en tournant pendant la premiere demi-seconde.
+        drop = max(0.0, 1 - elapsed / 600)
+        medal_center = (width // 2, int(46 - 30 * drop))
+        pygame.draw.polygon(card, (192, 57, 43), [
+            (medal_center[0] - 16, medal_center[1] - 34), (medal_center[0] - 4, medal_center[1] - 34),
+            (medal_center[0] + 2, medal_center[1] - 10), (medal_center[0] - 10, medal_center[1] - 10),
+        ])
+        pygame.draw.polygon(card, (41, 128, 185), [
+            (medal_center[0] + 4, medal_center[1] - 34), (medal_center[0] + 16, medal_center[1] - 34),
+            (medal_center[0] + 10, medal_center[1] - 10), (medal_center[0] - 2, medal_center[1] - 10),
+        ])
+        pygame.draw.circle(card, gold, medal_center, 18)
+        pygame.draw.circle(card, (183, 149, 11), medal_center, 18, width=3)
+        star = self.font_medium.render("1", True, (120, 90, 10))
+        card.blit(star, star.get_rect(center=medal_center))
+
+        # Le titre palpite doucement.
+        pulse = 0.5 + 0.5 * math.sin(elapsed / 160)
+        title_color = tuple(int(c * (0.8 + 0.2 * pulse)) for c in gold)
+        title = self.font_large.render("PALIER DE VICTOIRE", True, title_color)
+        card.blit(title, title.get_rect(centerx=width // 2, top=74))
+
+        nom = f"J{joueur + 1}"
+        swatch = pygame.Rect(0, 0, 18, 18)
+        auteur = self.font_medium.render(nom, True, (240, 244, 248))
+        bloc_width = swatch.width + 10 + auteur.get_width()
+        swatch.topleft = (width // 2 - bloc_width // 2, 120)
+        pygame.draw.rect(card, couleur, swatch, border_radius=4)
+        pygame.draw.rect(card, (240, 244, 248), swatch, width=1, border_radius=4)
+        card.blit(auteur, (swatch.right + 10, 117))
+
+        libelle = self.VICTORY_CONDITION_LABELS.get(palier.get("condition"), palier.get("condition"))
+        moyen = self.font_small.render(f"{libelle} - +1 point de victoire", True, (230, 236, 242))
+        card.blit(moyen, moyen.get_rect(centerx=width // 2, top=152))
+
+        scissions = len(palier.get("scissions") or [])
+        if scissions:
+            suite = (
+                "Un empire perd un tiers de ses territoires : un nouveau joueur entre en jeu."
+                if scissions == 1 else
+                f"{scissions} empires perdent un tiers de leurs territoires : autant de nouveaux joueurs."
+            )
+            y = 182
+            for line in self.wrap_text(suite, self.font_small, width - 40):
+                rendered = self.font_small.render(line, True, (200, 210, 220))
+                card.blit(rendered, rendered.get_rect(centerx=width // 2, top=y))
+                y += 20
+
+        # Le carton surgit en grossissant legerement au-dela de sa taille.
+        t = min(1.0, elapsed / 450)
+        scale = 0.6 + 0.4 * t + 0.08 * math.sin(math.pi * t)
+        scaled = pygame.transform.smoothscale(card, (int(width * scale), int(height * scale)))
+        scaled.set_alpha(int(255 * fade))
+        self.screen.blit(scaled, scaled.get_rect(center=center))
+
     def wrap_text(self, text: str, font: pygame.font.Font, max_width: int) -> list[str]:
         words = str(text).split()
         if not words:
@@ -10054,8 +10152,13 @@ class GraphicalGame:
         return True
 
     def check_winner(self) -> Optional[int]:
+        deja_connus = len(getattr(self, "victory_milestones", []))
         winner, reason = moteur_regles.evaluate_winner(self)
         self.last_victory_reason = reason
+        # evaluate_winner enregistre les paliers franchis : les nouveaux
+        # s'annoncent avant que la partie continue.
+        for palier in self.victory_milestones[deja_connus:]:
+            self.milestone_announcements.append({"palier": palier, "debut": None})
         return winner
 
     def handle_start_menu_click(self, pos: Tuple[int, int]) -> None:
@@ -10076,6 +10179,11 @@ class GraphicalGame:
             ai_turn = self.phase == "playing" and self.is_ai_player(self.current_player)
             if event.type == pygame.QUIT:
                 self.running = False
+                continue
+            if self.milestone_announcements:
+                # Un clic ou une touche ecourte l'annonce du palier.
+                if event.type in (pygame.MOUSEBUTTONDOWN, pygame.KEYDOWN):
+                    self.milestone_announcements.pop(0)
                 continue
             if self.major_event_modal is not None:
                 if event.type == pygame.KEYDOWN and event.key in (
@@ -10721,6 +10829,7 @@ class GraphicalGame:
         self.victory_winner = None
         self.victory_summary = {}
         self.confetti_particles = []
+        self.milestone_announcements = []
         self.major_event_modal = None
         self.major_event_modal_queue = []
         self.selected_source = None
@@ -10798,6 +10907,7 @@ class GraphicalGame:
         self.replay_history = []
         self.replay_restore_state = None
         self.confetti_particles = []
+        self.milestone_announcements = []
         self.current_player = 0
         self.turn = 1
         moteur_regles.sync_special_territory_holders(self)
@@ -11303,6 +11413,15 @@ class GraphicalGame:
         self.process_pending_details_button_click()
         if self.message and pygame.time.get_ticks() > self.message_timer:
             self.message = ""
+        if self.milestone_announcements:
+            # La partie attend la fin de l'annonce du palier.
+            annonce = self.milestone_announcements[0]
+            now = pygame.time.get_ticks()
+            if annonce["debut"] is None:
+                annonce["debut"] = now
+            elif now - annonce["debut"] >= self.MILESTONE_ANNOUNCEMENT_MS:
+                self.milestone_announcements.pop(0)
+            return
         if self.major_event_modal is not None:
             return
         if self.phase == "game_over":
@@ -12512,6 +12631,7 @@ class GraphicalGame:
         if self.phase not in ("game_over", "replay"):
             self.draw_territory_tooltip()
         self.draw_major_event_modal()
+        self.draw_milestone_announcement()
         pygame.display.flip()
 
 

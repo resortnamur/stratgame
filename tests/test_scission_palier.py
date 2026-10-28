@@ -1,11 +1,11 @@
-"""Regles d'aout 2026 : franchir un palier coupe les empires en deux.
+"""Regles d'aout 2026 : franchir un palier ampute les empires.
 
 Le premier palier franchi lancait son auteur vers tous les suivants :
 l'avance qui l'avait porte la ne faisait que grandir, et la partie se jouait
 d'un seul elan. Desormais chaque palier se paie, et il se paie sur toute la
-carte : chaque empire laisse partir sa moitie la plus eloignee de sa
-capitale vers un nouveau joueur IA, qui emporte la moitie du tresor et le
-meme niveau de science. Autant de nouveaux joueurs que d'empires coupes. Le
+carte : chaque empire laisse partir son tiers le plus eloigne de sa
+capitale (la moitie jusqu'en octobre 2026) vers un nouveau joueur IA, qui
+emporte la moitie du tresor et le meme niveau de science. Autant de nouveaux joueurs que d'empires coupes. Le
 point de victoire, lui, reste acquis. Seul le palier qui acheve la partie ne
 scinde rien : il n'y aurait plus personne pour en profiter.
 
@@ -68,7 +68,7 @@ class BaseScission(unittest.TestCase):
 
 
 class TestScissionApresPalier(BaseScission):
-    """Un palier franchi fait naitre un joueur sur la moitie de l'empire."""
+    """Un palier franchi fait naitre un joueur sur un tiers de l'empire."""
 
     def test_le_palier_fait_naitre_un_nouveau_joueur(self):
         joueurs_avant = self.state.num_players
@@ -77,16 +77,15 @@ class TestScissionApresPalier(BaseScission):
         self.assertGreater(self.state.num_players, joueurs_avant)
         self.assertTrue(self.territoires_de(joueurs_avant))
 
-    def test_la_scission_partage_l_empire_en_deux(self):
+    def test_la_scission_detache_un_tiers_de_l_empire(self):
         avant = self.seuil
         secessionniste = self.state.num_players
         self.franchir_le_palier_territorial()
         restants = len(self.territoires_de(0))
         partis = len(self.territoires_de(secessionniste))
         self.assertEqual(restants + partis, avant)
-        self.assertEqual(partis, avant // 2)
-        # Sur un nombre impair, l'ecu et le territoire de trop restent au
-        # joueur d'origine.
+        self.assertEqual(partis, avant // 3)
+        # L'arrondi se fait toujours au profit du joueur d'origine.
         self.assertGreaterEqual(restants, partis)
 
     def test_le_nouveau_joueur_est_une_ia(self):
@@ -131,7 +130,7 @@ class TestScissionApresPalier(BaseScission):
 
 
 class TestScissionGenerale(BaseScission):
-    """Un palier coupe en deux tous les empires, pas seulement son auteur."""
+    """Un palier ampute tous les empires, pas seulement son auteur."""
 
     def repartir(self, parts):
         """Distribue la carte : ``parts`` associe un joueur a son nombre de terres."""
@@ -143,11 +142,11 @@ class TestScissionGenerale(BaseScission):
         for terr in self.state.territories[index:]:
             terr.owner = parts[0][0]
 
-    def test_le_rival_se_coupe_aussi_en_deux(self):
+    def test_le_rival_perd_aussi_un_tiers(self):
         premier_ne = self.state.num_players
         avant_rival = self.total - self.seuil
         self.franchir_le_palier_territorial(joueur=0, rival=1)
-        self.assertEqual(len(self.territoires_de(1)), avant_rival - avant_rival // 2)
+        self.assertEqual(len(self.territoires_de(1)), avant_rival - avant_rival // 3)
         # Deux empires coupes, donc deux nouveaux joueurs.
         self.assertEqual(self.state.num_players, premier_ne + 2)
         self.assertTrue(self.territoires_de(premier_ne + 1))

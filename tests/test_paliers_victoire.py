@@ -2,8 +2,8 @@
 
 Remplir une condition ne met plus fin a la partie : elle ferme un palier,
 rapporte un point de victoire a son auteur, et ne peut plus jamais etre
-franchie — ni par lui, ni par personne. La partie s'acheve quand les sept
-paliers sont tombes, ou quand il ne reste plus qu'un bloc sur la carte,
+franchie — ni par lui, ni par personne. La partie s'acheve quand les
+paliers necessaires sont tombes, ou quand il ne reste plus qu'un bloc sur la carte,
 faute d'adversaire. Le vainqueur est celui qui compte le plus de points ;
 a egalite, le plus grand empire, puis le premier a avoir franchi un palier.
 
@@ -70,7 +70,7 @@ class BasePaliers(unittest.TestCase):
 class TestFranchissement(BasePaliers):
     """Un palier se franchit une fois, et rapporte un point."""
 
-    def test_au_depart_les_sept_conditions_sont_ouvertes(self):
+    def test_au_depart_les_six_conditions_sont_ouvertes(self):
         self.assertEqual(self.state.victory_milestones, [])
         self.assertEqual(
             len(regles.get_remaining_victory_conditions(self.state)),
@@ -131,16 +131,15 @@ class TestFranchissement(BasePaliers):
 
 
 class TestPaliersFacultatifs(BasePaliers):
-    """Deux paliers rapportent leur point sans conditionner la fin.
+    """La religion rapporte son point sans conditionner la fin.
 
-    La religion, parce qu'une religion conquerante finit par recouvrir les
-    religions nationales et leur interdit les neuf dixiemes de la carte. La
-    conquete totale, parce qu'elle n'arrive presque jamais. Les exiger,
-    c'etait condamner la partie a ne jamais s'achever.
+    Une religion conquerante finit par recouvrir les religions nationales et
+    leur interdit les neuf dixiemes de la carte. L'exiger, c'etait condamner
+    la partie a ne jamais s'achever.
     """
 
-    def test_les_deux_paliers_facultatifs(self):
-        self.assertEqual(regles.OPTIONAL_VICTORY_CONDITIONS, ("religion", "conquete"))
+    def test_le_palier_facultatif(self):
+        self.assertEqual(regles.OPTIONAL_VICTORY_CONDITIONS, ("religion",))
         for condition in regles.OPTIONAL_VICTORY_CONDITIONS:
             self.assertIn(condition, regles.VICTORY_CONDITIONS)
             self.assertNotIn(condition, regles.REQUIRED_VICTORY_CONDITIONS)
@@ -155,7 +154,7 @@ class TestPaliersFacultatifs(BasePaliers):
     def test_fermer_les_paliers_necessaires_suffit_a_finir(self):
         for index, condition in enumerate(regles.REQUIRED_VICTORY_CONDITIONS):
             self.fermer(condition, 0 if index < 3 else 1, tour=index + 1)
-        # La religion et la conquete restent ouvertes, et le resteront.
+        # La religion reste ouverte, et le restera.
         self.assertEqual(
             set(regles.get_remaining_victory_conditions(self.state)),
             set(regles.OPTIONAL_VICTORY_CONDITIONS),
@@ -168,13 +167,13 @@ class TestPaliersFacultatifs(BasePaliers):
         for index, condition in enumerate(regles.REQUIRED_VICTORY_CONDITIONS[:-1]):
             self.fermer(condition, 0, tour=index + 1)
         # Il manque un palier necessaire : la partie continue, meme si les
-        # deux facultatifs sont tombes.
+        # facultatif est tombe.
         for condition in regles.OPTIONAL_VICTORY_CONDITIONS:
             self.fermer(condition, 1, tour=6)
         self.assertIsNone(regles.evaluate_winner(self.state)[0])
 
     def test_un_palier_facultatif_rapporte_bien_son_point(self):
-        self.fermer("conquete", 2, tour=4)
+        self.fermer("religion", 2, tour=4)
         self.assertEqual(regles.get_victory_points(self.state, 2), 1)
 
 
@@ -204,7 +203,8 @@ class TestFinDePartie(BasePaliers):
         self.assertEqual(gagnant, 0)
 
     def test_a_egalite_de_points_le_plus_grand_empire(self):
-        # Trois paliers chacun pour les joueurs 0 et 1, le septieme au 2.
+        # Deux paliers chacun pour les joueurs 0 et 1, le cinquieme et le
+        # sixieme au 2.
         rival, tiers = 1, 2
         for index, terr in enumerate(self.state.territories):
             if index < self.total - 6:
@@ -213,15 +213,16 @@ class TestFinDePartie(BasePaliers):
                 terr.owner = rival
             else:
                 terr.owner = tiers
-        for index, condition in enumerate(regles.VICTORY_CONDITIONS[:6]):
-            self.fermer(condition, 0 if index < 3 else rival, tour=index + 1)
-        self.fermer(regles.VICTORY_CONDITIONS[6], tiers, tour=7)
-        self.assertEqual(regles.get_victory_points(self.state, 0), 3)
-        self.assertEqual(regles.get_victory_points(self.state, rival), 3)
+        for index, condition in enumerate(regles.VICTORY_CONDITIONS[:4]):
+            self.fermer(condition, 0 if index < 2 else rival, tour=index + 1)
+        self.fermer(regles.VICTORY_CONDITIONS[4], tiers, tour=5)
+        self.fermer(regles.VICTORY_CONDITIONS[5], tiers, tour=6)
+        self.assertEqual(regles.get_victory_points(self.state, 0), 2)
+        self.assertEqual(regles.get_victory_points(self.state, rival), 2)
         # A egalite de points, c'est le plus grand empire qui l'emporte.
         gagnant, raison = regles.evaluate_winner(self.state)
         self.assertEqual(gagnant, 0)
-        self.assertIn("3 point(s)", raison)
+        self.assertIn("2 point(s)", raison)
 
     def test_tenir_toute_la_carte_acheve_la_partie(self):
         for terr in self.state.territories:

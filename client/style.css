@@ -425,6 +425,91 @@ header {
 }
 #bandeau-victoire .boutons-victoire { display: flex; gap: 10px; justify-content: center; }
 
+/* --- Annonce d'un palier de victoire --------------------------------- */
+
+#annonce-palier {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  display: flex;
+  /* La zone de la carte s'étire sur toute la hauteur des panneaux : en
+     haut, l'annonce tombe sur la carte et reste visible sans défiler. */
+  align-items: flex-start;
+  padding-top: 70px;
+  justify-content: center;
+  background: rgba(10, 18, 32, 0.55);
+  border-radius: 6px;
+  z-index: 7;
+  cursor: pointer;
+  animation: palier-fond 0.3s ease;
+}
+#annonce-palier.disparition { animation: palier-fondu 0.35s ease forwards; }
+@keyframes palier-fond { from { opacity: 0; } to { opacity: 1; } }
+@keyframes palier-fondu { to { opacity: 0; } }
+#annonce-palier .carte-palier {
+  position: relative;
+  max-width: min(440px, 88%);
+  background: linear-gradient(160deg, rgb(40, 56, 82), rgb(22, 34, 54));
+  border: 3px solid rgb(244, 208, 63);
+  border-radius: 14px;
+  padding: 18px 30px 20px;
+  text-align: center;
+  box-shadow: 0 0 34px rgba(244, 208, 63, 0.4), 0 10px 26px rgba(0, 0, 0, 0.6);
+  animation: victoire-pop 0.55s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+#annonce-palier .onde-palier {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 120px; height: 120px;
+  margin: -60px 0 0 -60px;
+  border-radius: 50%;
+  border: 4px solid var(--couleur-joueur, rgb(244, 208, 63));
+  pointer-events: none;
+  animation: palier-onde 1.3s ease-out 0.15s 2 both;
+}
+@keyframes palier-onde {
+  from { opacity: 0.9; transform: scale(0.4); }
+  to { opacity: 0; transform: scale(4.5); }
+}
+#annonce-palier .medaille-palier {
+  font-size: 2.6rem;
+  animation: palier-medaille 0.9s cubic-bezier(0.3, 1.5, 0.5, 1) 0.1s both;
+}
+@keyframes palier-medaille {
+  from { opacity: 0; transform: translateY(-30px) rotate(-200deg) scale(0.3); }
+  to { opacity: 1; transform: none; }
+}
+#annonce-palier .titre-palier {
+  font-size: 1.6rem;
+  font-weight: 800;
+  letter-spacing: 3px;
+  margin: 4px 0 6px;
+  color: rgb(244, 208, 63);
+  animation: victoire-pulse 0.8s ease-in-out infinite alternate;
+}
+#annonce-palier .auteur-palier {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin-bottom: 4px;
+  color: rgb(240, 244, 248);
+}
+#annonce-palier .auteur-palier .pion {
+  width: 16px; height: 16px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+#annonce-palier .moyen-palier { font-size: 1rem; color: rgb(230, 236, 242); }
+#annonce-palier .suite-palier {
+  margin-top: 10px;
+  font-size: 0.9rem;
+  color: rgb(214, 222, 230);
+  line-height: 1.4;
+}
+
 #confettis { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 #confettis span {
   position: absolute;
