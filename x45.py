@@ -5908,6 +5908,9 @@ class GraphicalGame:
                     target_owner = self.territories[neighbor_id].owner
                     if target_owner in getattr(self, "commercial_city_players", set()):
                         continue
+                    # Une capitale ne s'annexe jamais par la culture.
+                    if self.is_any_capital_territory(neighbor_id):
+                        continue
                     if self.can_commercial_city_gain_territory(player, neighbor_id):
                         targets.add(neighbor_id)
         return targets
@@ -5916,6 +5919,8 @@ class GraphicalGame:
         if not (0 <= territory_id < len(self.territories)):
             return None
         if self.territories[territory_id].owner in getattr(self, "commercial_city_players", set()):
+            return None
+        if self.is_any_capital_territory(territory_id):
             return None
         if not self.can_commercial_city_gain_territory(player, territory_id):
             return None

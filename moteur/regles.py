@@ -4561,6 +4561,9 @@ def get_culture_expansion_target_ids(state: GameState, player: int) -> Set[int]:
                 target_owner = state.territories[neighbor_id].owner
                 if target_owner in state.commercial_city_players:
                     continue
+                # Une capitale ne s'annexe jamais par la culture.
+                if is_any_capital_territory(state, neighbor_id):
+                    continue
                 if can_commercial_city_gain_territory(state, player, neighbor_id):
                     targets.add(neighbor_id)
     return targets
@@ -4570,6 +4573,8 @@ def annex_territory_by_culture(state: GameState, territory_id: int, player: int)
     if not (0 <= territory_id < len(state.territories)):
         return None
     if state.territories[territory_id].owner in state.commercial_city_players:
+        return None
+    if is_any_capital_territory(state, territory_id):
         return None
     if not can_commercial_city_gain_territory(state, player, territory_id):
         return None

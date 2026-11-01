@@ -120,6 +120,34 @@ class TestExpansionCulturelle(unittest.TestCase):
         choix = {random.Random(graine).choice(cibles) for graine in range(24)}
         self.assertGreater(len(choix), 1, "Le tirage doit varier selon le hasard.")
 
+    def test_une_capitale_n_est_jamais_annexee(self):
+        state = charger_premier_etat()
+        joueur = next(
+            (
+                j for j in joueurs_actifs(state)
+                if len(regles.get_culture_expansion_target_ids(state, j)) >= 2
+            ),
+            None,
+        )
+        if joueur is None:
+            self.skipTest("Aucun joueur avec au moins deux cibles d'expansion.")
+
+        # Une des cibles devient la capitale de son proprietaire.
+        cible = min(regles.get_culture_expansion_target_ids(state, joueur))
+        proprietaire = state.territories[cible].owner
+        state.player_capital_ids[proprietaire] = cible
+
+        self.assertNotIn(cible, regles.get_culture_expansion_target_ids(state, joueur))
+        self.assertIsNone(regles.annex_territory_by_culture(state, cible, joueur))
+        self.assertEqual(state.territories[cible].owner, proprietaire)
+
+        culture = regles.calculate_player_culture(state, joueur)
+        for graine in range(24):
+            copie = GameState.from_payload(state.to_payload())
+            copie.culture_expansion_milestones[joueur] = max(0, culture // 50 * 50 - 50)
+            regles.trigger_culture_expansions_if_due(copie, joueur, random.Random(graine))
+            self.assertEqual(copie.territories[cible].owner, proprietaire)
+
 
 class TestRempartIvoire(unittest.TestCase):
     """Le territoire du Rempart d'Ivoire est intouchable pour les IA."""
