@@ -75,6 +75,8 @@ class TurnAdvanceReport:
     new_global_turn: bool = False
     reinforcement_report: Optional[regles.ReinforcementReport] = None
     sedition_message: Optional[str] = None
+    # Passage en paradis fiscal du joueur qui vient de finir son tour.
+    last_stand_message: Optional[str] = None
     resource_messages: List[str] = field(default_factory=list)
     victory_alerts: List[str] = field(default_factory=list)
     religion_messages: List[str] = field(default_factory=list)
@@ -157,6 +159,15 @@ def advance_turn(
     if not simple:
         regles.execute_ai_economic_actions(state, previous_player, rng, cell_width, cell_height)
     report.reinforcement_report = regles.grant_reinforcements(state, previous_player, rng)
+    if not simple:
+        # Le passage en paradis fiscal se juge des la fin du tour du joueur :
+        # attendre le debut de son tour suivant le lui ferait manquer s'il
+        # recoit un territoire entre-temps (vente d'un autre joueur...).
+        # La verification du debut de tour reste, pour le joueur ramene a
+        # un seul territoire par une conquete pendant le tour des autres.
+        last_stand_note = regles.activate_last_stand_bonus_if_needed(state, previous_player)
+        if last_stand_note:
+            report.last_stand_message = f"J{previous_player + 1} - {last_stand_note}"
     active_players = regles.get_active_players(state)
     report.has_active_players = bool(active_players)
     if active_players:

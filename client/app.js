@@ -2259,6 +2259,7 @@ function journalRapportTour(rapport) {
   if (rapport.reinforcement_report && rapport.reinforcement_report.message) {
     textes.push(rapport.reinforcement_report.message);
   }
+  textes.push(rapport.last_stand_message);
   textes.push(rapport.sedition_message, rapport.market_message);
   textes.push(rapport.integration_message);
   textes.push(...(rapport.apocalypse_messages || []));

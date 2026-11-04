@@ -9744,6 +9744,8 @@ class GraphicalGame:
         if report.reinforcement_report is not None:
             durations = {"colonisation": 2200, "plafond": 2600, "renforts": 2200}
             self.show_message(report.reinforcement_report.message, durations[report.reinforcement_report.kind])
+        if report.last_stand_message:
+            self.show_message(report.last_stand_message, 3200)
         if report.sedition_message:
             self.show_message(report.sedition_message, 6200)
         if report.winner is not None:
