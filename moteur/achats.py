@@ -462,6 +462,11 @@ def detruire_universite(state: GameState, terr: Territory) -> AchatResult:
 def construire_merveille(state: GameState, terr: Territory, wonder_type: Optional[str]) -> AchatResult:
     if wonder_type not in regles.WONDER_DEFINITIONS:
         return _refus("Choisissez d'abord une merveille dans le menu des achats.")
+    if regles.has_reached_wonder_build_limit(state, state.current_player):
+        return _refus(
+            f"Limite atteinte : {regles.MAX_WONDERS_BUILT_PER_PLAYER} merveilles baties, "
+            "aucune autre construction possible."
+        )
     if regles.has_built_wonder_this_turn(state, state.current_player):
         return _refus("Une seule merveille par tour : la prochaine attendra le tour suivant.")
     if regles.is_post_apocalypse_wonder_type(wonder_type):

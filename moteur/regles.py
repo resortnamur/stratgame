@@ -199,6 +199,12 @@ WONDER_DEFINITIONS = {
 # des autres, sans rien leur rendre.
 APOCALYPSE_FIRST_TURN = 60
 APOCALYPSE_STAGES = 5
+# Plafond de merveilles qu'un joueur peut BATIR sur toute la partie, pour
+# freiner un joueur dominant. C'est la construction qui est comptee, pas la
+# possession : une merveille perdue ne rend pas de place, une merveille
+# conquise n'en prend pas. Le Sceau de l'Apocalypse compte pour une, au
+# versement qui le ferme.
+MAX_WONDERS_BUILT_PER_PLAYER = 5
 # L'age de tenebres : tout ce qui se compte est divise par dix. La science
 # deja acquise l'est une fois, seche, au moment ou le sceau se ferme ; la
 # culture, la science et les revenus le sont ensuite a chaque tour.
@@ -4431,6 +4437,14 @@ def register_wonder_construction_turn(state: GameState, player: int) -> None:
     state.wonder_construction_turns[player] = state.turn
 
 
+def get_player_wonders_built(state: GameState, player: int) -> int:
+    return int(getattr(state, "player_wonders_built", {}).get(player, 0))
+
+
+def has_reached_wonder_build_limit(state: GameState, player: int) -> bool:
+    return get_player_wonders_built(state, player) >= MAX_WONDERS_BUILT_PER_PLAYER
+
+
 def has_built_wonder_this_turn(state: GameState, player: int) -> bool:
     """Une seule merveille par joueur et par tour.
 
@@ -4451,6 +4465,8 @@ def blocks_second_chancellery(state: GameState, player: int) -> bool:
 
 
 def can_player_build_wonder_type(state: GameState, player: int, wonder_type: str) -> bool:
+    if has_reached_wonder_build_limit(state, player):
+        return False
     if is_post_apocalypse_wonder_type(wonder_type):
         return can_player_build_post_apocalypse_wonder(state, player)
     if is_apocalypse_wonder_type(wonder_type):
@@ -4494,6 +4510,9 @@ def build_wonder(state: GameState, territory_id: int, wonder_type: str, record_e
         return False
     state.wonder_territories[wonder_type] = territory_id
     register_wonder_construction_turn(state, territory.owner)
+    if not hasattr(state, "player_wonders_built"):
+        state.player_wonders_built = {}
+    state.player_wonders_built[territory.owner] = get_player_wonders_built(state, territory.owner) + 1
     wonder_religion_id = get_wonder_religion_id_for_wonder(wonder_type)
     if wonder_religion_id is not None:
         state.religion_foundation_turns[wonder_religion_id] = state.turn

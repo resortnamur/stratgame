@@ -350,6 +350,7 @@ class GraphicalGame:
         self.religious_influence: dict[int, int] = {}
         self.last_religion_foundation_message: Optional[str] = None
         self.wonder_territories: dict[str, int] = {}
+        self.player_wonders_built: dict[int, int] = {}
         # Chantiers du Sceau de l'Apocalypse : territoire -> versements, et
         # territoire -> qui les a faits (cf. moteur.regles).
         self.apocalypse_site_stages: dict[int, int] = {}
@@ -1355,6 +1356,10 @@ class GraphicalGame:
                 str(wonder_type): int(tid)
                 for wonder_type, tid in getattr(self, "wonder_territories", {}).items()
             },
+            "player_wonders_built": {
+                str(player): int(count)
+                for player, count in getattr(self, "player_wonders_built", {}).items()
+            },
             "eternal_ally_player": (
                 None if getattr(self, "eternal_ally_player", None) is None
                 else int(self.eternal_ally_player)
@@ -1649,6 +1654,10 @@ class GraphicalGame:
         self.wonder_territories = {
             str(wonder_type): int(tid)
             for wonder_type, tid in payload.get("wonder_territories", {}).items()
+        }
+        self.player_wonders_built = {
+            int(player): max(0, int(count))
+            for player, count in payload.get("player_wonders_built", {}).items()
         }
         allie = payload.get("eternal_ally_player")
         self.eternal_ally_player = None if allie is None else int(allie)
@@ -5325,6 +5334,7 @@ class GraphicalGame:
         self.player_science = {}
         self.culture_expansion_milestones = {}
         self.wonder_territories = {}
+        self.player_wonders_built = {}
         self.apocalypse_site_stages = {}
         self.apocalypse_site_owners = {}
         self.wonder_construction_turns = {}
@@ -7208,7 +7218,13 @@ class GraphicalGame:
                     if not available:
                         self.shop_action = None
                         self.pending_wonder_type = None
-                        if not self.get_available_wonder_types():
+                        if moteur_regles.has_reached_wonder_build_limit(self, self.current_player):
+                            self.show_message(
+                                f"Limite atteinte : {moteur_regles.MAX_WONDERS_BUILT_PER_PLAYER} "
+                                "merveilles baties, aucune autre construction possible.",
+                                2800,
+                            )
+                        elif not self.get_available_wonder_types():
                             self.show_message("Toutes les merveilles ont deja ete construites.", 2400)
                         else:
                             self.show_message(

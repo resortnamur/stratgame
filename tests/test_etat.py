@@ -63,7 +63,7 @@ EXPECTED_GAME_KEYS = {
     "temple_capture_counts", "religion_founders", "religion_foundation_turns",
     "religion_last_spread_turns", "religion_holy_sites",
     "religious_influence", "player_science", "culture_expansion_milestones",
-    "wonder_territories", "apocalypse_site_stages", "apocalypse_site_owners",
+    "wonder_territories", "player_wonders_built", "apocalypse_site_stages", "apocalypse_site_owners",
     "eternal_ally_player", "eternal_ally_patron",
     "victory_milestones",
     "last_stand_bonus_players",

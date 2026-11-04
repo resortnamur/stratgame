@@ -208,6 +208,9 @@ class GameState:
     player_science: Dict[int, int] = field(default_factory=dict)
     culture_expansion_milestones: Dict[int, int] = field(default_factory=dict)
     wonder_territories: Dict[str, int] = field(default_factory=dict)
+    # Joueur -> merveilles qu'il a baties depuis le debut (plafond
+    # MAX_WONDERS_BUILT_PER_PLAYER). Compte la construction, pas la possession.
+    player_wonders_built: Dict[int, int] = field(default_factory=dict)
     # Chantiers du Sceau de l'Apocalypse : territoire -> versements faits, et
     # territoire -> qui les a faits. Deux registres paralleles, comme pour les
     # territoires soumis. Le chantier appartient a celui qui l'a commence :
@@ -673,6 +676,10 @@ class GameState:
             str(wonder_type): int(tid)
             for wonder_type, tid in payload.get("wonder_territories", {}).items()
         }
+        self.player_wonders_built = {
+            int(player): max(0, int(count))
+            for player, count in payload.get("player_wonders_built", {}).items()
+        }
         self.apocalypse_site_stages = {
             int(tid): max(0, int(stages))
             for tid, stages in payload.get("apocalypse_site_stages", {}).items()
@@ -904,6 +911,10 @@ class GameState:
             "wonder_territories": {
                 str(wonder_type): int(tid)
                 for wonder_type, tid in self.wonder_territories.items()
+            },
+            "player_wonders_built": {
+                str(player): int(count)
+                for player, count in self.player_wonders_built.items()
             },
             "apocalypse_site_stages": {
                 str(tid): int(stages)

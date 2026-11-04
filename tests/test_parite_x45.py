@@ -66,11 +66,17 @@ CLES_ABSENTES_DE_L_ORIGINAL = (
     "apocalypse_site_stages", "apocalypse_site_owners",
     "special_territories", "special_territory_holders",
 )
+# Cles qu'une regle nouvelle remplit des le premier achat concerne (compteur
+# de merveilles baties, plafond de novembre 2026) : retirees sans verifier
+# qu'elles sont vides, puisqu'elles ne le sont pas des que l'on batit.
+CLES_SANS_EQUIVALENT_DANS_L_ORIGINAL = ("player_wonders_built",)
 # Meme chose dans les instantanes de replay, ou la cle porte un autre nom.
 CLES_D_INSTANTANE_ABSENTES_DE_L_ORIGINAL = ("ruins",)
 
 
 def retirer_cles_hors_original(test, payload):
+    for cle in CLES_SANS_EQUIVALENT_DANS_L_ORIGINAL:
+        payload.pop(cle, None)
     for cle in CLES_ABSENTES_DE_L_ORIGINAL:
         valeur = payload.pop(cle, None)
         test.assertFalse(valeur, f"'{cle}' devrait etre vide face a x45-original")
