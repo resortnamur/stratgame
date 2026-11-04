@@ -22,6 +22,7 @@ REST :
 - ``GET  /api/parties/{id}/etat``      — etat complet (sans historique replay).
 - ``GET  /api/parties/{id}/replay``    — l'historique replay (a la demande).
 - ``GET  /api/parties/{id}/bilans``    — etat des lieux par joueur actif
+- ``GET  /api/parties/{id}/corruption`` — prix d'une corruption (confirmation)
   (amenagements, bonus, conditions de nation, progression de victoire).
 - ``GET  /api/parties/{id}/expedition?source=3&cible=7`` — apercu d'une
   expedition maritime (distance, chances du de a 64 faces) pour l'encart
@@ -436,6 +437,13 @@ def creer_app(dossier_parties: Optional[Path] = None,
         64 faces, pour l'encart de confirmation du client."""
         salle = get_salle(partie_id)
         return salle.session.apercu_expedition(source, cible)
+
+    @app.get("/api/parties/{partie_id}/corruption")
+    def apercu_corruption(partie_id: str, territoire: int):
+        """Prix d'une corruption (reduction PF comprise), pour l'encart de
+        confirmation du client."""
+        salle = get_salle(partie_id)
+        return salle.session.apercu_corruption(territoire)
 
     @app.get("/api/parties/{partie_id}/transport")
     def apercu_transport(partie_id: str, source: int, cible: int, regiments: int = 1):

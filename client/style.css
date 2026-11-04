@@ -361,6 +361,15 @@ header {
   line-height: 1.45;
 }
 #encart-expedition li, #encart-soumission li { margin-bottom: 6px; }
+/* Confirmation de corruption : en phase d'achats, la boutique étire la zone
+   de carte bien au-delà de l'écran ; centré, l'encart tomberait hors de
+   vue. On le cale en haut, et il suit le défilement. */
+#encart-expedition.encart-haut { align-items: flex-start; }
+#encart-expedition.encart-haut .boite-evenements {
+  position: sticky;
+  top: 12px;
+  margin-top: 70px;
+}
 #encart-expedition .boutons-expedition, #encart-soumission .boutons-expedition {
   display: flex;
   justify-content: center;

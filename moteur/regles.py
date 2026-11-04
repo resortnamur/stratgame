@@ -516,6 +516,9 @@ CORRUPTION_FORTRESS_SURCHARGE = 400
 CORRUPTION_INDUSTRIAL_SURCHARGE = 400
 CORRUPTION_CULTURAL_CENTER_SURCHARGE = 800
 CORRUPTION_BONUS_TERRITORY_SURCHARGE = 400
+# Un joueur en paradis fiscal corrompt a moitie prix (regle dictee le
+# 04/11/2026) : le total, surcouts compris, est divise par deux.
+TAX_HAVEN_CORRUPTION_DIVISOR = 2
 
 
 # ----------------------------------------------------------------------
@@ -4762,7 +4765,24 @@ def calculate_corruption_cost(
     )
     base_cost = max(1, terr.regiments) * cost_per_regiment
     surcharge = calculate_corruption_surcharge(state, terr.id)
-    return base_cost + surcharge, base_cost, surcharge
+    total = base_cost + surcharge
+    if has_tax_haven_corruption_discount(state, attacker):
+        total = max(1, total // TAX_HAVEN_CORRUPTION_DIVISOR)
+    return total, base_cost, surcharge
+
+
+def has_tax_haven_corruption_discount(state: GameState, player: int) -> bool:
+    """Le joueur est en paradis fiscal : la corruption lui coute moitie prix.
+
+    Les cites commercantes figurent aussi dans ``last_stand_bonus_players``
+    (leur cite est une capitale PF) mais ne sont pas concernees : la regle
+    vise les joueurs en PF.
+    """
+    return (
+        player in state.last_stand_bonus_players
+        and bool(get_player_tax_haven_capital_ids(state, player))
+        and not is_commercial_city_player(state, player)
+    )
 
 
 def transfer_territory_to_commercial_city(state: GameState, territory_id: int, player: int) -> None:

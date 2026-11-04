@@ -1705,11 +1705,64 @@ function clicCarteBoutique(tid) {
   }
   client.territoiresAchat.push(tid);
   if (client.territoiresAchat.length >= article.cibles.length) {
+    if (article.id === "corruption") {
+      proposerCorruption(tid);
+      return true;
+    }
     envoyerAchat();
   } else {
     afficherConsigneBoutique();
   }
   return true;
+}
+
+// Corruption : le prix (réduction paradis fiscal comprise) est demandé au
+// serveur et affiché ; l'achat ne part qu'après confirmation.
+async function proposerCorruption(tid) {
+  let apercu;
+  try {
+    apercu = await api(`/api/parties/${client.partieId}/corruption?territoire=${tid}`);
+  } catch (erreur) {
+    client.territoiresAchat = [];
+    flash(`Prix de la corruption indisponible : ${erreur.message}`);
+    return;
+  }
+  if (!apercu.possible) {
+    client.territoiresAchat = [];
+    flash(apercu.message);
+    journal(apercu.message);
+    afficherConsigneBoutique();
+    return;
+  }
+  const nom = client.etat.territories[tid].name;
+  const lignes = [];
+  if (apercu.reduction_pf) {
+    lignes.push(`Prix : ${apercu.cout} écus — moitié prix grâce au paradis fiscal ` +
+      `(au lieu de ${apercu.base + apercu.surcout}).`);
+  } else {
+    lignes.push(`Prix : ${apercu.cout} écus.`);
+  }
+  if (apercu.surcout > 0) {
+    lignes.push(`Dont surcoût aménagements/+3 : ${apercu.surcout}` +
+      (apercu.reduction_pf ? " (avant réduction)." : "."));
+  }
+  lignes.push(`Ton trésor : ${apercu.argent} écus.`);
+  if (apercu.argent < apercu.cout) lignes.push("Trésor insuffisant : la corruption sera refusée.");
+  ouvrirEncartExpedition(
+    `Corrompre ${nom} ?`,
+    lignes,
+    {
+      confirmer: { texte: "Confirmer", action: () => envoyerAchat() },
+      annuler: {
+        texte: "Annuler",
+        action: () => {
+          client.territoiresAchat = [];
+          afficherConsigneBoutique();
+        },
+      },
+    },
+  );
+  $("encart-expedition").classList.add("encart-haut");
 }
 
 $("bouton-jouer-siege").addEventListener("click", () => {
@@ -3406,6 +3459,7 @@ function ouvrirEncartExpedition(titre, lignes, boutons, saisie) {
 
 function fermerEncartExpedition() {
   $("encart-expedition").hidden = true;
+  $("encart-expedition").classList.remove("encart-haut");
 }
 
 function annulerAnimationExpedition() {

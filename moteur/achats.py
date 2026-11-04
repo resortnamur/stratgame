@@ -567,24 +567,55 @@ def changer_capitale(state: GameState, terr: Territory) -> AchatResult:
 # Achats : corruption et revolte
 # ----------------------------------------------------------------------
 
-def corrompre_territoire(state: GameState, terr: Territory) -> AchatResult:
+def refus_corruption(state: GameState, terr: Territory) -> Optional[str]:
+    """Le motif de refus d'une corruption (hors argent), ou None si permise.
+
+    Partage entre l'achat et l'apercu de prix affiche avant confirmation.
+    """
     current_is_commercial_city = regles.is_commercial_city_player(state, state.current_player)
     if terr.owner == state.current_player:
-        return _refus("Ce territoire est deja a vous. La corruption interne, gardons ca pour plus tard.")
+        return "Ce territoire est deja a vous. La corruption interne, gardons ca pour plus tard."
     if terr.id in state.golden_territory_ids:
-        return _refus("Impossible de corrompre un territoire dore : incorruptible.")
+        return "Impossible de corrompre un territoire dore : incorruptible."
     if (terr.owner < 0 or regles.is_sanctuary_territory(state, terr.id)) and not current_is_commercial_city:
-        return _refus("Impossible de corrompre un territoire ONU.")
+        return "Impossible de corrompre un territoire ONU."
     if regles.is_commercial_city_territory(state, terr.id):
-        return _refus("Impossible de corrompre une cite commercante.")
+        return "Impossible de corrompre une cite commercante."
     if regles.is_last_stand_bonus_territory(state, terr.id) and not current_is_commercial_city:
-        return _refus("Impossible de corrompre une capitale en paradis fiscal.")
+        return "Impossible de corrompre une capitale en paradis fiscal."
     if current_is_commercial_city and not regles.is_territory_adjacent_to_player(state, terr.id, state.current_player):
-        return _refus("Corruption CC impossible : le territoire doit etre adjacent a une cite deja controlee.")
+        return "Corruption CC impossible : le territoire doit etre adjacent a une cite deja controlee."
+    return None
+
+
+def apercu_corruption(state: GameState, terr: Territory) -> dict:
+    """Le prix d'une corruption, pour l'encart de confirmation (lecture seule)."""
+    motif = refus_corruption(state, terr)
+    if motif is not None:
+        return {"possible": False, "message": motif}
     cost, base_cost, surcharge = regles.calculate_corruption_cost(state, terr)
+    return {
+        "possible": True,
+        "cout": cost,
+        "base": base_cost,
+        "surcout": surcharge,
+        "reduction_pf": regles.has_tax_haven_corruption_discount(state, state.current_player),
+        "argent": get_player_money(state),
+    }
+
+
+def corrompre_territoire(state: GameState, terr: Territory) -> AchatResult:
+    motif = refus_corruption(state, terr)
+    if motif is not None:
+        return _refus(motif)
+    cost, base_cost, surcharge = regles.calculate_corruption_cost(state, terr)
+    pf_note = (
+        " Reduction paradis fiscal : moitie prix."
+        if regles.has_tax_haven_corruption_discount(state, state.current_player) else ""
+    )
     if not spend_player_money(state, state.current_player, cost):
         surcharge_note = f" dont {surcharge} de surcout amenagement/+3" if surcharge > 0 else ""
-        return _refus(f"Corruption trop chere : {cost} ecu(s) necessaires{surcharge_note}.")
+        return _refus(f"Corruption trop chere : {cost} ecu(s) necessaires{surcharge_note}.{pf_note}")
     previous_owner = terr.owner
     # La branche vassale de x45 est morte (mecanique abandonnee).
     state.sanctuary_territory_ids.discard(terr.id)
@@ -600,7 +631,7 @@ def corrompre_territoire(state: GameState, terr: Territory) -> AchatResult:
         regles.refresh_eliminated_human_players(state)
         elimination_note = f" J{previous_owner + 1} est elimine." + regles.transfer_eliminated_player_money(state, previous_owner, state.current_player)
     surcharge_note = f" Base {base_cost} + surcout {surcharge}." if surcharge > 0 else ""
-    return _succes(f"{terr.name} corrompu pour {cost} ecu(s).{surcharge_note} Les amenagements restent intacts." + elimination_note)
+    return _succes(f"{terr.name} corrompu pour {cost} ecu(s).{surcharge_note}{pf_note} Les amenagements restent intacts." + elimination_note)
 
 
 def financer_revolte(state: GameState, terr: Territory, rng=random) -> AchatResult:

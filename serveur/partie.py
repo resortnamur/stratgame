@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from moteur import actions, mise_en_place, regles
+from moteur import achats, actions, mise_en_place, regles
 from moteur.etat import GameState
 
 from .joueurs import RegistreJoueurs
@@ -638,6 +638,19 @@ class SessionPartie:
             if apercu is None:
                 return {"possible": False, "code": "expedition_invalide"}
             return {"possible": True, **apercu}
+
+    def apercu_corruption(self, territoire: Any) -> Dict[str, Any]:
+        """Le prix d'une corruption pour le joueur au trait (encart de
+        confirmation), reduction paradis fiscal comprise. Lecture seule."""
+        with self.lock:
+            state = self.state
+            try:
+                territoire = int(territoire)
+            except (TypeError, ValueError):
+                return {"possible": False, "message": "Territoire invalide."}
+            if not (0 <= territoire < len(state.territories)):
+                return {"possible": False, "message": "Territoire invalide."}
+            return achats.apercu_corruption(state, state.territories[territoire])
 
     def apercu_transport(self, source: Any, cible: Any, regiments: Any = 1) -> Dict[str, Any]:
         """L'apercu d'un transport maritime de fin de tour.
