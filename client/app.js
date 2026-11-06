@@ -1217,7 +1217,8 @@ function afficherMenacesVictoire() {
   const requisesRestantes = donnees.conditions_requises_restantes || [];
   const bonus = (condition) => facultatives.includes(condition) ? " <em>(bonus)</em>" : "";
   const reste = requisesRestantes.length
-    ? `La partie s'achève quand les ${requisesRestantes.length} palier(s) restant(s) seront tombés.`
+    ? `La partie s'achève quand les ${requisesRestantes.length} palier(s) restant(s) seront tombés,`
+      + ` ou dès qu'un joueur en tient ${Math.floor(total / 2) + 1} sur ${total}.`
     : "Tous les paliers nécessaires sont tombés.";
   let entete = "";
   if (paliers.length) {
@@ -2251,6 +2252,44 @@ function jouerAnnoncePalier(palier) {
   });
 }
 
+// Le classement final : chaque palier (franchi ou non) avec son auteur, puis
+// le décompte des paliers par joueur. Le vainqueur est celui qui en tient le
+// plus ; dès qu'un joueur en tient plus de la moitié, la partie s'arrête.
+function recapPaliers(vainqueurId) {
+  const bloc = document.createElement("div");
+  bloc.className = "recap-paliers";
+  const paliers = (client.etat && client.etat.victory_milestones) || [];
+  const pion = (joueur) =>
+    `<span class="pion" style="background:${rgb(couleurJoueur(joueur))}"></span>`;
+  const franchies = new Set(paliers.map((palier) => palier.condition));
+  const lignes = paliers.map((palier) =>
+    `<tr><td>${LIBELLES_MENACES[palier.condition] || palier.condition}`
+    + `${palier.facultatif ? " <em>(bonus)</em>" : ""}</td>`
+    + `<td>${pion(palier.joueur)}${nomDuJoueur(palier.joueur)}</td>`
+    + `<td>tour ${palier.tour}</td></tr>`);
+  for (const condition of Object.keys(LIBELLES_MENACES)) {
+    if (franchies.has(condition)) continue;
+    lignes.push(`<tr class="non-franchi"><td>${LIBELLES_MENACES[condition]}</td>`
+      + "<td>non franchi</td><td>—</td></tr>");
+  }
+  const points = {};
+  for (const palier of paliers) points[palier.joueur] = (points[palier.joueur] || 0) + 1;
+  if (!(vainqueurId in points)) points[vainqueurId] = 0;
+  const decompte = Object.entries(points)
+    .map(([joueur, nb]) => [Number(joueur), nb])
+    .sort((a, b) => (b[0] === vainqueurId) - (a[0] === vainqueurId) || b[1] - a[1] || a[0] - b[0])
+    .map(([joueur, nb]) =>
+      `<tr${joueur === vainqueurId ? " class='gagnant'" : ""}>`
+      + `<td>${pion(joueur)}${nomDuJoueur(joueur)}</td>`
+      + `<td>${nb} palier${nb > 1 ? "s" : ""}</td></tr>`);
+  bloc.innerHTML =
+    "<h3>Paliers de victoire</h3>"
+    + `<table>${lignes.join("")}</table>`
+    + "<h3>Décompte</h3>"
+    + `<table>${decompte.join("")}</table>`;
+  return bloc;
+}
+
 function afficherVictoire() {
   const bandeau = $("bandeau-victoire");
   const info = client.victoire;
@@ -2300,7 +2339,7 @@ function afficherVictoire() {
   versLobby.addEventListener("click", () => $("bouton-retour-lobby").click());
   boutons.append(versReplay, voirCarte, versLobby);
 
-  carte.append(feux, titre, vainqueur, raison, boutons);
+  carte.append(feux, titre, vainqueur, raison, recapPaliers(info.vainqueur), boutons);
   bandeau.append(carte);
   bandeau.hidden = false;
 }

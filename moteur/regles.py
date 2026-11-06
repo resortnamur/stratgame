@@ -2037,6 +2037,27 @@ def get_victory_point_table(state: GameState) -> Dict[int, int]:
     return table
 
 
+def get_victory_majority_threshold() -> int:
+    """Plus de la moitie des paliers : 4 sur 6. Personne ne peut plus rattraper."""
+    return len(VICTORY_CONDITIONS) // 2 + 1
+
+
+def get_victory_majority_holder(state: GameState) -> Optional[int]:
+    """Le joueur dont le bloc tient deja plus de la moitie des paliers.
+
+    Sa victoire finale est acquise : meme en raflant tous les paliers
+    restants, aucun rival ne peut l'egaler. La partie s'arrete la.
+    """
+    seuil = get_victory_majority_threshold()
+    for player in get_active_players(state):
+        if is_onu_player(state, player) or player == get_eternal_ally(state):
+            continue
+        bloc = get_victory_bloc(state, player)
+        if sum(get_victory_points(state, member) for member in bloc) >= seuil:
+            return player
+    return None
+
+
 def get_bloc_owning_everything(state: GameState) -> Optional[int]:
     """Le joueur dont le bloc tient toute la carte, s'il existe."""
     owners = {terr.owner for terr in state.territories if terr.owner >= 0}
@@ -2322,7 +2343,13 @@ def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
         restants = len([
             reste for reste in REQUIRED_VICTORY_CONDITIONS if reste not in crossed
         ])
-        if is_optional_victory_condition(condition):
+        majorite = get_victory_majority_holder(state) is not None
+        if majorite:
+            suite = (
+                f"Il tient la majorite des paliers ({get_victory_majority_threshold()} "
+                f"sur {len(VICTORY_CONDITIONS)}) : sa victoire finale est acquise, la partie s'acheve."
+            )
+        elif is_optional_victory_condition(condition):
             suite = (
                 "Palier bonus : il rapporte son point sans rien changer a la "
                 f"fin de la partie, qui attend encore {restants} palier(s)."
@@ -2342,7 +2369,7 @@ def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
         # Inutile d'amputer la carte de celui qui vient de gagner,
         # ni celle d'un bloc qui tient tout — la partie s'acheve dans les
         # deux cas.
-        if restants and get_bloc_owning_everything(state) is None:
+        if restants and not majorite and get_bloc_owning_everything(state) is None:
             scissions = split_all_empires_after_milestone(state, owner, rng)
             if scissions:
                 palier["scissions"] = scissions
@@ -2463,8 +2490,10 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
 
     register_victory_milestones(state)
 
+    majoritaire = get_victory_majority_holder(state)
     if (
-        get_remaining_required_victory_conditions(state)
+        majoritaire is None
+        and get_remaining_required_victory_conditions(state)
         and get_bloc_owning_everything(state) is None
     ):
         return None, ""
@@ -2473,6 +2502,14 @@ def evaluate_winner(state: GameState) -> Tuple[Optional[int], str]:
     if leader is None:
         return None, ""
     winner, reason = leader
+    if majoritaire is not None and winner == majoritaire:
+        points = sum(
+            get_victory_points(state, member) for member in get_victory_bloc(state, winner)
+        )
+        reason = (
+            f"remporte la majorite des paliers ({points} sur {len(VICTORY_CONDITIONS)}) : "
+            f"aucun rival ne peut plus le rattraper"
+        )
     if maybe_start_final_duel(state, winner):
         return None, reason
     return winner, reason

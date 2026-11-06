@@ -164,9 +164,10 @@ class TestPaliersFacultatifs(BasePaliers):
         self.assertEqual(gagnant, 0)
 
     def test_un_palier_facultatif_ne_retarde_pas_la_fin(self):
+        # Quatre paliers necessaires repartis (personne n'a la majorite).
         for index, condition in enumerate(regles.REQUIRED_VICTORY_CONDITIONS[:-1]):
-            self.fermer(condition, 0, tour=index + 1)
-        # Il manque un palier necessaire : la partie continue, meme si les
+            self.fermer(condition, index % 2, tour=index + 1)
+        # Il manque un palier necessaire : la partie continue, meme si le
         # facultatif est tombe.
         for condition in regles.OPTIONAL_VICTORY_CONDITIONS:
             self.fermer(condition, 1, tour=6)
@@ -192,7 +193,7 @@ class TestFinDePartie(BasePaliers):
             self.fermer(condition, 0 if index < 4 else 1, tour=index + 1)
         gagnant, raison = regles.evaluate_winner(self.state)
         self.assertEqual(gagnant, 0)
-        self.assertIn("4 point(s)", raison)
+        self.assertIn("4 sur 6", raison)
 
     def test_le_plus_de_points_l_emporte_meme_avec_moins_de_territoires(self):
         # Le joueur 1 tient la carte, le joueur 0 a rafle les paliers.
@@ -240,6 +241,45 @@ class TestFinDePartie(BasePaliers):
         self.fixer_territoires(0, self.total, rival=1)
         gagnant, _raison = regles.evaluate_winner(self.state)
         self.assertEqual(gagnant, 0)
+
+
+class TestMajoriteDesPaliers(BasePaliers):
+    """Regle du 06/11/2026 : plus de la moitie des paliers arrete la partie."""
+
+    def test_le_seuil_est_quatre_sur_six(self):
+        self.assertEqual(regles.get_victory_majority_threshold(), 4)
+
+    def test_trois_paliers_ne_suffisent_pas(self):
+        for index, condition in enumerate(regles.REQUIRED_VICTORY_CONDITIONS[:3]):
+            self.fermer(condition, 0, tour=index + 1)
+        self.assertIsNone(regles.evaluate_winner(self.state)[0])
+
+    def test_quatre_paliers_arretent_la_partie(self):
+        # Un palier necessaire reste ouvert : sans la majorite, on jouerait.
+        for index, condition in enumerate(regles.REQUIRED_VICTORY_CONDITIONS[:3]):
+            self.fermer(condition, 2, tour=index + 1)
+        self.fermer("religion", 2, tour=4)
+        self.assertTrue(regles.get_remaining_required_victory_conditions(self.state))
+        gagnant, raison = regles.evaluate_winner(self.state)
+        self.assertEqual(gagnant, 2)
+        self.assertIn("majorite des paliers (4 sur 6)", raison)
+
+    def test_le_palier_majoritaire_ne_scinde_pas(self):
+        """Le quatrieme palier franchi en jeu acheve la partie sans scission."""
+        self.fixer_territoires(0, self.seuil)
+        for index, condition in enumerate(("lieux_sacres", "culture", "science")):
+            self.fermer(condition, 0, tour=index + 1)
+        avant = len(regles.get_active_players(self.state))
+        gagnant, _raison = regles.evaluate_winner(self.state)
+        self.assertEqual(gagnant, 0)
+        nouveau = self.state.victory_milestones[-1]
+        self.assertEqual(nouveau["condition"], "territoires")
+        self.assertNotIn("scissions", nouveau)
+        self.assertEqual(len(regles.get_active_players(self.state)), avant)
+        self.assertTrue(any(
+            "victoire finale est acquise" in evenement
+            for evenement in self.state.recent_major_events
+        ))
 
 
 class TestMenacesEtPaliersFermes(BasePaliers):

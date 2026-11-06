@@ -433,6 +433,20 @@ header {
   line-height: 1.45;
 }
 #bandeau-victoire .boutons-victoire { display: flex; gap: 10px; justify-content: center; }
+#bandeau-victoire .carte-victoire { max-height: calc(100% - 24px); overflow-y: auto; max-width: calc(100% - 32px); box-sizing: border-box; }
+#bandeau-victoire .recap-paliers { margin: 0 auto 16px; max-width: 420px; text-align: left; }
+#bandeau-victoire .recap-paliers h3 {
+  font-size: 0.85rem; text-transform: uppercase; letter-spacing: 1px;
+  color: rgb(244, 208, 63); margin: 10px 0 4px;
+}
+#bandeau-victoire .recap-paliers table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+#bandeau-victoire .recap-paliers td { padding: 3px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+#bandeau-victoire .recap-paliers td:last-child { text-align: right; color: rgb(170, 185, 200); }
+#bandeau-victoire .recap-paliers .non-franchi td { color: rgb(120, 135, 150); font-style: italic; }
+#bandeau-victoire .recap-paliers .gagnant td { font-weight: 700; color: rgb(244, 208, 63); }
+#bandeau-victoire .recap-paliers .pion {
+  display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px;
+}
 
 /* --- Annonce d'un palier de victoire --------------------------------- */
 
