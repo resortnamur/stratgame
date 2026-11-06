@@ -358,6 +358,8 @@ def find_ai_missile_target(
             continue
         if regles.is_sanctuary_territory(state, terr.id):
             continue
+        if regles.is_missile_immune_territory(state, terr.id):
+            continue
         if regles.player_controls_wonder(state, terr.owner, "selene_dome"):
             continue
         if terr.regiments < garnison_minimale:

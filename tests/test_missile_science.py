@@ -82,6 +82,8 @@ class BaseMissile(unittest.TestCase):
         for terr in self.state.territories:
             if terr.owner in (self.joueur, -1):
                 continue
+            if regles.is_missile_immune_territory(self.state, terr.id):
+                continue
             if regles.is_territory_adjacent_to_player(self.state, terr.id, self.joueur):
                 return terr
         self.skipTest("Aucun territoire adverse voisin.")
@@ -108,6 +110,8 @@ class BaseMissile(unittest.TestCase):
         """Un territoire adverse a plus de ``distance_min`` pixels de chez soi."""
         for terr in self.state.territories:
             if terr.owner in (self.joueur, -1):
+                continue
+            if regles.is_missile_immune_territory(self.state, terr.id):
                 continue
             distance = regles.get_distance_to_nearest_owned_territory(
                 self.state, terr.id, self.joueur, self.largeur, self.hauteur,
@@ -371,6 +375,7 @@ class TestMissileParLActionEnLigne(unittest.TestCase):
         cible = next(
             terr for terr in state.territories
             if terr.owner not in (0, -1)
+            and not regles.is_missile_immune_territory(state, terr.id)
             and regles.is_territory_adjacent_to_player(state, terr.id, 0)
         )
         cible.regiments = 9

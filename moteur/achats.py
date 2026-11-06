@@ -761,6 +761,12 @@ def tirer_missile_detaille(
         ), None
     if terr.owner == player:
         return _refus("Un missile se tire sur un territoire adverse, pas sur le sien."), None
+    if regles.is_missile_immune_territory(state, terr.id):
+        return _refus(
+            f"{terr.name} est hors d'atteinte : un missile ne frappe ni une capitale, "
+            f"ni la ville x10 d'un paradis fiscal ou d'une cite commercante, "
+            f"ni un territoire de l'ONU."
+        ), None
     if terr.owner >= 0 and regles.player_controls_wonder(state, terr.owner, "selene_dome"):
         return _refus(
             f"Missile intercepte : le {regles.get_wonder_name('selene_dome')} protege "

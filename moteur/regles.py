@@ -783,6 +783,22 @@ def is_last_stand_bonus_territory(state: GameState, territory_id: int) -> bool:
     return territory_id in get_all_tax_haven_capital_ids(state)
 
 
+def is_missile_immune_territory(state: GameState, territory_id: int) -> bool:
+    """Un missile ne frappe jamais ce territoire.
+
+    Sont hors d'atteinte : les capitales actives, les villes x10 des
+    paradis fiscaux et des cites commercantes, et les territoires de l'ONU.
+    """
+    if not (0 <= territory_id < len(state.territories)):
+        return False
+    if is_onu_player(state, state.territories[territory_id].owner):
+        return True
+    return (
+        is_active_regular_capital(state, territory_id)
+        or is_last_stand_bonus_territory(state, territory_id)
+    )
+
+
 def is_territory_tax_haven_immune_to_religion(state: GameState, territory_id: int) -> bool:
     return is_last_stand_bonus_territory(state, territory_id)
 
