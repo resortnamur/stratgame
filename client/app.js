@@ -932,7 +932,10 @@ function traiterMessage(message) {
       ouvrirQuestionSoumission(message);
       break;
     case "victoire":
-      client.victoire = { vainqueur: message.vainqueur, raison: message.raison };
+      client.victoire = {
+        vainqueur: message.vainqueur, raison: message.raison,
+        classement: message.classement || null,
+      };
       // Le dernier palier s'annonce d'abord, la victoire ensuite.
       Promise.resolve(client.annoncesPaliers).then(afficherVictoire);
       break;
@@ -2272,16 +2275,28 @@ function recapPaliers(vainqueurId) {
     lignes.push(`<tr class="non-franchi"><td>${LIBELLES_MENACES[condition]}</td>`
       + "<td>non franchi</td><td>—</td></tr>");
   }
-  const points = {};
-  for (const palier of paliers) points[palier.joueur] = (points[palier.joueur] || 0) + 1;
-  if (!(vainqueurId in points)) points[vainqueurId] = 0;
-  const decompte = Object.entries(points)
-    .map(([joueur, nb]) => [Number(joueur), nb])
-    .sort((a, b) => (b[0] === vainqueurId) - (a[0] === vainqueurId) || b[1] - a[1] || a[0] - b[0])
-    .map(([joueur, nb]) =>
-      `<tr${joueur === vainqueurId ? " class='gagnant'" : ""}>`
-      + `<td>${pion(joueur)}${nomDuJoueur(joueur)}</td>`
-      + `<td>${nb} palier${nb > 1 ? "s" : ""}</td></tr>`);
+  // Le classement vient du moteur : nombre de paliers franchis (ceux de
+  // l'allié définitif comptent pour son patron), éliminés compris.
+  let classement = client.victoire && client.victoire.classement;
+  if (!classement) {
+    const points = {};
+    for (const palier of paliers) points[palier.joueur] = (points[palier.joueur] || 0) + 1;
+    if (!(vainqueurId in points)) points[vainqueurId] = 0;
+    classement = Object.entries(points)
+      .map(([joueur, nb]) => ({ joueur: Number(joueur), bloc: [Number(joueur)], points: nb }))
+      .sort((a, b) => b.points - a.points || (b.joueur === vainqueurId) - (a.joueur === vainqueurId));
+  }
+  const decompte = classement
+    .filter((ligne) => ligne.points > 0 || ligne.joueur === vainqueurId)
+    .map((ligne) => {
+    const allies = (ligne.bloc || []).filter((membre) => membre !== ligne.joueur);
+    const nomAllie = allies.length
+      ? ` <em>+ ${allies.map((membre) => nomDuJoueur(membre)).join(", ")} (allié)</em>` : "";
+    const elimine = ligne.elimine ? " <em>(éliminé)</em>" : "";
+    return `<tr${ligne.joueur === vainqueurId ? " class='gagnant'" : ""}>`
+      + `<td>${pion(ligne.joueur)}${nomDuJoueur(ligne.joueur)}${nomAllie}${elimine}</td>`
+      + `<td>${ligne.points} palier${ligne.points > 1 ? "s" : ""}</td></tr>`;
+  });
   bloc.innerHTML =
     "<h3>Paliers de victoire</h3>"
     + `<table>${lignes.join("")}</table>`

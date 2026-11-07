@@ -2042,16 +2042,35 @@ def get_victory_majority_threshold() -> int:
     return len(VICTORY_CONDITIONS) // 2 + 1
 
 
+def get_victory_candidates(state: GameState) -> List[int]:
+    """Les joueurs qui concourent au decompte des paliers.
+
+    Tous ceux qui tiennent encore la carte, et tous ceux qui ont franchi un
+    palier, meme elimines depuis : le vainqueur est celui qui a franchi le
+    plus de paliers, quoi qu'il soit advenu de son empire. L'ONU ne concourt
+    pas, et l'allie definitif concourt sous la banniere de son patron.
+    """
+    joueurs = set(get_active_players(state))
+    for palier in getattr(state, "victory_milestones", []):
+        joueur = palier.get("joueur")
+        if isinstance(joueur, int) and joueur >= 0:
+            joueurs.add(joueur)
+    ally = get_eternal_ally(state)
+    return sorted(
+        player for player in joueurs
+        if not is_onu_player(state, player) and player != ally
+    )
+
+
 def get_victory_majority_holder(state: GameState) -> Optional[int]:
     """Le joueur dont le bloc tient deja plus de la moitie des paliers.
 
     Sa victoire finale est acquise : meme en raflant tous les paliers
-    restants, aucun rival ne peut l'egaler. La partie s'arrete la.
+    restants, aucun rival ne peut l'egaler. La partie s'arrete la — meme
+    s'il a ete elimine entre-temps.
     """
     seuil = get_victory_majority_threshold()
-    for player in get_active_players(state):
-        if is_onu_player(state, player) or player == get_eternal_ally(state):
-            continue
+    for player in get_victory_candidates(state):
         bloc = get_victory_bloc(state, player)
         if sum(get_victory_points(state, member) for member in bloc) >= seuil:
             return player
@@ -2403,43 +2422,64 @@ def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
     return nouveaux
 
 
-def get_victory_point_leader(state: GameState) -> Optional[Tuple[int, str]]:
-    """Qui l'emporte au decompte des points de victoire.
+def get_victory_ranking(state: GameState) -> List[dict]:
+    """Le classement final au decompte des paliers, le vainqueur en tete.
 
-    A egalite de points, le plus grand empire l'emporte ; puis, s'il le faut,
-    le premier a avoir franchi un palier. Seuls les joueurs encore en lice
-    sont comptes : un elimine ne remporte pas la partie.
+    Le critere est le nombre de paliers franchis (ceux de l'allie definitif
+    comptant pour son patron). A egalite seulement : le plus grand empire,
+    puis le premier a avoir franchi un palier. Un joueur elimine garde ses
+    paliers et peut l'emporter.
     """
-    actifs = [
-        player for player in get_active_players(state)
-        if not is_onu_player(state, player) and player != get_eternal_ally(state)
-    ]
-    if not actifs:
-        return None
     premier_palier: Dict[int, int] = {}
     for index, palier in enumerate(getattr(state, "victory_milestones", [])):
         premier_palier.setdefault(palier.get("joueur"), index)
     dernier = len(getattr(state, "victory_milestones", []))
-
-    def cle(player: int) -> Tuple[int, int, int]:
+    lignes = []
+    for player in get_victory_candidates(state):
         bloc = get_victory_bloc(state, player)
-        return (
-            sum(get_victory_points(state, member) for member in bloc),
-            sum(1 for terr in state.territories if terr.owner in bloc),
-            -premier_palier.get(player, dernier),
-        )
+        points = sum(get_victory_points(state, member) for member in bloc)
+        territoires = sum(1 for terr in state.territories if terr.owner in bloc)
+        premier = min(premier_palier.get(member, dernier) for member in bloc)
+        lignes.append({
+            "joueur": int(player),
+            "bloc": [int(member) for member in bloc],
+            "points": int(points),
+            "territoires": int(territoires),
+            "elimine": territoires == 0,
+            "_cle": (points, territoires, -premier, -player),
+        })
+    lignes.sort(key=lambda ligne: ligne["_cle"], reverse=True)
+    for ligne in lignes:
+        del ligne["_cle"]
+    return lignes
 
-    gagnant = max(actifs, key=cle)
-    points, territoires, _ = cle(gagnant)
+
+def get_victory_point_leader(state: GameState) -> Optional[Tuple[int, str]]:
+    """Qui l'emporte : celui qui a franchi le plus de paliers.
+
+    A egalite de paliers, le plus grand empire l'emporte ; puis, s'il le faut,
+    le premier a avoir franchi un palier.
+    """
+    classement = get_victory_ranking(state)
+    if not classement:
+        return None
+    tete = classement[0]
+    gagnant, points, territoires = tete["joueur"], tete["points"], tete["territoires"]
     total = len(VICTORY_CONDITIONS)
     if points <= 0:
         return gagnant, (
             f"remporte la partie sans palier a son actif, avec le plus grand "
             f"empire ({territoires} territoires)"
         )
+    ex_aequo = len(classement) > 1 and classement[1]["points"] == points
+    empire = (
+        "bien que son empire ait disparu" if territoires == 0
+        else f"avec {territoires} territoires"
+    )
+    departage = " (a egalite de paliers, departage par la taille de l'empire)" if ex_aequo else ""
     return gagnant, (
-        f"remporte la partie au decompte des paliers : {points} point(s) de "
-        f"victoire sur {total}, et {territoires} territoires"
+        f"remporte la partie au decompte des paliers : {points} palier(s) "
+        f"franchi(s) sur {total}, {empire}{departage}"
     )
 
 

@@ -86,7 +86,7 @@ Serveur vers client :
   accuses de reception de ``prendre_siege`` / ``quitter_siege``.
 - ``{"type": "mode_auto", "joueur": n, "actif": bool, "nom": "..."}`` — a
   tous : le siege ``n`` vient de passer a l'IA (ou de revenir a son humain).
-- ``{"type": "victoire", "vainqueur": n, "raison": "..."}``
+- ``{"type": "victoire", "vainqueur": n, "raison": "...", "classement": [...]}``
 
 Le client web (``client/``) est servi en statique a la racine ``/``.
 
@@ -105,6 +105,8 @@ from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+
+from moteur import regles
 
 from .partie import (
     GestionnaireParties, MAX_CONSECUTIVE_AI_TURNS, PREFIXE_SAUVEGARDE_AUTO,
@@ -289,6 +291,9 @@ class SallePartie:
                 "type": "victoire",
                 "vainqueur": resultat.winner,
                 "raison": resultat.winner_reason,
+                # Le decompte des paliers, vainqueur en tete : l'encart final
+                # l'affiche tel quel, sans le recalculer.
+                "classement": regles.get_victory_ranking(self.session.state),
             })
 
 

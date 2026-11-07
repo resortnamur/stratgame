@@ -6,6 +6,7 @@ franchie — ni par lui, ni par personne. La partie s'acheve quand les
 paliers necessaires sont tombes, ou quand il ne reste plus qu'un bloc sur la carte,
 faute d'adversaire. Le vainqueur est celui qui compte le plus de points ;
 a egalite, le plus grand empire, puis le premier a avoir franchi un palier.
+Depuis le 07/11/2026, un joueur elimine garde ses paliers et peut l'emporter.
 
 Lancement, depuis le dossier "Jeux Strat" :
     python -m unittest tests.test_paliers_victoire -v
@@ -223,7 +224,8 @@ class TestFinDePartie(BasePaliers):
         # A egalite de points, c'est le plus grand empire qui l'emporte.
         gagnant, raison = regles.evaluate_winner(self.state)
         self.assertEqual(gagnant, 0)
-        self.assertIn("2 point(s)", raison)
+        self.assertIn("2 palier(s)", raison)
+        self.assertIn("egalite de paliers", raison)
 
     def test_tenir_toute_la_carte_acheve_la_partie(self):
         for terr in self.state.territories:
@@ -234,13 +236,26 @@ class TestFinDePartie(BasePaliers):
         # Les paliers atteignables au passage lui sont bien credites.
         self.assertGreaterEqual(regles.get_victory_points(self.state, 0), 1)
 
-    def test_un_elimine_ne_remporte_pas_la_partie(self):
+    def test_un_elimine_garde_ses_paliers_et_peut_l_emporter(self):
+        """Regle du 07/11/2026 : le vainqueur est celui qui a franchi le plus
+        de paliers, meme si son empire a disparu depuis."""
         for index, condition in enumerate(regles.VICTORY_CONDITIONS):
-            self.fermer(condition, 3, tour=index + 1)
-        # Le joueur 3 n'a plus rien : c'est un survivant qui l'emporte.
+            self.fermer(condition, 3 if index < 3 else index - 3, tour=index + 1)
+        # Le joueur 3 (3 paliers) n'a plus rien, le joueur 0 (1 palier) tient tout.
         self.fixer_territoires(0, self.total, rival=1)
-        gagnant, _raison = regles.evaluate_winner(self.state)
-        self.assertEqual(gagnant, 0)
+        gagnant, raison = regles.evaluate_winner(self.state)
+        self.assertEqual(gagnant, 3)
+        self.assertIn("3 palier(s)", raison)
+        self.assertIn("empire ait disparu", raison)
+
+    def test_le_classement_suit_les_paliers_et_non_les_territoires(self):
+        for index, condition in enumerate(regles.VICTORY_CONDITIONS):
+            self.fermer(condition, (2, 2, 2, 1, 1, 0)[index], tour=index + 1)
+        self.fixer_territoires(0, self.total - 1, rival=1)
+        classement = regles.get_victory_ranking(self.state)
+        self.assertEqual([ligne["joueur"] for ligne in classement[:3]], [2, 1, 0])
+        self.assertEqual([ligne["points"] for ligne in classement[:3]], [3, 2, 1])
+        self.assertTrue(classement[0]["elimine"])
 
 
 class TestMajoriteDesPaliers(BasePaliers):
@@ -263,6 +278,13 @@ class TestMajoriteDesPaliers(BasePaliers):
         gagnant, raison = regles.evaluate_winner(self.state)
         self.assertEqual(gagnant, 2)
         self.assertIn("majorite des paliers (4 sur 6)", raison)
+
+    def test_un_elimine_majoritaire_arrete_aussi_la_partie(self):
+        for index, condition in enumerate(regles.REQUIRED_VICTORY_CONDITIONS[:4]):
+            self.fermer(condition, 3, tour=index + 1)
+        self.fixer_territoires(0, self.total // 2, rival=1)
+        gagnant, _raison = regles.evaluate_winner(self.state)
+        self.assertEqual(gagnant, 3)
 
     def test_le_palier_majoritaire_ne_scinde_pas(self):
         """Le quatrieme palier franchi en jeu acheve la partie sans scission."""
