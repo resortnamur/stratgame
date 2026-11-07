@@ -7877,17 +7877,25 @@ class GraphicalGame:
             "universites": len(owned_ids & self.university_territory_ids),
             "temples": len(owned_ids & self.temple_territory_ids),
         }
+        # Classement final : au nombre de paliers franchis, le meme que celui
+        # qui designe le vainqueur (moteur.regles.get_victory_ranking). Les
+        # territoires ne servent qu'a departager une egalite de paliers.
         ranking = []
-        players = sorted({territory.owner for territory in self.territories if territory.owner >= 0} | set(range(self.num_players)))
-        for player in players:
-            territories = [territory for territory in self.territories if territory.owner == player]
+        for ligne in moteur_regles.get_victory_ranking(self):
+            bloc = [member for member in ligne["bloc"]]
+            regiments = sum(
+                max(0, territory.regiments) for territory in self.territories
+                if territory.owner in bloc
+            )
             ranking.append({
-                "player": player,
-                "territories": len(territories),
-                "regiments": sum(max(0, territory.regiments) for territory in territories),
-                "money": self.get_player_money(player),
+                "player": ligne["joueur"],
+                "allies": [member for member in bloc if member != ligne["joueur"]],
+                "paliers": ligne["points"],
+                "territories": ligne["territoires"],
+                "eliminated": ligne["elimine"],
+                "regiments": regiments,
+                "money": self.get_player_money(ligne["joueur"]),
             })
-        ranking.sort(key=lambda item: (item["territories"], item["regiments"], item["money"]), reverse=True)
         return {
             "winner": winner,
             "reason": self.last_victory_reason or "condition de victoire atteinte",
@@ -12260,15 +12268,18 @@ class GraphicalGame:
             self.screen.blit(self.font_small.render(line, True, (224, 230, 236)), (right_x, top + index * 23))
 
         ranking_y = panel.y + 372
-        rank_title = self.font_medium.render("Classement final", True, (244, 208, 63))
+        rank_title = self.font_medium.render("Classement final (paliers)", True, (244, 208, 63))
         self.screen.blit(rank_title, (left_x, ranking_y))
         ranking = summary.get("ranking", [])
         for index, item in enumerate(ranking[:6]):
             player = int(item.get("player", 0))
             marker = "  VAINQUEUR" if player == winner else ""
+            paliers = int(item.get("paliers", 0))
+            allies = "".join(f" + J{ally + 1}" for ally in item.get("allies", []))
+            etat = "elimine" if item.get("eliminated") else f"{item.get('territories', 0)} terr."
             line = (
-                f"{index + 1}. J{player + 1} - {item.get('territories', 0)} terr. - "
-                f"{item.get('regiments', 0)} reg. - {item.get('money', 0)} ecus{marker}"
+                f"{index + 1}. J{player + 1}{allies} - {paliers} palier{'s' if paliers > 1 else ''}"
+                f" - {etat}{marker}"
             )
             color = (255, 245, 170) if player == winner else (205, 213, 220)
             self.screen.blit(self.font_small.render(line, True, color), (left_x, ranking_y + 30 + index * 20))
