@@ -115,6 +115,7 @@ def nouvelle_partie(
     assign_initial_economic_structures(state, rng)
     if special_territories and not state.simple_mode:
         assign_special_territories(state, rng)
+    apply_human_regiment_handicap(state, rng)
     state.victory_milestones = []
     state.replay_history = []
     state.phase = "playing"
@@ -359,6 +360,43 @@ def _distribute_armies(state: GameState, rng=random) -> None:
         rng.choice(owned).regiments += 5
 
     assign_random_bonus_territories(state, rng)
+
+
+# Handicap des joueurs humains (07/11/2026) : ils commencent la partie avec
+# un tiers de regiments en moins que ce que la mise en place leur a donne.
+HUMAN_STARTING_REGIMENT_HANDICAP = 1 / 3
+
+
+def apply_human_regiment_handicap(state, rng=random) -> None:
+    """Retire a chaque joueur humain un tiers de ses regiments de depart.
+
+    Appele en toute fin de mise en place, une fois capitales, sanctuaires et
+    territoires speciaux poses : le tiers porte sur tout ce que le joueur
+    tient reellement. Les regiments partent au hasard, au prorata des
+    garnisons (une grosse pile perd plus qu'une petite), sans jamais laisser
+    un territoire sous un regiment. Sert aussi a x45 (duck typing).
+    """
+    if HUMAN_STARTING_REGIMENT_HANDICAP <= 0:
+        return
+    cites = set(getattr(state, "commercial_city_players", set()) or set())
+    for player in range(state.num_players):
+        if player in cites or not regles.is_human_player_id(state, player):
+            continue
+        owned = [terr for terr in state.territories if terr.owner == player]
+        total = sum(terr.regiments for terr in owned)
+        a_retirer = int(total * HUMAN_STARTING_REGIMENT_HANDICAP)
+        while a_retirer > 0:
+            surplus = [terr for terr in owned if terr.regiments > 1]
+            if not surplus:
+                break
+            poids = [terr.regiments - 1 for terr in surplus]
+            tirage = rng.random() * sum(poids)
+            for terr, poids_terr in zip(surplus, poids):
+                tirage -= poids_terr
+                if tirage < 0:
+                    break
+            terr.regiments -= 1
+            a_retirer -= 1
 
 
 def assign_initial_player_capitals(state: GameState, rng=random) -> None:

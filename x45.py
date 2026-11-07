@@ -807,6 +807,7 @@ class GraphicalGame:
         self.reset_economy_state()
         self.assign_initial_economic_structures()
         self.assign_special_territories()
+        moteur_mise_en_place.apply_human_regiment_handicap(self, random)
         self.last_victory_reason = ""
         self.victory_winner = None
         self.victory_summary = {}
@@ -10643,6 +10644,7 @@ class GraphicalGame:
         self.reset_economy_state()
         self.assign_initial_economic_structures()
         self.assign_special_territories()
+        moteur_mise_en_place.apply_human_regiment_handicap(self, random)
         self.last_victory_reason = ""
         self.victory_winner = None
         self.victory_summary = {}

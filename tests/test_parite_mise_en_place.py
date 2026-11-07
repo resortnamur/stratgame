@@ -172,7 +172,8 @@ class TestPariteMiseEnPlace(unittest.TestCase):
                     # La reference figee ne connait pas les territoires
                     # aux proprietes particulieres : on ne les pose pas.
                     # Elle pose aussi quatre +3, contre deux desormais.
-                    with mock.patch.object(mise_en_place, "INITIAL_ULTRA_BONUS_COUNT", 4):
+                    # Elle ignore aussi le handicap des humains (07/11/2026).
+                    with mock.patch.object(mise_en_place, "INITIAL_ULTRA_BONUS_COUNT", 4),                             mock.patch.object(mise_en_place, "HUMAN_STARTING_REGIMENT_HANDICAP", 0):
                         state = mise_en_place.nouvelle_partie(
                             json.loads(json.dumps(map_payload)), **config,
                             special_territories=False,
