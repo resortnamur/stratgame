@@ -819,6 +819,28 @@ def is_capital_immune_to_culture_annexation(state: GameState, territory_id: int)
     )
 
 
+def count_player_territories_fast(state: GameState, player: int) -> int:
+    return sum(1 for terr in state.territories if terr.owner == player)
+
+
+def is_player_last_territory(state: GameState, territory_id: int) -> bool:
+    """Ce territoire est-il le dernier de son proprietaire ?
+
+    Regle dictee : un joueur ne se fait jamais rayer de la carte par un
+    evenement. Sedition, revolte, trahison, revolution, chaos, palier
+    culturel, fondation de Cite commercante : aucun ne lui prend son
+    dernier territoire. Seule la guerre elimine -- une attaque, un
+    debarquement, une corruption. Le dernier bastion est justement la
+    pour qu'un joueur acculé puisse se refaire.
+    """
+    if not (0 <= territory_id < len(state.territories)):
+        return False
+    owner = state.territories[territory_id].owner
+    if owner < 0 or is_onu_player(state, owner):
+        return False
+    return count_player_territories_fast(state, owner) <= 1
+
+
 def is_missile_immune_territory(state: GameState, territory_id: int) -> bool:
     """Un missile ne frappe jamais ce territoire.
 
@@ -3939,6 +3961,12 @@ def choose_owned_contiguous_block(
     if count <= 0 or not owned_ids:
         return []
     target_count = min(count, len(owned_ids))
+    # Regle dictee : un evenement ne raye jamais un joueur de la carte. Il
+    # lui reste toujours un territoire, meme sans capitale a proteger.
+    total_owned = count_player_territories_fast(state, player)
+    target_count = min(target_count, max(0, total_owned - 1))
+    if target_count <= 0:
+        return []
     owned_set = set(owned_ids)
 
     components: List[List[int]] = []
@@ -4912,6 +4940,10 @@ def get_culture_expansion_target_ids(state: GameState, player: int) -> Set[int]:
                 # compris la ville d'origine d'un paradis fiscal.
                 if is_capital_immune_to_culture_annexation(state, neighbor_id):
                     continue
+                # Ni le dernier territoire d'un joueur : la culture
+                # n'elimine personne.
+                if is_player_last_territory(state, neighbor_id):
+                    continue
                 if can_commercial_city_gain_territory(state, player, neighbor_id):
                     targets.add(neighbor_id)
     return targets
@@ -4923,6 +4955,8 @@ def annex_territory_by_culture(state: GameState, territory_id: int, player: int)
     if state.territories[territory_id].owner in state.commercial_city_players:
         return None
     if is_capital_immune_to_culture_annexation(state, territory_id):
+        return None
+    if is_player_last_territory(state, territory_id):
         return None
     if not can_commercial_city_gain_territory(state, player, territory_id):
         return None
@@ -5039,6 +5073,10 @@ def spawn_pending_commercial_cities(state: GameState, rng=random) -> List[str]:
                 and not is_any_capital_territory(state, terr.id)
                 and terr.id not in set(state.wonder_territories.values())
             ]
+        candidates = [
+            terr for terr in candidates
+            if not is_player_last_territory(state, terr.id)
+        ]
         if not candidates:
             break
         territory = rng.choice(candidates)
@@ -6601,6 +6639,8 @@ def convert_territory_to_sanctuary(state: GameState, territory_id: int, regiment
         territory_id in state.golden_territory_ids
         or is_commercial_city_territory(state, territory_id)
         or is_regular_capital_territory(state, territory_id)
+        # Regle dictee : l'ONU ne raye pas un joueur de la carte.
+        or is_player_last_territory(state, territory_id)
     ):
         return False
     terr = state.territories[territory_id]
@@ -6785,6 +6825,13 @@ def get_random_ai_recipient_for_sedition(state: GameState, previous_owner: int, 
 def maybe_trigger_sedition_at_end_of_turn(state: GameState, rng=random) -> Optional[str]:
     tax_haven_capitals = get_all_tax_haven_capital_ids(state)
     seditions: List[Tuple[str, int, int]] = []
+    # Regle dictee : la sedition ne raye personne de la carte. Le compte
+    # se tient au fil du passage, pour qu'un joueur a trois territoires
+    # n'en perde pas trois dans le meme tour.
+    restants = {
+        player: count_player_territories_fast(state, player)
+        for player in get_active_players(state)
+    }
 
     for terr in state.territories:
         if terr.owner < 0 or is_sanctuary_territory(state, terr.id) or terr.owner == state.onu_player_id:
@@ -6792,6 +6839,8 @@ def maybe_trigger_sedition_at_end_of_turn(state: GameState, rng=random) -> Optio
         if is_commercial_city_player(state, terr.owner):
             continue
         if terr.id in tax_haven_capitals:
+            continue
+        if restants.get(terr.owner, 0) <= 1:
             continue
 
         chance_points = calculate_sedition_chance_points(state, terr)
@@ -6803,6 +6852,10 @@ def maybe_trigger_sedition_at_end_of_turn(state: GameState, rng=random) -> Optio
         previous_owner = terr.owner
         new_owner = get_random_ai_recipient_for_sedition(state, previous_owner, rng)
         terr.owner = new_owner
+        # Seules les pertes comptent : un territoire recu pendant la
+        # sedition ne rend pas son nouveau maitre plus vulnerable dans le
+        # meme passage.
+        restants[previous_owner] = restants.get(previous_owner, 1) - 1
         seditions.append((terr.name, previous_owner, new_owner))
 
     if not seditions:
