@@ -131,6 +131,40 @@ header {
 .liste-menaces .menace.imminente .jauge > span { background: rgb(231, 76, 60); }
 .menace-calme { margin: 0; font-size: 12px; color: rgb(150, 165, 185); }
 
+/* L'objectif en cours : une seule condition de victoire ouverte a la fois.
+   Il ouvre la colonne de droite, au-dessus de la situation generale. */
+#panneau-objectif {
+  border-color: rgb(244, 208, 63);
+  background: linear-gradient(180deg, rgb(46, 56, 44), rgb(28, 44, 66));
+}
+#panneau-objectif h2 { color: rgb(244, 208, 63); }
+.objectif-titre {
+  margin: 0 0 2px;
+  font-size: 15px;
+  color: rgb(240, 244, 248);
+  line-height: 1.35;
+}
+.objectif-rang {
+  font-size: 11px;
+  color: rgb(150, 165, 185);
+  border: 1px solid rgb(72, 93, 114);
+  border-radius: 999px;
+  padding: 1px 6px;
+  margin-left: 2px;
+}
+.objectif-but {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: rgb(214, 222, 230);
+}
+.objectif-note { margin-top: 6px; font-style: italic; }
+#objectif-victoire .pion {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 3px;
+  margin-right: 5px;
+}
+
 .panneau {
   background: rgb(28, 44, 66);
   border: 1px solid rgb(52, 73, 94);
@@ -531,6 +565,23 @@ header {
   font-size: 0.9rem;
   color: rgb(214, 222, 230);
   line-height: 1.4;
+}
+/* La condition suivante, tiree dans la foulee du palier. */
+#annonce-palier .objectif-suivant-palier {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(244, 208, 63, 0.4);
+  font-size: 0.95rem;
+  color: rgb(240, 244, 248);
+  line-height: 1.4;
+}
+#annonce-palier .etiquette-objectif {
+  display: inline-block;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgb(244, 208, 63);
+  margin-right: 6px;
 }
 
 #confettis { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }

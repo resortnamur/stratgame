@@ -276,8 +276,13 @@ VICTORY_THREAT_NOTICE_RATIO = 0.65
 SCIENCE_VICTORY_RATIO = 20
 AI_SCIENCE_VICTORY_RATIO = 10
 SCIENCE_VICTORY_MIN_POINTS = 100
-# Victoire religieuse : part de la carte que la religion nationale doit couvrir.
-NATIONAL_RELIGION_VICTORY_RATIO = 0.9
+# Victoire religieuse : part de la carte que la foi du joueur doit couvrir.
+# Trois quarts pour tout le monde. Les neuf dixiemes exiges autrefois des
+# joueurs humains etaient hors d'atteinte des qu'une religion conquerante
+# (nee d'une merveille) commencait a recouvrir les religions nationales :
+# l'objectif religieux pouvait ne jamais tomber, et comme il n'y a plus qu'un
+# objectif en cours a la fois, il aurait fige la partie.
+NATIONAL_RELIGION_VICTORY_RATIO = 0.75
 AI_NATIONAL_RELIGION_VICTORY_RATIO = 0.75
 MAX_REINFORCEMENTS_PER_TURN = 10
 MAX_REINFORCEMENT_ELIGIBLE_REGIMENTS = 120
@@ -1498,10 +1503,59 @@ def get_required_holy_site_count_for_victory(state: GameState) -> int:
     return WONDER_RELIGION_ID + len(get_founded_wonder_religion_ids(state))
 
 
-def get_required_influence_count_for_religion_victory(state: GameState, player: int) -> int:
-    """Combien de territoires sous influence nationale pour gagner la partie.
+def get_player_victory_religion_ids(state: GameState, player: int) -> List[int]:
+    """Les fois qui peuvent porter la victoire religieuse d'un joueur.
 
-    Neuf dixiemes de la carte pour un joueur humain, trois quarts pour une IA.
+    Sa religion nationale, et toute religion conquerante — Elyrion, Solmyre —
+    dont il tient la merveille fondatrice. Une religion de merveille n'est
+    toujours pas une religion nationale (ni immunite aux revoltes, ni
+    missions), mais son extension compte desormais pour qui la controle :
+    sans cela, celui qui la repand sur la carte s'interdisait a lui-meme
+    l'objectif religieux.
+    """
+    if player < 0:
+        return []
+    religions: List[int] = []
+    national = get_player_national_religion_id(state, player)
+    if national is not None:
+        religions.append(national)
+    for religion_id in get_founded_wonder_religion_ids(state):
+        if get_religion_founder(state, religion_id) == player:
+            religions.append(religion_id)
+    return religions
+
+
+def get_victory_religion_influence(
+    state: GameState, players,
+) -> Optional[Tuple[int, int, int]]:
+    """L'etendue de la foi d'un bloc : ``(religion, porteur, influence)``.
+
+    L'influence s'additionne sur toutes les fois du bloc — religions
+    nationales et religions conquerantes dont il tient la merveille. Un
+    territoire n'est jamais sous deux religions a la fois, donc rien n'est
+    compte deux fois ; et celui dont la foi conquerante recouvre sa propre
+    religion nationale ne perd plus ce qu'elle lui prend.
+
+    La religion nommee est la mieux etendue des siennes : c'est elle qu'on
+    cite dans l'annonce du palier.
+    """
+    total = 0
+    meilleur: Optional[Tuple[int, int, int]] = None
+    for member in players:
+        for religion_id in get_player_victory_religion_ids(state, member):
+            influence = get_religion_influence_count(state, religion_id)
+            total += influence
+            if meilleur is None or influence > meilleur[2]:
+                meilleur = (religion_id, member, influence)
+    if meilleur is None:
+        return None
+    return (meilleur[0], meilleur[1], total)
+
+
+def get_required_influence_count_for_religion_victory(state: GameState, player: int) -> int:
+    """Combien de territoires sous influence pour franchir le palier religieux.
+
+    Les trois quarts de la carte, pour tout le monde.
     """
     total = len(state.territories)
     if total <= 0:
@@ -1968,6 +2022,11 @@ def find_domination_candidate(
 # Les six conditions de victoire, devenues des paliers : chacune ne se
 # franchit qu'une fois dans la partie, donne un point de victoire a son
 # auteur, puis se ferme definitivement.
+#
+# Elles ne sont plus ouvertes toutes ensemble : la partie n'en vise qu'une a
+# la fois, l'objectif en cours, tire au sort au debut de la partie puis
+# apres chaque palier parmi celles qui restent. Voir
+# ``draw_victory_objective``.
 VICTORY_CONDITIONS = (
     "lieux_sacres",
     "religion",
@@ -1976,16 +2035,35 @@ VICTORY_CONDITIONS = (
     "territoires",
     "dores",
 )
-# La religion rapporte son point comme les autres, mais ne conditionne pas
-# la fin de la partie : on peut fort bien ne jamais la voir tomber. Une
-# religion conquerante finit par recouvrir les religions nationales : passe
-# un certain point, plus aucune ne peut esperer les neuf dixiemes de la
-# carte. L'exiger, c'etait condamner la partie a ne jamais s'achever.
+# Le nom de chaque condition, pour les annonces du moteur.
+VICTORY_CONDITION_LABELS = {
+    "lieux_sacres": "les lieux sacres",
+    "religion": "la religion",
+    "culture": "la culture",
+    "science": "la science",
+    "territoires": "les territoires",
+    "dores": "les territoires dores",
+}
+# Ce qu'il faut faire pour franchir chaque palier, en une ligne : l'annonce
+# de l'objectif doit se suffire a elle-meme.
+VICTORY_CONDITION_GOALS = {
+    "lieux_sacres": "controler tous les lieux sacres de la carte",
+    "religion": "etendre sa foi sur les trois quarts des territoires",
+    "culture": "ecraser la culture de tous ses rivaux",
+    "science": "ecraser la science de tous ses rivaux",
+    "territoires": "controler les trois quarts des territoires",
+    "dores": "controler les quatre territoires dores",
+}
+# Plus aucune condition n'est facultative : chacune est tiree comme les
+# autres et doit tomber pour que la suivante s'ouvre. La religion l'etait
+# tant qu'elle exigeait les neuf dixiemes de la carte ; ramenee aux trois
+# quarts, et comptant desormais les religions conquerantes de son porteur,
+# elle est atteignable comme les cinq autres.
 #
-# La conquete totale n'est plus un palier : les trois quarts des territoires
+# La conquete totale n'est pas un palier : les trois quarts des territoires
 # en sont deja un, et tenir toute la carte acheve de toute facon la partie
 # (cf. evaluate_winner).
-OPTIONAL_VICTORY_CONDITIONS = ("religion",)
+OPTIONAL_VICTORY_CONDITIONS = ()
 REQUIRED_VICTORY_CONDITIONS = tuple(
     condition for condition in VICTORY_CONDITIONS
     if condition not in OPTIONAL_VICTORY_CONDITIONS
@@ -2018,6 +2096,113 @@ def get_remaining_required_victory_conditions(state: GameState) -> List[str]:
         condition for condition in REQUIRED_VICTORY_CONDITIONS
         if condition not in crossed
     ]
+
+
+# ----------------------------------------------------------------------
+# L'objectif en cours
+# ----------------------------------------------------------------------
+#
+# Une partie ne vise jamais deux conditions a la fois. Au debut, le
+# programme en tire une au sort et l'annonce : c'est l'objectif. Le premier
+# joueur qui le remplit franchit un palier — point de victoire, scission
+# generale, condition fermee, exactement comme avant — puis le programme
+# tire l'objectif suivant parmi les conditions qui restent, et ainsi de
+# suite jusqu'a la derniere.
+#
+# Tant qu'une condition n'est pas l'objectif en cours, la remplir ne
+# rapporte rien : elle attend son tour.
+
+
+def _victory_objective_rng(state: GameState) -> random.Random:
+    """Le tirage de l'objectif, independant de l'aleatoire partage.
+
+    Piocher dans le ``rng`` de la partie decalerait tout ce qui suit (les
+    tests de parite rejouent la meme partie des deux cotes avec le meme
+    germe). La graine se deduit donc de la partie elle-meme : sa carte, ses
+    territoires dores — tires au hasard a la mise en place, donc propres a
+    chaque partie —, le tour et le nombre de paliers deja franchis. Le
+    tirage reste ainsi reproductible et different d'une partie a l'autre.
+    """
+    empreinte = (
+        len(state.territories),
+        int(getattr(state, "num_players", 0) or 0),
+        tuple(sorted(int(tid) for tid in getattr(state, "golden_territory_ids", ()))),
+        tuple(sorted(int(tid) for tid in getattr(state, "sanctuary_territory_ids", ()))),
+        int(getattr(state, "turn", 0) or 0),
+        len(getattr(state, "victory_milestones", ())),
+    )
+    return random.Random(repr(empreinte))
+
+
+def get_current_victory_objective(state: GameState) -> Optional[str]:
+    """La seule condition de victoire ouverte a cet instant, ou ``None``.
+
+    ``None`` signifie qu'il n'y a plus rien a viser : toutes les conditions
+    sont tombees, la partie s'acheve.
+    """
+    objectif = getattr(state, "victory_objective", None)
+    if objectif in get_remaining_victory_conditions(state):
+        return str(objectif)
+    return None
+
+
+def draw_victory_objective(state: GameState) -> Optional[str]:
+    """Tire au sort l'objectif suivant parmi les conditions encore ouvertes.
+
+    Rend la condition tiree, ou ``None`` s'il n'en reste aucune.
+    """
+    restantes = get_remaining_victory_conditions(state)
+    if not restantes:
+        state.victory_objective = None
+        return None
+    choisi = _victory_objective_rng(state).choice(restantes)
+    state.victory_objective = choisi
+    state.victory_objective_turn = int(getattr(state, "turn", 0) or 0)
+    return choisi
+
+
+def ensure_victory_objective(state: GameState) -> Optional[str]:
+    """L'objectif en cours, tire au besoin.
+
+    Une partie commencee avant cette regle, ou chargee d'une vieille
+    sauvegarde, n'en a pas : le premier passage lui en donne un.
+    """
+    objectif = get_current_victory_objective(state)
+    if objectif is not None:
+        return objectif
+    return draw_victory_objective(state)
+
+
+def describe_victory_objective(condition: Optional[str]) -> str:
+    """L'objectif en une phrase, pour les annonces."""
+    if condition is None:
+        return "aucun objectif a viser : la partie s'acheve"
+    libelle = VICTORY_CONDITION_LABELS.get(condition, condition)
+    but = VICTORY_CONDITION_GOALS.get(condition)
+    return f"{libelle} — {but}" if but else str(libelle)
+
+
+def announce_victory_objective(state: GameState, condition: Optional[str], debut: bool = False) -> None:
+    """Inscrit l'objectif dans les evenements majeurs : il doit se voir."""
+    if condition is None:
+        return
+    restantes = len(get_remaining_victory_conditions(state))
+    total = len(VICTORY_CONDITIONS)
+    rang = total - restantes + 1
+    tete = "OBJECTIF DE LA PARTIE" if debut else "NOUVEL OBJECTIF"
+    record_major_event(state, (
+        f"Tour {state.turn}: {tete} ({rang}/{total}) — "
+        f"{describe_victory_objective(condition)}. "
+        "C'est la seule condition de victoire ouverte : le premier qui la "
+        "remplit marque le point, et le programme en tire une autre."
+    ))
+
+
+def start_victory_objective(state: GameState) -> Optional[str]:
+    """Pose et annonce le premier objectif, au debut de la partie."""
+    condition = draw_victory_objective(state)
+    announce_victory_objective(state, condition, debut=True)
+    return condition
 
 
 def get_victory_points(state: GameState, player: int) -> int:
@@ -2128,24 +2313,25 @@ def find_satisfied_victory_conditions(state: GameState) -> List[Tuple[str, int, 
                 break
 
     map_size = len(state.territories)
-    for founder, religion_id in sorted(state.religion_founders.items()):
-        if is_wonder_religion(religion_id) or founder not in owners:
-            continue
-        required_influence = get_required_influence_count_for_religion_victory(state, founder)
+    # La foi d'un joueur : sa religion nationale, et les religions
+    # conquerantes dont il tient la merveille. Celle d'un allie definitif
+    # compte pour son patron, comme tout le reste du bloc.
+    for owner in sorted(candidates):
+        required_influence = get_required_influence_count_for_religion_victory(state, owner)
         if required_influence <= 0:
             continue
-        influence_count = get_religion_influence_count(state, religion_id)
+        bloc = get_victory_bloc(state, owner)
+        mesure = get_victory_religion_influence(state, bloc)
+        if mesure is None:
+            continue
+        religion_id, porteur, influence_count = mesure
         if influence_count >= required_influence:
-            part = "3/4" if is_ai_player(state, founder) else "9/10"
-            # La foi d'un allie definitif fait gagner son patron.
-            winner = get_eternal_ally_patron(state) if founder == eternal_ally else founder
-            if winner is None:
-                continue
+            porte_par = f" (portee par J{porteur + 1})" if porteur != owner else ""
             satisfied.append((
-                "religion", winner,
-                f"a etendu {get_religion_name(state, religion_id)} sur {part} des territoires "
-                f"({influence_count}/{map_size})"
-                + (ally_note if winner != founder else ""),
+                "religion", owner,
+                f"a etendu sa foi — {get_religion_name(state, religion_id)} en tete — "
+                f"sur 3/4 des territoires ({influence_count}/{map_size}){porte_par}"
+                + bloc_note(bloc),
             ))
             break
 
@@ -2335,19 +2521,30 @@ def split_all_empires_after_milestone(
 
 
 def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
-    """Enregistre les paliers nouvellement franchis et distribue les points.
+    """Enregistre le palier franchi et distribue le point.
 
-    Un palier deja franchi ne se rejoue jamais : que le meme joueur ou un
-    autre remplisse a nouveau la condition ne change plus rien.
+    Seul compte l'objectif en cours : c'est la seule condition ouverte, et
+    remplir une autre ne rapporte rien tant qu'elle n'a pas ete tiree. Un
+    palier franchi ne se rejoue jamais ; l'objectif suivant est tire dans la
+    foulee parmi les conditions qui restent.
 
     Chaque palier franchi ampute d'un tiers tous les empires de la carte, sauf
     celui qui met fin a la partie : voir
     ``split_all_empires_after_milestone``.
     """
+    objectif = get_current_victory_objective(state)
+    if objectif is None:
+        # Une partie deja decidee ne vise plus rien : inutile de lui tirer
+        # un objectif de plus, qui ne serait annonce a personne.
+        if get_victory_majority_holder(state) is not None:
+            return []
+        objectif = draw_victory_objective(state)
+        if objectif is None:
+            return []
     crossed = get_crossed_victory_conditions(state)
     nouveaux: List[dict] = []
     for condition, owner, reason in find_satisfied_victory_conditions(state):
-        if condition in crossed:
+        if condition != objectif or condition in crossed:
             continue
         crossed.add(condition)
         palier = {
@@ -2367,11 +2564,6 @@ def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
             suite = (
                 f"Il tient la majorite des paliers ({get_victory_majority_threshold()} "
                 f"sur {len(VICTORY_CONDITIONS)}) : sa victoire finale est acquise, la partie s'acheve."
-            )
-        elif is_optional_victory_condition(condition):
-            suite = (
-                "Palier bonus : il rapporte son point sans rien changer a la "
-                f"fin de la partie, qui attend encore {restants} palier(s)."
             )
         elif restants:
             suite = f"Ce palier est ferme ; il en reste {restants} a franchir."
@@ -2419,6 +2611,16 @@ def register_victory_milestones(state: GameState, rng=random) -> List[dict]:
                     f"tous les autres empires perdent aussi un tiers de leurs territoires, chacun donnant "
                     f"naissance a un joueur IA. {detail_texte}"
                 ))
+        # L'objectif est tombe : le programme en tire un autre parmi ceux
+        # qui restent, et la partie repart sur celui-la. Inutile si elle
+        # s'acheve ici.
+        if not majorite:
+            suivant = draw_victory_objective(state)
+            palier["objectif_suivant"] = suivant
+            announce_victory_objective(state, suivant)
+        else:
+            state.victory_objective = None
+        break
     return nouveaux
 
 
@@ -2607,8 +2809,11 @@ def get_victory_threats(
         return []
     owners = {terr.owner for terr in state.territories if terr.owner >= 0}
     eternal_ally = get_eternal_ally(state)
-    # Un palier deja franchi ne menace plus personne : il est ferme.
-    ouverts = set(get_remaining_victory_conditions(state))
+    # Une seule condition est ouverte a la fois : l'objectif en cours. Les
+    # autres n'ont pas encore ete tirees, ou sont deja fermees — dans les
+    # deux cas elles ne menacent personne.
+    objectif = get_current_victory_objective(state)
+    ouverts = {objectif} if objectif else set()
     threats: List[dict] = []
 
     territory_threshold = math.ceil(total * 0.75)
@@ -2648,22 +2853,18 @@ def get_victory_threats(
                 notice=required_holy_sites - holy <= 2 * VICTORY_THREAT_HOLY_SITE_MARGIN,
             ))
 
-        for member in bloc if "religion" in ouverts else ():
-            religion_id = get_player_national_religion_id(state, member)
-            if religion_id is None:
-                continue
-            required = get_required_influence_count_for_religion_victory(state, member)
-            if required <= 0:
-                continue
-            influence = get_religion_influence_count(state, religion_id)
-            part = "3/4" if is_ai_player(state, member) else "9/10"
-            porteur = f" (par J{member + 1})" if member != owner else ""
-            threats.append(_victory_threat(
-                owner, bloc, "religion", "religieuse", influence, required,
-                influence >= VICTORY_THREAT_IMMINENT_RATIO * required,
-                f"{get_religion_name(state, religion_id)} sur {influence}/{required} "
-                f"territoires ({part} de la carte){porteur}",
-            ))
+        if "religion" in ouverts:
+            required = get_required_influence_count_for_religion_victory(state, owner)
+            mesure = get_victory_religion_influence(state, bloc)
+            if mesure is not None and required > 0:
+                religion_id, porteur_id, influence = mesure
+                porteur = f" (par J{porteur_id + 1})" if porteur_id != owner else ""
+                threats.append(_victory_threat(
+                    owner, bloc, "religion", "religieuse", influence, required,
+                    influence >= VICTORY_THREAT_IMMINENT_RATIO * required,
+                    f"{get_religion_name(state, religion_id)} sur {influence}/{required} "
+                    f"territoires (3/4 de la carte){porteur}",
+                ))
 
         for kind, label, measure, ratio_human, ratio_ai, minimum in (
             ("culture", "culturelle", calculate_player_culture,

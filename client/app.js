@@ -1204,6 +1204,66 @@ const LIBELLES_MENACES = {
   science: "Science",
 };
 
+// Ce qu'il faut faire pour franchir chaque palier : l'objectif annoncé doit
+// se suffire à lui-même, sans aller chercher le manuel.
+const BUTS_CONDITIONS = {
+  territoires: "contrôler les trois quarts des territoires",
+  dores: "contrôler les quatre territoires dorés",
+  lieux_sacres: "contrôler tous les lieux sacrés de la carte",
+  religion: "étendre sa foi sur les trois quarts des territoires",
+  culture: "écraser la culture de tous ses rivaux",
+  science: "écraser la science de tous ses rivaux",
+};
+
+const EMOJIS_CONDITIONS = {
+  territoires: "🗺️",
+  dores: "🪙",
+  lieux_sacres: "⛩️",
+  religion: "🕊️",
+  culture: "🎭",
+  science: "🔬",
+};
+
+// L'objectif en cours : la seule condition de victoire ouverte. Le premier
+// qui la remplit marque le point, puis le programme en tire une autre.
+function afficherObjectif() {
+  const zone = $("objectif-victoire");
+  if (!zone) return;
+  const donnees = client.bilans;
+  if (!donnees) {
+    zone.textContent = "Chargement…";
+    return;
+  }
+  const objectif = donnees.objectif;
+  const total = donnees.nb_conditions || 6;
+  if (!objectif) {
+    zone.innerHTML = "<p class='menace-calme'>Plus d'objectif à viser : "
+      + "la partie s'achève.</p>";
+    return;
+  }
+  const moyen = LIBELLES_MENACES[objectif] || objectif;
+  // La table locale d'abord : celle du moteur est en ASCII (sans accents).
+  const but = BUTS_CONDITIONS[objectif] || donnees.objectif_but || "";
+  const emoji = EMOJIS_CONDITIONS[objectif] || "🎯";
+  const rang = donnees.objectif_rang || ((donnees.paliers || []).length + 1);
+  const depuis = donnees.objectif_tour
+    ? ` <span class="tour-palier">(fixé au tour ${donnees.objectif_tour})</span>`
+    : "";
+  // Qui en est le plus près, si quelqu'un approche : l'objectif se lit
+  // d'un coup d'œil, la course avec.
+  const menace = (donnees.menaces || []).find((m) => m.moyen === objectif);
+  const course = menace
+    ? `<p class="menace-calme"><span class="pion" style="background:${rgb(couleurJoueur(menace.joueur))}"></span>`
+      + `${nomDuJoueur(menace.joueur)} en est le plus près : ${menace.detail}</p>`
+    : "<p class='menace-calme'>Personne ne s'en approche encore.</p>";
+  zone.innerHTML = `<p class="objectif-titre">${emoji} <strong>${moyen}</strong>`
+    + ` <span class="objectif-rang">${rang}/${total}</span>${depuis}</p>`
+    + `<p class="objectif-but">${but}</p>`
+    + course
+    + "<p class='menace-calme objectif-note'>C'est la seule condition ouverte. "
+    + "Une fois franchie, le programme en tire une autre.</p>";
+}
+
 function afficherMenacesVictoire() {
   const zone = $("menaces-victoire");
   const donnees = client.bilans;
@@ -1223,6 +1283,9 @@ function afficherMenacesVictoire() {
     ? `La partie s'achève quand les ${requisesRestantes.length} palier(s) restant(s) seront tombés,`
       + ` ou dès qu'un joueur en tient ${Math.floor(total / 2) + 1} sur ${total}.`
     : "Tous les paliers nécessaires sont tombés.";
+  const enCours = donnees.objectif
+    ? ` Objectif en cours : <strong>${LIBELLES_MENACES[donnees.objectif] || donnees.objectif}</strong>.`
+    : "";
   let entete = "";
   if (paliers.length) {
     const franchis = paliers.map((palier) => {
@@ -1246,14 +1309,14 @@ function afficherMenacesVictoire() {
       return `<li class="palier">${pion}${nomDuJoueur(palier.joueur)} — <strong>${moyen}</strong>${bonus(palier.condition)}`
         + ` <span class="tour-palier">(tour ${palier.tour})</span>${scission}</li>`;
     });
-    entete = `<p class='menace-calme'>${paliers.length}/${total} paliers franchis. ${reste}</p>`
+    entete = `<p class='menace-calme'>${paliers.length}/${total} paliers franchis.${enCours} ${reste}</p>`
       + "<ul class='liste-paliers'>" + franchis.join("") + "</ul>";
   } else {
-    entete = `<p class='menace-calme'>Aucun palier franchi : les ${total} conditions sont ouvertes. ${reste}</p>`;
+    entete = `<p class='menace-calme'>Aucun palier franchi sur ${total}.${enCours} ${reste}</p>`;
   }
   const menaces = donnees.menaces || [];
   if (!menaces.length) {
-    zone.innerHTML = entete + "<p class='menace-calme'>Personne n'approche d'un palier.</p>";
+    zone.innerHTML = entete + "<p class='menace-calme'>Personne n'approche de l'objectif.</p>";
     return;
   }
   const lignes = menaces.map((menace) => {
@@ -1271,6 +1334,7 @@ function afficherMenacesVictoire() {
 }
 
 function afficherSituation() {
+  afficherObjectif();
   afficherMenacesVictoire();
   const zone = $("tableau-situation");
   const etat = client.etat;
@@ -2233,6 +2297,18 @@ function jouerAnnoncePalier(palier) {
         : `${scissions} empires perdent un tiers de leurs territoires : `
           + "autant de nouveaux joueurs entrent en jeu.";
       carte.append(suite);
+    }
+    // La condition franchie se referme : le programme en tire aussitôt une
+    // autre, et c'est elle qu'il faut viser maintenant.
+    if (palier.objectif_suivant) {
+      const suivant = document.createElement("div");
+      suivant.className = "objectif-suivant-palier";
+      const nom = LIBELLES_MENACES[palier.objectif_suivant] || palier.objectif_suivant;
+      const but = BUTS_CONDITIONS[palier.objectif_suivant] || "";
+      suivant.innerHTML = `<span class="etiquette-objectif">Nouvel objectif</span> `
+        + `${EMOJIS_CONDITIONS[palier.objectif_suivant] || "🎯"} <strong>${nom}</strong>`
+        + (but ? ` — ${but}` : "");
+      carte.append(suivant);
     }
     zone.append(carte);
     zone.classList.remove("disparition");

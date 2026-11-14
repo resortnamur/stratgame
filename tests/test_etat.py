@@ -66,6 +66,8 @@ EXPECTED_GAME_KEYS = {
     "wonder_territories", "player_wonders_built", "apocalypse_site_stages", "apocalypse_site_owners",
     "eternal_ally_player", "eternal_ally_patron",
     "victory_milestones",
+    "victory_objective",
+    "victory_objective_turn",
     "last_stand_bonus_players",
     "last_stand_bonus_territory", "tax_haven_turn_start_territory_counts",
     "active_alliances", "active_ai_alliances", "active_offensive_alliances",

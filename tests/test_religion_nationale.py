@@ -212,33 +212,41 @@ class TestMission(unittest.TestCase):
 
 
 class TestVictoireReligieuse(unittest.TestCase):
-    """Neuf dixiemes de la carte pour un humain, trois quarts pour une IA."""
+    """Les trois quarts de la carte, pour tout le monde.
+
+    Les neuf dixiemes exiges autrefois des humains devenaient hors
+    d'atteinte des qu'une religion conquerante recouvrait les religions
+    nationales ; l'objectif religieux pouvait ne jamais tomber. Depuis que
+    la partie ne vise qu'une condition a la fois, il aurait fige le jeu.
+    """
 
     def setUp(self):
         self.state = partie_neuve()
         self.total = len(self.state.territories)
+        self.state.victory_objective = "religion"
 
     def _repandre(self, religion_id, nombre):
         self.state.religious_influence = {
             terr.id: religion_id for terr in self.state.territories[:nombre]
         }
 
-    def test_seuils_humain_et_ia(self):
+    def test_le_meme_seuil_pour_l_humain_et_pour_l_ia(self):
         humain = 0
         ia = 1
         self.state.base_ai_players.add(ia)
         self.state.human_controlled_players.discard(ia)
         import math
+        attendu = math.ceil(self.total * 0.75)
         self.assertEqual(
             regles.get_required_influence_count_for_religion_victory(self.state, humain),
-            math.ceil(self.total * 0.9),
+            attendu,
         )
         self.assertEqual(
             regles.get_required_influence_count_for_religion_victory(self.state, ia),
-            math.ceil(self.total * 0.75),
+            attendu,
         )
 
-    def test_neuf_dixiemes_franchissent_le_palier_pour_un_humain(self):
+    def test_trois_quarts_franchissent_le_palier_pour_un_humain(self):
         joueur = 0
         religion = fonder_religion(self.state, joueur)
         requis = regles.get_required_influence_count_for_religion_victory(self.state, joueur)
@@ -248,8 +256,64 @@ class TestVictoireReligieuse(unittest.TestCase):
         self.assertIn(("religion", joueur), conditions_remplies(self.state))
         paliers = regles.register_victory_milestones(self.state)
         self.assertTrue(any(p["condition"] == "religion" for p in paliers))
-        self.assertIn("9/10", next(p["raison"] for p in paliers if p["condition"] == "religion"))
+        self.assertIn("3/4", next(p["raison"] for p in paliers if p["condition"] == "religion"))
         self.assertGreaterEqual(regles.get_victory_points(self.state, joueur), 1)
+
+    def test_la_religion_de_la_merveille_compte_pour_qui_la_tient(self):
+        """Regle du 14/11/2026 : la foi d'un joueur, c'est sa religion
+        nationale ET les religions conquerantes dont il tient la merveille."""
+        joueur = 0
+        terr = next(t for t in self.state.territories if t.owner == joueur)
+        self.state.turn = regles.LATE_WONDER_FIRST_TURN
+        if not regles.build_wonder(self.state, terr.id, "elyrion_sanctuary", record_event=False):
+            self.skipTest("Le Sanctuaire d'Elyrion n'a pas pu etre bati.")
+        self.assertEqual(
+            regles.get_religion_founder(self.state, regles.WONDER_RELIGION_ID), joueur,
+        )
+        self.assertIn(
+            regles.WONDER_RELIGION_ID,
+            regles.get_player_victory_religion_ids(self.state, joueur),
+        )
+        requis = regles.get_required_influence_count_for_religion_victory(self.state, joueur)
+        self._repandre(regles.WONDER_RELIGION_ID, requis)
+        self.assertIn(("religion", joueur), conditions_remplies(self.state))
+        raison = next(
+            r for condition, _j, r in regles.find_satisfied_victory_conditions(self.state)
+            if condition == "religion"
+        )
+        self.assertIn("Elyrion", raison)
+
+    def test_les_fois_d_un_joueur_s_additionnent(self):
+        """Regle du 14/11/2026 : sa religion nationale ET la foi conquerante
+        dont il tient la merveille comptent ensemble. Celui dont Elyrion
+        recouvre sa propre religion nationale ne perd plus ce qu'elle lui
+        prend."""
+        joueur = 0
+        nationale = fonder_religion(self.state, joueur)
+        requis = regles.get_required_influence_count_for_religion_victory(self.state, joueur)
+        # La religion nationale seule ne suffit pas.
+        self._repandre(nationale, requis - 10)
+        self.assertNotIn(("religion", joueur), conditions_remplies(self.state))
+        terr = next(t for t in self.state.territories if t.owner == joueur)
+        self.state.turn = regles.LATE_WONDER_FIRST_TURN
+        if not regles.build_wonder(self.state, terr.id, "elyrion_sanctuary", record_event=False):
+            self.skipTest("Le Sanctuaire d'Elyrion n'a pas pu etre bati.")
+        # Dix territoires de plus, mais sous la foi conquerante : le compte
+        # des deux atteint le seuil.
+        for autre in self.state.territories[requis - 10:requis]:
+            self.state.religious_influence[autre.id] = regles.WONDER_RELIGION_ID
+        _religion, _porteur, influence = regles.get_victory_religion_influence(
+            self.state, [joueur],
+        )
+        # La somme des deux fois, et rien d'autre : un territoire n'est
+        # jamais sous deux religions a la fois.
+        self.assertEqual(
+            influence,
+            regles.get_religion_influence_count(self.state, nationale)
+            + regles.get_religion_influence_count(self.state, regles.WONDER_RELIGION_ID),
+        )
+        self.assertGreaterEqual(influence, requis)
+        self.assertIn(("religion", joueur), conditions_remplies(self.state))
 
     def test_trois_quarts_suffisent_a_une_ia(self):
         ia = 1
@@ -265,10 +329,11 @@ class TestVictoireReligieuse(unittest.TestCase):
         )
         self.assertIn("3/4", raison)
 
-    def test_la_religion_de_la_merveille_ne_fait_pas_gagner(self):
+    def test_une_merveille_que_personne_ne_tient_ne_fait_gagner_personne(self):
         self._repandre(regles.WONDER_RELIGION_ID, self.total)
-        # Personne ne fonde Elyrion : aucun fondateur, donc aucun palier
-        # religieux (la condition territoriale, elle, garde ses regles).
+        # Le Sanctuaire n'est pas bati : la foi conquerante n'a pas de
+        # porteur, donc aucun palier religieux (la condition territoriale,
+        # elle, garde ses regles).
         for joueur, religion_id in list(self.state.religion_founders.items()):
             self.assertNotEqual(religion_id, regles.WONDER_RELIGION_ID)
         raisons = [r for _c, _j, r in regles.find_satisfied_victory_conditions(self.state)]

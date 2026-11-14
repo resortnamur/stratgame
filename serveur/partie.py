@@ -414,6 +414,18 @@ class SessionPartie:
                 "conditions_requises_restantes": (
                     regles.get_remaining_required_victory_conditions(state)
                 ),
+                # L'objectif en cours : la seule condition ouverte. Les
+                # autres attendent qu'elle tombe.
+                "objectif": regles.get_current_victory_objective(state),
+                "objectif_tour": int(getattr(state, "victory_objective_turn", 0) or 0),
+                "objectif_but": regles.VICTORY_CONDITION_GOALS.get(
+                    regles.get_current_victory_objective(state) or "", "",
+                ),
+                "objectif_rang": (
+                    len(regles.VICTORY_CONDITIONS)
+                    - len(regles.get_remaining_victory_conditions(state))
+                    + 1
+                ),
             }
 
     def _bilan_domination(

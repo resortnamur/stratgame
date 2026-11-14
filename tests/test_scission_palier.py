@@ -52,8 +52,19 @@ class BaseScission(unittest.TestCase):
         for joueur in regles.get_active_players(self.state):
             self.state.player_science[joueur] = 0
 
+    def viser(self, condition):
+        """Fait de cette condition l'objectif en cours.
+
+        Une seule condition est ouverte a la fois depuis novembre 2026 : un
+        palier ne tombe que si c'est celui qu'on vise.
+        """
+        self.state.victory_objective = condition
+        self.state.victory_objective_turn = self.state.turn
+        return condition
+
     def franchir_le_palier_territorial(self, joueur=0, rival=1):
         """Donne les 3/4 de la carte au joueur, puis enregistre les paliers."""
+        self.viser("territoires")
         for index, terr in enumerate(self.state.territories):
             terr.owner = joueur if index < self.seuil else rival
         return regles.register_victory_milestones(self.state, random.Random(7))
@@ -134,6 +145,7 @@ class TestScissionGenerale(BaseScission):
 
     def repartir(self, parts):
         """Distribue la carte : ``parts`` associe un joueur a son nombre de terres."""
+        self.viser("territoires")
         index = 0
         for joueur, combien in parts:
             for _ in range(combien):
@@ -239,6 +251,7 @@ class TestDecoupeDepuisLaCapitale(BaseScission):
     """Ce sont les provinces les plus lointaines qui font secession."""
 
     def test_le_joueur_garde_sa_capitale(self):
+        self.viser("territoires")
         capitale = regles.get_active_regular_capital_id_for_player(self.state, 0)
         if capitale is None:
             self.skipTest("Le joueur 0 n'a pas de capitale active sur cette carte.")
@@ -249,6 +262,7 @@ class TestDecoupeDepuisLaCapitale(BaseScission):
         self.assertEqual(self.state.territories[capitale].owner, 0)
 
     def test_les_partants_sont_plus_loin_que_les_restants(self):
+        self.viser("territoires")
         for index, terr in enumerate(self.state.territories):
             terr.owner = 0 if index < self.seuil else 1
         origine = regles.get_split_origin_territory_id(self.state, 0)
@@ -400,6 +414,7 @@ class TestLaPartieContinueApresLaScission(BaseScission):
     """La scission rend la carte au jeu au lieu de la fermer."""
 
     def test_la_partie_ne_s_acheve_pas_sur_le_palier_scindeur(self):
+        self.viser("territoires")
         gagnant, _raison = regles.evaluate_winner(self.state)
         self.assertIsNone(gagnant)
         for index, terr in enumerate(self.state.territories):

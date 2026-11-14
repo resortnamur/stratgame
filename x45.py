@@ -364,6 +364,9 @@ class GraphicalGame:
         self.eternal_ally_patron: Optional[int] = None
         # Les paliers de victoire franchis, dans l'ordre.
         self.victory_milestones: list[dict] = []
+        # L'objectif en cours : la seule condition de victoire ouverte.
+        self.victory_objective: Optional[str] = None
+        self.victory_objective_turn: int = 0
         self.pending_wonder_type: Optional[str] = None
         # "Une merveille par tour" : memoire de session, jamais sauvegardee.
         self.wonder_construction_turns: dict[int, int] = {}
@@ -842,6 +845,9 @@ class GraphicalGame:
         self.current_player = 0
         self.turn = 1
         moteur_regles.sync_special_territory_holders(self)
+        # L'objectif de la partie : une seule condition de victoire, tiree
+        # au sort et annoncee d'entree.
+        moteur_regles.start_victory_objective(self)
         self.selected_source = None
         self.selected_target = None
         self.record_replay_snapshot("Debut de la partie", force=True)
@@ -1372,6 +1378,11 @@ class GraphicalGame:
             "victory_milestones": [
                 dict(palier) for palier in getattr(self, "victory_milestones", [])
             ],
+            "victory_objective": (
+                None if getattr(self, "victory_objective", None) is None
+                else str(self.victory_objective)
+            ),
+            "victory_objective_turn": int(getattr(self, "victory_objective_turn", 0) or 0),
             "last_stand_bonus_players": list(self.last_stand_bonus_players),
             "last_stand_bonus_territory": {
                 str(k): sorted(int(tid) for tid in self.get_player_tax_haven_capital_ids(k))
@@ -1668,6 +1679,9 @@ class GraphicalGame:
             palier for palier in payload.get("victory_milestones", [])
             if isinstance(palier, dict)
         ]
+        objectif = payload.get("victory_objective")
+        self.victory_objective = None if objectif is None else str(objectif)
+        self.victory_objective_turn = int(payload.get("victory_objective_turn", 0) or 0)
         self.wonder_construction_turns = {}
         self.pending_wonder_type = None
         # Le statut paradis fiscal depend du proprietaire des capitales.
@@ -5343,6 +5357,8 @@ class GraphicalGame:
         self.eternal_ally_player = None
         self.eternal_ally_patron = None
         self.victory_milestones = []
+        self.victory_objective = None
+        self.victory_objective_turn = 0
         self.last_stand_bonus_players = set()
         self.last_stand_bonus_territory = {}
         self.tax_haven_turn_start_territory_counts = {}
@@ -8913,21 +8929,47 @@ class GraphicalGame:
                 f"Religion nationale {self.get_religion_name(religion_id)}: {influence}/{required_influence} "
                 f"territoires sous influence (manque {max(0, required_influence - influence)})"
             )
+        # La foi conquerante dont on tient la merveille porte aussi le
+        # palier religieux : son extension s'ajoute a celle de la religion
+        # nationale.
+        conquerantes = [
+            religion for religion in moteur_regles.get_player_victory_religion_ids(self, player)
+            if moteur_regles.is_wonder_religion(religion)
+        ]
+        if conquerantes:
+            noms = ", ".join(self.get_religion_name(r) for r in conquerantes)
+            mesure = moteur_regles.get_victory_religion_influence(self, [player])
+            total = mesure[2] if mesure else 0
+            required_influence = moteur_regles.get_required_influence_count_for_religion_victory(self, player)
+            lines.append(
+                f"Foi conquerante {noms}: comptee avec la religion nationale pour le "
+                f"palier religieux ({total}/{required_influence} au total)"
+            )
         return lines
 
     def get_victory_milestone_lines(self) -> list[str]:
-        """Les paliers de victoire franchis et le decompte des points.
+        """L'objectif en cours, les paliers franchis et le decompte des points.
 
-        Chaque condition de victoire ne se franchit qu'une fois : elle vaut
-        un point a son auteur puis se ferme. La partie s'acheve quand il n'en
-        reste plus aucune, et c'est le total des points qui departage.
+        La partie ne vise qu'une condition a la fois : elle est tiree au
+        sort, annoncee, et vaut un point a qui la remplit le premier. Le
+        palier tombe, le programme en tire une autre, et ainsi de suite.
         """
         paliers = list(getattr(self, "victory_milestones", []))
         total = len(moteur_regles.VICTORY_CONDITIONS)
         requis_restants = moteur_regles.get_remaining_required_victory_conditions(self)
         lignes = []
+        objectif = moteur_regles.get_current_victory_objective(self)
+        if objectif is not None:
+            rang = total - len(moteur_regles.get_remaining_victory_conditions(self)) + 1
+            lignes.append(
+                f"OBJECTIF EN COURS ({rang}/{total}) : "
+                + moteur_regles.describe_victory_objective(objectif)
+            )
+            lignes.append("C'est la seule condition ouverte ; une autre sera tiree ensuite")
+        else:
+            lignes.append("Plus d'objectif a viser : la partie s'acheve")
         if not paliers:
-            lignes.append(f"Aucun palier franchi : les {total} conditions sont ouvertes")
+            lignes.append(f"Aucun palier franchi sur {total}")
         else:
             lignes.append(f"{len(paliers)}/{total} paliers franchis")
             for palier in paliers:
@@ -8956,15 +8998,14 @@ class GraphicalGame:
             lignes.append(f"Points de victoire: {classement}")
         else:
             lignes.append("Points de victoire: aucun joueur n'en a encore marque")
-        restantes = moteur_regles.get_remaining_victory_conditions(self)
+        restantes = [
+            condition for condition in moteur_regles.get_remaining_victory_conditions(self)
+            if condition != objectif
+        ]
         if restantes:
             lignes.append(
-                "Conditions encore ouvertes: "
-                + ", ".join(
-                    self.VICTORY_CONDITION_LABELS.get(c, c)
-                    + (" (bonus)" if moteur_regles.is_optional_victory_condition(c) else "")
-                    for c in restantes
-                )
+                "Conditions qui restent a tirer: "
+                + ", ".join(self.VICTORY_CONDITION_LABELS.get(c, c) for c in restantes)
             )
         return lignes
 

@@ -5,7 +5,7 @@
 <title>Jeux Strat</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <!-- ?v=... force le navigateur à reprendre les fichiers après une mise à jour -->
-<link rel="stylesheet" href="style.css?v=29">
+<link rel="stylesheet" href="style.css?v=30">
 </head>
 <body>
 
@@ -27,7 +27,7 @@
   <header>
     <h1>Jeux Strat</h1>
     <span id="lobby-nom" class="badge-nom"></span>
-    <a class="bouton-lien secondaire" href="manuel.html?v=7" target="_blank" rel="noopener">📖 Règles</a>
+    <a class="bouton-lien secondaire" href="manuel.html?v=8" target="_blank" rel="noopener">📖 Règles</a>
   </header>
   <div class="colonnes">
     <div class="panneau">
@@ -96,7 +96,7 @@
     <span id="info-tresor"></span>
     <button id="bouton-sauvegarder" class="secondaire" type="button">💾 Sauvegarder</button>
     <button id="bouton-replay" class="secondaire" type="button">Replay</button>
-    <a class="bouton-lien secondaire" href="manuel.html?v=7" target="_blank" rel="noopener">📖 Règles</a>
+    <a class="bouton-lien secondaire" href="manuel.html?v=8" target="_blank" rel="noopener">📖 Règles</a>
     <span id="info-connexion" class="badge-connexion"></span>
   </header>
   <div class="zone-partie">
@@ -164,6 +164,10 @@
         <h2>Mon empire</h2>
         <div id="detail-empire">Prends un siège pour voir ton bilan.</div>
       </div>
+      <div class="panneau" id="panneau-objectif">
+        <h2>Objectif en cours</h2>
+        <div id="objectif-victoire"></div>
+      </div>
       <div class="panneau" id="panneau-situation">
         <h2>Situation générale</h2>
         <div id="tableau-situation"></div>
@@ -195,6 +199,6 @@
 </section>
 
 <script src="generation.js?v=1"></script>
-<script src="app.js?v=49"></script>
+<script src="app.js?v=50"></script>
 </body>
 </html>

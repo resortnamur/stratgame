@@ -253,6 +253,9 @@ class TestVictoireCulturelle(unittest.TestCase):
 
     def test_le_plancher_atteint_face_a_des_rivaux_a_zero_ferme_le_palier(self):
         meneur = self.joueurs[0]
+        # Une seule condition de victoire est ouverte a la fois : le palier
+        # culturel ne tombe que si c'est celui que la partie vise.
+        self.state.victory_objective = "culture"
         self._poser_culture(meneur, regles.CULTURE_VICTORY_MIN_POINTS)
         self.assertIn(("culture", meneur), conditions_remplies(self.state))
         paliers = regles.register_victory_milestones(self.state)

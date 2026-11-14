@@ -226,6 +226,13 @@ class GameState:
     # Les paliers de victoire deja franchis, dans l'ordre : chacun ne se
     # franchit qu'une fois et vaut un point de victoire a son auteur.
     victory_milestones: List[dict] = field(default_factory=list)
+    # L'objectif en cours : la seule condition de victoire ouverte a cet
+    # instant. Une partie n'en vise jamais deux a la fois — celle-ci tombe,
+    # elle devient un palier, et le programme en tire une autre parmi celles
+    # qui restent (regles.draw_victory_objective).
+    victory_objective: Optional[str] = None
+    # Le tour ou l'objectif en cours a ete tire : sert a l'annoncer.
+    victory_objective_turn: int = 0
     # Registre "une merveille par joueur et par tour" : memoire de session
     # uniquement, volontairement absent des sauvegardes (parite du format
     # avec x45-original).
@@ -696,6 +703,9 @@ class GameState:
             palier for palier in payload.get("victory_milestones", [])
             if isinstance(palier, dict)
         ]
+        objectif = payload.get("victory_objective")
+        self.victory_objective = None if objectif is None else str(objectif)
+        self.victory_objective_turn = int(payload.get("victory_objective_turn", 0) or 0)
         self.wonder_construction_turns = {}
 
         # Paradis fiscaux
@@ -931,6 +941,10 @@ class GameState:
                 None if self.eternal_ally_patron is None else int(self.eternal_ally_patron)
             ),
             "victory_milestones": [dict(palier) for palier in self.victory_milestones],
+            "victory_objective": (
+                None if self.victory_objective is None else str(self.victory_objective)
+            ),
+            "victory_objective_turn": int(self.victory_objective_turn),
             "last_stand_bonus_players": sorted(self.last_stand_bonus_players),
             "last_stand_bonus_territory": {
                 str(k): sorted(int(tid) for tid in self.get_player_tax_haven_capital_ids(k))

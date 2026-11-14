@@ -67,6 +67,18 @@ class BasePaliers(unittest.TestCase):
             "condition": condition, "joueur": joueur, "tour": tour, "raison": "pour le test",
         })
 
+    def viser(self, condition):
+        """Fait de cette condition l'objectif en cours.
+
+        Depuis novembre 2026, une seule condition de victoire est ouverte a
+        la fois : remplir les autres ne rapporte rien tant qu'elles n'ont pas
+        ete tirees. Un test qui veut franchir un palier precis doit donc le
+        mettre a l'ordre du jour.
+        """
+        self.state.victory_objective = condition
+        self.state.victory_objective_turn = self.state.turn
+        return condition
+
 
 class TestFranchissement(BasePaliers):
     """Un palier se franchit une fois, et rapporte un point."""
@@ -79,6 +91,7 @@ class TestFranchissement(BasePaliers):
         )
 
     def test_remplir_une_condition_ferme_le_palier_et_donne_un_point(self):
+        self.viser("territoires")
         self.fixer_territoires(0, self.seuil)
         nouveaux = regles.register_victory_milestones(self.state)
         conditions = {palier["condition"] for palier in nouveaux}
@@ -88,6 +101,7 @@ class TestFranchissement(BasePaliers):
         self.assertNotIn("territoires", regles.get_remaining_victory_conditions(self.state))
 
     def test_le_palier_est_annonce_dans_les_evenements_majeurs(self):
+        self.viser("territoires")
         self.fixer_territoires(0, self.seuil)
         regles.register_victory_milestones(self.state)
         self.assertTrue(
@@ -96,6 +110,7 @@ class TestFranchissement(BasePaliers):
         )
 
     def test_un_palier_ferme_ne_se_rejoue_pas_pour_le_meme_joueur(self):
+        self.viser("territoires")
         self.fixer_territoires(0, self.seuil)
         regles.register_victory_milestones(self.state)
         points = regles.get_victory_points(self.state, 0)
@@ -108,6 +123,7 @@ class TestFranchissement(BasePaliers):
             self.skipTest("Cette carte n'a pas quatre territoires dores.")
         # La carte se partage en deux : personne ne conquiert tout, personne
         # n'atteint les 3/4. Seul le palier des dores est en jeu.
+        self.viser("dores")
         self.fixer_territoires(0, self.total // 2, rival=1)
         for tid in dores:
             self.state.territories[tid].owner = 0
@@ -121,6 +137,7 @@ class TestFranchissement(BasePaliers):
         self.assertEqual(regles.get_victory_points(self.state, rival), 0)
 
     def test_les_paliers_survivent_a_la_sauvegarde(self):
+        self.viser("territoires")
         self.fixer_territoires(0, self.seuil)
         regles.register_victory_milestones(self.state)
         recharge = GameState.from_payload(json.loads(json.dumps(self.state.to_payload())))
@@ -131,58 +148,113 @@ class TestFranchissement(BasePaliers):
         self.assertEqual(regles.get_victory_points(recharge, 0), 1)
 
 
-class TestPaliersFacultatifs(BasePaliers):
-    """La religion rapporte son point sans conditionner la fin.
+class TestObjectifUnique(BasePaliers):
+    """Regle du 14/11/2026 : une seule condition de victoire a la fois.
 
-    Une religion conquerante finit par recouvrir les religions nationales et
-    leur interdit les neuf dixiemes de la carte. L'exiger, c'etait condamner
-    la partie a ne jamais s'achever.
+    La partie tire un objectif au depart, l'annonce, et n'en ouvre pas
+    d'autre tant qu'il n'est pas tombe. Le palier franchi, le programme tire
+    le suivant parmi ceux qui restent.
     """
 
-    def test_le_palier_facultatif(self):
-        self.assertEqual(regles.OPTIONAL_VICTORY_CONDITIONS, ("religion",))
-        for condition in regles.OPTIONAL_VICTORY_CONDITIONS:
-            self.assertIn(condition, regles.VICTORY_CONDITIONS)
-            self.assertNotIn(condition, regles.REQUIRED_VICTORY_CONDITIONS)
-            self.assertTrue(regles.is_optional_victory_condition(condition))
+    def test_la_partie_commence_avec_un_objectif_tire(self):
+        objectif = regles.get_current_victory_objective(self.state)
+        self.assertIn(objectif, regles.VICTORY_CONDITIONS)
+        self.assertEqual(self.state.victory_objective, objectif)
 
-    def test_les_cinq_paliers_necessaires(self):
+    def test_l_objectif_est_annonce_des_le_depart(self):
+        annonces = [
+            evenement for evenement in self.state.recent_major_events
+            if "OBJECTIF DE LA PARTIE" in evenement
+        ]
+        self.assertEqual(len(annonces), 1)
+        libelle = regles.VICTORY_CONDITION_LABELS[self.state.victory_objective]
+        self.assertIn(libelle, annonces[0])
+
+    def test_une_condition_hors_objectif_ne_rapporte_rien(self):
+        self.viser("culture")
+        self.fixer_territoires(0, self.seuil)
+        self.assertEqual(regles.register_victory_milestones(self.state), [])
+        self.assertEqual(regles.get_victory_points(self.state, 0), 0)
+        self.assertNotIn("territoires", regles.get_crossed_victory_conditions(self.state))
+        # L'objectif n'a pas bouge : il attend toujours d'etre rempli.
+        self.assertEqual(regles.get_current_victory_objective(self.state), "culture")
+
+    def test_le_palier_franchi_ouvre_un_autre_objectif(self):
+        self.viser("territoires")
+        self.fixer_territoires(0, self.seuil)
+        nouveaux = regles.register_victory_milestones(self.state, random.Random(7))
+        self.assertEqual([palier["condition"] for palier in nouveaux], ["territoires"])
+        suivant = regles.get_current_victory_objective(self.state)
+        self.assertIn(suivant, regles.VICTORY_CONDITIONS)
+        self.assertNotEqual(suivant, "territoires")
+        self.assertEqual(nouveaux[0]["objectif_suivant"], suivant)
+
+    def test_le_nouvel_objectif_est_annonce(self):
+        self.viser("territoires")
+        self.fixer_territoires(0, self.seuil)
+        regles.register_victory_milestones(self.state, random.Random(7))
+        annonces = [
+            evenement for evenement in self.state.recent_major_events
+            if "NOUVEL OBJECTIF" in evenement
+        ]
+        self.assertTrue(annonces)
+        libelle = regles.VICTORY_CONDITION_LABELS[self.state.victory_objective]
+        self.assertIn(libelle, annonces[-1])
+
+    def test_l_objectif_n_est_jamais_une_condition_deja_fermee(self):
+        for condition in ("lieux_sacres", "culture", "science", "dores"):
+            self.fermer(condition, 1)
+        self.state.victory_objective = "culture"  # ferme entre-temps
+        objectif = regles.ensure_victory_objective(self.state)
+        self.assertIn(objectif, ("religion", "territoires"))
+
+    def test_plus_d_objectif_quand_tout_est_tombe(self):
+        for condition in regles.VICTORY_CONDITIONS:
+            self.fermer(condition, 1)
+        self.assertIsNone(regles.ensure_victory_objective(self.state))
+        self.assertEqual(regles.register_victory_milestones(self.state), [])
+
+    def test_l_objectif_survit_a_la_sauvegarde(self):
+        self.viser("dores")
+        recharge = GameState.from_payload(json.loads(json.dumps(self.state.to_payload())))
+        self.assertEqual(regles.get_current_victory_objective(recharge), "dores")
+        self.assertEqual(recharge.victory_objective_turn, self.state.victory_objective_turn)
+
+    def test_une_vieille_partie_recoit_un_objectif(self):
+        self.state.victory_objective = None
+        objectif = regles.ensure_victory_objective(self.state)
+        self.assertIn(objectif, regles.VICTORY_CONDITIONS)
+
+    def test_le_tirage_est_reproductible(self):
+        self.state.victory_objective = None
+        premier = regles.draw_victory_objective(self.state)
+        self.state.victory_objective = None
+        self.assertEqual(regles.draw_victory_objective(self.state), premier)
+
+    def test_plus_aucune_condition_facultative(self):
+        self.assertEqual(regles.OPTIONAL_VICTORY_CONDITIONS, ())
         self.assertEqual(
-            regles.REQUIRED_VICTORY_CONDITIONS,
-            ("lieux_sacres", "culture", "science", "territoires", "dores"),
+            regles.REQUIRED_VICTORY_CONDITIONS, regles.VICTORY_CONDITIONS,
         )
+        for condition in regles.VICTORY_CONDITIONS:
+            self.assertFalse(regles.is_optional_victory_condition(condition))
 
-    def test_fermer_les_paliers_necessaires_suffit_a_finir(self):
-        for index, condition in enumerate(regles.REQUIRED_VICTORY_CONDITIONS):
-            self.fermer(condition, 0 if index < 3 else 1, tour=index + 1)
-        # La religion reste ouverte, et le restera.
-        self.assertEqual(
-            set(regles.get_remaining_victory_conditions(self.state)),
-            set(regles.OPTIONAL_VICTORY_CONDITIONS),
-        )
-        self.assertEqual(regles.get_remaining_required_victory_conditions(self.state), [])
-        gagnant, _raison = regles.evaluate_winner(self.state)
-        self.assertEqual(gagnant, 0)
-
-    def test_un_palier_facultatif_ne_retarde_pas_la_fin(self):
-        # Quatre paliers necessaires repartis (personne n'a la majorite).
-        for index, condition in enumerate(regles.REQUIRED_VICTORY_CONDITIONS[:-1]):
-            self.fermer(condition, index % 2, tour=index + 1)
-        # Il manque un palier necessaire : la partie continue, meme si le
-        # facultatif est tombe.
-        for condition in regles.OPTIONAL_VICTORY_CONDITIONS:
-            self.fermer(condition, 1, tour=6)
-        self.assertIsNone(regles.evaluate_winner(self.state)[0])
-
-    def test_un_palier_facultatif_rapporte_bien_son_point(self):
-        self.fermer("religion", 2, tour=4)
-        self.assertEqual(regles.get_victory_points(self.state, 2), 1)
+    def test_chaque_condition_sait_se_dire(self):
+        for condition in regles.VICTORY_CONDITIONS:
+            with self.subTest(condition=condition):
+                self.assertIn(condition, regles.VICTORY_CONDITION_LABELS)
+                self.assertIn(condition, regles.VICTORY_CONDITION_GOALS)
+                self.assertIn(
+                    regles.VICTORY_CONDITION_LABELS[condition],
+                    regles.describe_victory_objective(condition),
+                )
 
 
 class TestFinDePartie(BasePaliers):
     """La partie ne s'acheve qu'a court de paliers necessaires."""
 
     def test_un_palier_franchi_n_arrete_pas_la_partie(self):
+        self.viser("territoires")
         self.fixer_territoires(0, self.seuil)
         gagnant, _raison = regles.evaluate_winner(self.state)
         self.assertIsNone(gagnant)
@@ -228,6 +300,7 @@ class TestFinDePartie(BasePaliers):
         self.assertIn("egalite de paliers", raison)
 
     def test_tenir_toute_la_carte_acheve_la_partie(self):
+        self.viser("territoires")
         for terr in self.state.territories:
             terr.owner = 0
         gagnant, raison = regles.evaluate_winner(self.state)
@@ -308,6 +381,7 @@ class TestMenacesEtPaliersFermes(BasePaliers):
     """Un palier ferme ne menace plus personne."""
 
     def test_la_condition_fermee_disparait_de_l_encart(self):
+        self.viser("territoires")
         self.fixer_territoires(0, self.seuil - 2)
         moyens = {menace["moyen"] for menace in regles.get_victory_threats(self.state)}
         self.assertIn("territoires", moyens)
@@ -316,6 +390,7 @@ class TestMenacesEtPaliersFermes(BasePaliers):
         self.assertNotIn("territoires", moyens)
 
     def test_aucune_alerte_sur_un_palier_ferme(self):
+        self.viser("territoires")
         self.fixer_territoires(0, self.seuil - 1)
         self.assertTrue(regles.get_imminent_victory_threats(self.state))
         for condition in regles.VICTORY_CONDITIONS:

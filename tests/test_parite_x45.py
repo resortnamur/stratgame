@@ -69,12 +69,67 @@ CLES_ABSENTES_DE_L_ORIGINAL = (
 # Cles qu'une regle nouvelle remplit des le premier achat concerne (compteur
 # de merveilles baties, plafond de novembre 2026) : retirees sans verifier
 # qu'elles sont vides, puisqu'elles ne le sont pas des que l'on batit.
-CLES_SANS_EQUIVALENT_DANS_L_ORIGINAL = ("player_wonders_built",)
+# L'objectif en cours (novembre 2026) : la partie ne vise plus qu'une
+# condition de victoire a la fois. Elle est tiree des le premier examen des
+# paliers, donc jamais vide — et l'original figé n'en sait rien.
+CLES_SANS_EQUIVALENT_DANS_L_ORIGINAL = (
+    "player_wonders_built", "victory_objective", "victory_objective_turn",
+)
 # Meme chose dans les instantanes de replay, ou la cle porte un autre nom.
 CLES_D_INSTANTANE_ABSENTES_DE_L_ORIGINAL = ("ruins",)
 
 
+# Les annonces qu'une regle nouvelle inscrit dans les evenements majeurs :
+# l'original fige ne les connait pas. L'objectif en cours (novembre 2026)
+# s'annonce des la mise en place, puis a chaque palier franchi.
+ANNONCES_HORS_ORIGINAL = ("OBJECTIF DE LA PARTIE", "NOUVEL OBJECTIF")
+
+
+def _sans_annonces_nouvelles(evenements):
+    return [
+        evenement for evenement in evenements
+        if not any(marque in str(evenement) for marque in ANNONCES_HORS_ORIGINAL)
+    ]
+
+
+def retirer_annonces_hors_original(payload):
+    """Retire des evenements majeurs ce que l'original n'annonce pas."""
+    if isinstance(payload.get("recent_major_events"), list):
+        payload["recent_major_events"] = _sans_annonces_nouvelles(
+            payload["recent_major_events"],
+        )
+    attente = payload.get("pending_major_events_for_humans")
+    if isinstance(attente, dict):
+        restant = {}
+        for joueur, evenements in attente.items():
+            garde = _sans_annonces_nouvelles(evenements)
+            # Une file que le filtrage a videe n'existait pas du tout dans
+            # l'original : elle disparait, au lieu de rester en liste vide.
+            if garde or not evenements:
+                restant[joueur] = garde
+        payload["pending_major_events_for_humans"] = restant
+    # La fenetre d'evenement majeur ouverte par la seule annonce de
+    # l'objectif n'existe pas non plus dans l'original.
+    modal = payload.get("major_event_modal")
+    if isinstance(modal, dict) and isinstance(modal.get("events"), list):
+        garde = _sans_annonces_nouvelles(modal["events"])
+        payload["major_event_modal"] = None if not garde else dict(modal, events=garde)
+    file_modale = payload.get("major_event_modal_queue")
+    if isinstance(file_modale, list):
+        restantes = []
+        for fenetre in file_modale:
+            if not isinstance(fenetre, dict) or not isinstance(fenetre.get("events"), list):
+                restantes.append(fenetre)
+                continue
+            garde = _sans_annonces_nouvelles(fenetre["events"])
+            if garde:
+                restantes.append(dict(fenetre, events=garde))
+        payload["major_event_modal_queue"] = restantes
+    return payload
+
+
 def retirer_cles_hors_original(test, payload):
+    retirer_annonces_hors_original(payload)
     for cle in CLES_SANS_EQUIVALENT_DANS_L_ORIGINAL:
         payload.pop(cle, None)
     for cle in CLES_ABSENTES_DE_L_ORIGINAL:

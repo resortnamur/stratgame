@@ -56,7 +56,20 @@ class BaseMenaces(unittest.TestCase):
         for joueur in regles.get_active_players(self.state):
             self.state.player_science[joueur] = 0
 
+    def viser(self, condition):
+        """Fait de cette condition l'objectif en cours.
+
+        Depuis novembre 2026, une seule condition est ouverte a la fois :
+        les menaces ne recensent qu'elle. Un test qui veut eprouver un moyen
+        precis doit donc commencer par le mettre a l'ordre du jour.
+        """
+        self.state.victory_objective = condition
+        self.state.victory_objective_turn = self.state.turn
+        return condition
+
     def menaces(self, joueur=None, moyen=None):
+        if moyen is not None:
+            self.viser(moyen)
         retenues = regles.get_victory_threats(self.state)
         if joueur is not None:
             retenues = [m for m in retenues if m["joueur"] == joueur]
@@ -151,6 +164,7 @@ class TestAlertes(BaseMenaces):
         self.assertEqual(regles.record_victory_threat_alerts(self.state), [])
 
     def test_l_alerte_nomme_le_joueur_et_le_moyen(self):
+        self.viser("territoires")
         self.fixer_territoires(0, self.seuil - 1)
         messages = regles.record_victory_threat_alerts(self.state)
         self.assertTrue(messages)
@@ -159,6 +173,7 @@ class TestAlertes(BaseMenaces):
         self.assertIn("territoriale", messages[0])
 
     def test_l_alerte_entre_dans_les_evenements_majeurs(self):
+        self.viser("territoires")
         self.fixer_territoires(0, self.seuil - 1)
         regles.record_victory_threat_alerts(self.state)
         self.assertTrue(
@@ -166,6 +181,7 @@ class TestAlertes(BaseMenaces):
         )
 
     def test_l_alerte_se_repete_au_tour_suivant(self):
+        self.viser("territoires")
         self.fixer_territoires(0, self.seuil - 1)
         premier = regles.record_victory_threat_alerts(self.state)
         self.state.turn += 1
@@ -176,6 +192,7 @@ class TestAlertes(BaseMenaces):
     def test_le_tour_qui_avance_declenche_les_alertes(self):
         from moteur import actions
 
+        self.viser("territoires")
         self.fixer_territoires(0, self.seuil - 2)
         # Deux territoires manquent encore : le tour s'acheve sans vainqueur,
         # mais la menace est bien la. On se place sur le dernier joueur pour
@@ -223,6 +240,7 @@ class TestMenacesParBloc(BaseMenaces):
         self.assertGreater(menace[0]["valeur"], propres)
 
     def test_l_allie_ne_figure_pas_pour_son_propre_compte(self):
+        self.viser("territoires")
         for terr in self.state.territories:
             if terr.owner != 0:
                 terr.owner = self.allie

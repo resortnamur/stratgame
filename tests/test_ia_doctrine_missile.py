@@ -332,6 +332,9 @@ class TestAlerteDeVictoire(unittest.TestCase):
         # 20 territoires, seuil 15 : J2 en tient 14, la marge d'alerte est 3.
         owners = (0,) * 5 + (1,) + (2,) * 14
         state = build_state(owners=owners, regiments=(5,) * 20, ia_players=(0,))
+        # Une seule condition de victoire est ouverte a la fois : seule
+        # celle qui est a l'ordre du jour menace qui que ce soit.
+        state.victory_objective = "territoires"
         return state
 
     def test_l_alerte_se_declenche(self):
@@ -361,8 +364,17 @@ class TestAlerteDeVictoire(unittest.TestCase):
         state = build_state(
             owners=(0,) * 8 + (1,) * 6 + (2,) * 6, regiments=(5,) * 20, ia_players=(0,),
         )
+        state.victory_objective = "territoires"
         regles.assign_ai_personality_to_player(state, 0, "defensive")
         self.assertEqual(ia.get_ai_behavior(state, 0), "defensive")
+
+    def test_une_condition_hors_objectif_n_alerte_personne(self):
+        """Celui qui touche au but sur une condition pas encore tiree ne
+        menace personne : elle ne rapporte rien tant qu'elle attend."""
+        state = self.build()
+        state.victory_objective = "science"
+        self.assertEqual(regles.get_imminent_victory_threats(state), [])
+        self.assertFalse(regles.is_ai_facing_victory_alert(state, 0))
 
 
 class TestDoctrinesDesIa(unittest.TestCase):

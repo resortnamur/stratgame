@@ -126,6 +126,9 @@ def nouvelle_partie(
     state.current_player = 0
     state.turn = 1
     regles.sync_special_territory_holders(state)
+    # L'objectif de la partie : une seule condition de victoire, tiree au
+    # sort et annoncee d'entree. Les autres attendront qu'elle tombe.
+    regles.start_victory_objective(state)
     regles.record_replay_snapshot(state, "Debut de la partie", force=True)
     return state
 

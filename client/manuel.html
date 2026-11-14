@@ -419,14 +419,24 @@
         <strong>six manières de gagner</strong> — six paliers. Chacun ne se
         franchit <strong>qu'une seule fois dans la partie</strong> et rapporte
         <strong>un point de victoire</strong> à celui qui le prend. Quand les
-        <strong>cinq paliers nécessaires</strong> sont tombés, c'est le joueur
+        <strong>six paliers</strong> sont tombés, c'est le joueur
         qui compte le plus de points qui l'emporte. Et dès qu'un joueur tient
         <strong>plus de la moitié des paliers (4 sur 6)</strong>, la partie
         s'arrête : personne ne peut plus le rattraper.
       </p>
       <p>
-        Autrement dit : mieux vaut décrocher trois paliers différents que
-        d'essayer trois fois le même. Le premier arrivé ferme la porte.
+        Mais les six ne sont pas ouvertes en même temps. La partie
+        <strong>tire un seul objectif au sort</strong> et l'annonce :
+        c'est la <strong>seule condition de victoire en jeu</strong>. Remplir
+        une autre ne rapporte rien — elle attend son tour. Le premier qui
+        remplit l'objectif franchit le palier, empoche le point, et le
+        programme <strong>tire aussitôt l'objectif suivant</strong> parmi ceux
+        qui restent. Et ainsi de suite jusqu'au dernier.
+      </p>
+      <p>
+        L'objectif en cours s'affiche en permanence dans le panneau
+        <strong>« Objectif en cours »</strong>, en haut à droite, avec ce
+        qu'il exige et qui s'en approche.
       </p>
       <p>
         Et le palier se paie : franchir un palier
@@ -454,6 +464,32 @@
           dorés à celui qui les a pris ne rapporte plus rien — le palier a
           déjà été franchi.
         </p>
+
+        <details>
+          <summary>Un seul objectif à la fois</summary>
+          <div class="corps">
+            <p>
+              Six conditions ouvertes en même temps, c'était six courses
+              menées de front : chacun poussait son avantage dans son coin,
+              et les paliers tombaient sans que personne ne se croise. La
+              partie tire désormais <strong>un objectif à la fois</strong> :
+              tout le monde vise la même chose au même moment, et le palier
+              se dispute au lieu de se cueillir.
+            </p>
+            <p>
+              L'objectif est tiré <strong>au hasard</strong>, au début de la
+              partie puis après chaque palier, parmi les conditions qui
+              restent. Impossible de préparer sa voie dix tours à l'avance :
+              un empire bâti pour la science peut se retrouver devant un
+              objectif religieux.
+            </p>
+            <p>
+              Remplir une condition qui n'est pas l'objectif ne rapporte
+              rien et ne ferme rien — mais rien n'est perdu : elle sera
+              peut-être tirée ensuite, et l'avance prise reste acquise.
+            </p>
+          </div>
+        </details>
 
         <details>
           <summary>La scission : ce que coûte un palier franchi</summary>
@@ -523,7 +559,7 @@
               <summary>Quand la scission n'a pas lieu</summary>
               <div class="corps">
                 <p>
-                  Trois cas. Le <strong>dernier palier nécessaire</strong> ne
+                  Trois cas. Le <strong>dernier palier</strong> ne
                   scinde rien : la partie s'achève, il n'y aurait plus
                   personne pour en profiter. Le palier qui donne à un joueur
                   la majorité des paliers non plus, pour la même raison. Un bloc qui tient déjà
@@ -535,7 +571,7 @@
                 <p>
                   Partout ailleurs, la règle vaut pour tout le monde : les IA
                   se scindent exactement comme les joueurs humains, et le
-                  palier bonus — la religion — scinde aussi bien que les
+                  palier religieux scinde aussi bien que les
                   autres. Les joueurs nés d'une
                   scission ne se recoupent pas dans la foulée : ils
                   attendront le palier suivant.
@@ -557,10 +593,10 @@
               Trois fins possibles. Soit un joueur (avec son allié
               définitif, s'il en a un) tient <strong>plus de la moitié des
               paliers</strong> — 4 sur 6 : même en raflant tous les paliers
-              restants, aucun rival ne pourrait l'égaler. Soit les <strong>cinq paliers
-              nécessaires</strong> ont été franchis, qui qu'en soient les
-              auteurs : lieux sacrés, culture, science, contrôle territorial,
-              territoires dorés. Soit un joueur (avec son allié définitif,
+              restants, aucun rival ne pourrait l'égaler. Soit les <strong>six paliers</strong>
+              ont été franchis, qui qu'en soient les
+              auteurs : lieux sacrés, religion, culture, science, contrôle
+              territorial, territoires dorés. Soit un joueur (avec son allié définitif,
               s'il en a un) tient <strong>toute la carte</strong> : il n'y a
               plus d'adversaire, donc plus rien à jouer.
             </p>
@@ -574,23 +610,34 @@
             </p>
 
             <details>
-              <summary>Le palier bonus, et pourquoi il n'attend personne</summary>
+              <summary>La religion n'est plus un palier à part</summary>
               <div class="corps">
                 <p>
-                  La <strong>religion</strong> rapporte son point comme les
-                  autres, mais la partie ne l'attend pas. On peut fort bien ne
-                  jamais la voir tomber.
+                  Elle l'a été : tant qu'elle exigeait les
+                  <strong>neuf dixièmes</strong> de la carte sous une même
+                  religion nationale, elle pouvait ne jamais tomber. Une
+                  religion conquérante — Elyrion ou Solmyre — finit par
+                  recouvrir les religions nationales sur son passage, et
+                  passé un certain point plus aucune ne pouvait y prétendre.
+                  La partie ne l'attendait donc pas.
                 </p>
                 <p>
-                  Une religion conquérante — Elyrion ou Solmyre — finit par
-                  recouvrir les religions nationales sur son passage : passé
-                  un certain point, plus aucune ne peut espérer les neuf
-                  dixièmes de la carte.
+                  Puisqu'il n'y a plus qu'un objectif à la fois, un palier
+                  hors d'atteinte aurait figé le jeu. La religion exige
+                  désormais les <strong>trois quarts</strong> de la carte,
+                  comme pour une IA — et la foi d'un joueur, ce n'est plus
+                  seulement sa religion nationale : une
+                  <strong>religion conquérante compte aussi, pour qui tient
+                  la merveille qui l'a fondée</strong>, et les deux
+                  <strong>s'additionnent</strong>. Un territoire n'est jamais
+                  sous deux religions à la fois : rien n'est compté deux
+                  fois, et ce qu'Elyrion prend à votre religion nationale
+                  vous reste acquis. Celui qui répand Elyrion ne s'interdit
+                  donc plus l'objectif religieux : il le poursuit avec elle.
                 </p>
                 <p>
-                  L'exiger, c'était condamner la partie à ne jamais
-                  s'achever. Elle reste donc une belle prise — un point —
-                  sans peser sur la fin.
+                  Elle est tirée comme les cinq autres, et doit tomber comme
+                  elles.
                 </p>
               </div>
             </details>
@@ -607,11 +654,13 @@
     <div class="conseils">
 
       <div class="conseil">
-        <h3>Visez des paliers différents, pas le plus gros empire</h3>
+        <h3>Jouez l'objectif annoncé, pas votre plan</h3>
         <p>
-          Le contrôle territorial n'est qu'un palier sur six. Un joueur avec
-          un empire moyen, une religion bien étendue et une avance culturelle
-          marque trois points pendant que le conquérant en marque un.
+          Le contrôle territorial n'est qu'un palier sur six, et il ne
+          rapporte que s'il est l'objectif du moment. Un empire taillé pour
+          la conquête ne marque rien pendant un objectif culturel : lisez le
+          panneau <strong>« Objectif en cours »</strong> avant de décider
+          où passe votre prochain écu.
         </p>
         <details>
           <summary>Quels paliers sont les plus faciles à voler</summary>
@@ -653,7 +702,7 @@
               <li><span class="valeur">+2 écus</span> par tour et par territoire à vous sous son influence.</li>
               <li>Un renfort de plus tous les <span class="valeur">3</span> territoires sous influence.</li>
               <li>L'immunité aux révoltes sur ces mêmes territoires.</li>
-              <li>Un palier de victoire si elle couvre <span class="valeur">9/10</span> de la carte (<span class="valeur">3/4</span> pour une IA).</li>
+              <li>Un palier de victoire si elle couvre <span class="valeur">3/4</span> de la carte, quand la religion est l'objectif en cours.</li>
             </ul>
             <details>
               <summary>À quelle vitesse elle se répand</summary>
@@ -684,8 +733,9 @@
       <div class="conseil">
         <h3>Surveillez l'encart « Course à la victoire »</h3>
         <p>
-          Il liste en permanence qui approche d'un palier, par quel moyen, et
-          ce qui lui manque. Quand quelqu'un touche au but, une alerte part à
+          Il liste en permanence qui approche de <strong>l'objectif en
+          cours</strong> et ce qui lui manque — seule condition ouverte, donc
+          seule course en jeu. Quand quelqu'un touche au but, une alerte part à
           chaque tour dans les événements majeurs. C'est votre seul
           avertissement avant qu'un point ne vous échappe.
         </p>
@@ -705,8 +755,10 @@
               culture, la science et la religion.
             </p>
             <p>
-              Un palier déjà fermé disparaît de la liste : il ne menace plus
-              personne.
+              Seul l'objectif en cours y figure. Un palier déjà fermé
+              disparaît de la liste, et une condition pas encore tirée n'y
+              entre pas : elle ne menace personne tant qu'elle n'est pas à
+              l'ordre du jour.
             </p>
           </div>
         </details>
@@ -963,9 +1015,10 @@
 
     <p>
       Chacun rapporte un point de victoire à celui qui le franchit le premier,
-      puis se ferme définitivement. <strong>Cinq d'entre eux décident de la fin
-      de la partie</strong> ; le dernier est un bonus, que personne
-      n'attend. Tous, sauf celui qui achève la partie,
+      puis se ferme définitivement. Ils ne sont
+      <strong>jamais ouverts en même temps</strong> : la partie en tire un au
+      sort, l'annonce, et n'ouvre le suivant qu'une fois celui-là tombé.
+      Tous, sauf celui qui achève la partie,
       <strong>amputent d'un tiers tous les empires</strong>.
     </p>
 
@@ -980,7 +1033,7 @@
           <tr><td>Lieux sacrés</td><td>Tous les lieux sacrés des religions fondées</td></tr>
           <tr><td>Culture</td><td>20 fois le meilleur rival, et 100 points au moins</td></tr>
           <tr><td>Science</td><td>20 fois le meilleur rival, et 100 points au moins</td></tr>
-          <tr><td>Religion <em>(bonus)</em></td><td>Votre religion nationale sur 9/10 de la carte</td></tr>
+          <tr><td>Religion</td><td>Votre foi sur 3/4 de la carte : religion nationale <em>et</em> religion conquérante dont vous tenez la merveille, comptées ensemble</td></tr>
         </tbody>
       </table>
     </div>
@@ -989,12 +1042,13 @@
       <summary>Les seuils exacts, et ce qui change pour une IA</summary>
       <div class="corps">
         <p>
-          Les IA jouent avec des seuils plus bas sur trois paliers : la
-          religion leur demande <span class="valeur">3/4</span> de la carte au
-          lieu de neuf dixièmes, et la culture comme la science leur demandent
+          Les IA jouent avec des seuils plus bas sur deux paliers : la
+          culture comme la science leur demandent
           <span class="valeur">10 fois</span> le meilleur rival au lieu de
           vingt. Le plancher de <span class="valeur">100 points</span>, lui,
-          vaut pour tout le monde.
+          vaut pour tout le monde. La religion demande désormais
+          <span class="valeur">3/4</span> de la carte à tout le monde,
+          humains comme IA.
         </p>
         <p>
           Le palier des <strong>lieux sacrés</strong> ne s'ouvre que lorsque
@@ -1510,10 +1564,13 @@
             </p>
             <p>
               Elles ne sont pas des religions nationales : elles n'apportent
-              ni immunité aux révoltes, ni missions, ni palier religieux. En
-              revanche elles versent à leur contrôleur les mêmes primes de
-              revenu et de renforts, et chacune ajoute un lieu sacré de plus à
-              rassembler.
+              ni immunité aux révoltes, ni missions. En revanche elles
+              versent à leur contrôleur les mêmes primes de revenu et de
+              renforts, chacune ajoute un lieu sacré de plus à rassembler,
+              et leur extension <strong>s'ajoute à celle de la religion
+              nationale de celui qui tient la merveille</strong>, pour le
+              palier religieux : répandre Elyrion est une façon de
+              poursuivre l'objectif religieux.
             </p>
           </div>
         </details>
