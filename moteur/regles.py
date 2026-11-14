@@ -788,6 +788,37 @@ def is_last_stand_bonus_territory(state: GameState, territory_id: int) -> bool:
     return territory_id in get_all_tax_haven_capital_ids(state)
 
 
+def is_tax_haven_player(state: GameState, player: int) -> bool:
+    """Le joueur est-il en mode paradis fiscal (dernier bastion) ?
+
+    Regle dictee : un joueur en paradis fiscal est immunise contre les
+    crises et les krachs boursiers, il n'y perd jamais un ecu. Les cites
+    commercantes, qui partagent la mecanique interne mais pas le statut,
+    ne sont pas concernees.
+    """
+    if player < 0 or is_onu_player(state, player):
+        return False
+    if is_potential_commercial_city_player(state, player):
+        return False
+    return (
+        player in state.last_stand_bonus_players
+        and bool(get_player_tax_haven_capital_ids(state, player))
+    )
+
+
+def is_capital_immune_to_culture_annexation(state: GameState, territory_id: int) -> bool:
+    """Une capitale ne s'annexe jamais par un palier culturel.
+
+    Capitales ordinaires et capitales de cites commercantes, mais aussi la
+    ville d'origine d'un joueur passe en paradis fiscal : elle reste sa
+    capitale meme si elle ne figure plus dans player_capital_ids.
+    """
+    return (
+        is_any_capital_territory(state, territory_id)
+        or is_last_stand_bonus_territory(state, territory_id)
+    )
+
+
 def is_missile_immune_territory(state: GameState, territory_id: int) -> bool:
     """Un missile ne frappe jamais ce territoire.
 
@@ -4861,7 +4892,7 @@ def is_commercial_city_territory(state: GameState, territory_id: int) -> bool:
 def can_commercial_city_gain_territory(state: GameState, player: int, territory_id: int) -> bool:
     if player not in state.commercial_city_players:
         return True
-    if is_any_capital_territory(state, territory_id):
+    if is_capital_immune_to_culture_annexation(state, territory_id):
         return False
     return is_territory_adjacent_to_player(state, territory_id, player)
 
@@ -4877,8 +4908,9 @@ def get_culture_expansion_target_ids(state: GameState, player: int) -> Set[int]:
                 target_owner = state.territories[neighbor_id].owner
                 if target_owner in state.commercial_city_players:
                     continue
-                # Une capitale ne s'annexe jamais par la culture.
-                if is_any_capital_territory(state, neighbor_id):
+                # Une capitale ne s'annexe jamais par la culture, y
+                # compris la ville d'origine d'un paradis fiscal.
+                if is_capital_immune_to_culture_annexation(state, neighbor_id):
                     continue
                 if can_commercial_city_gain_territory(state, player, neighbor_id):
                     targets.add(neighbor_id)
@@ -4890,7 +4922,7 @@ def annex_territory_by_culture(state: GameState, territory_id: int, player: int)
         return None
     if state.territories[territory_id].owner in state.commercial_city_players:
         return None
-    if is_any_capital_territory(state, territory_id):
+    if is_capital_immune_to_culture_annexation(state, territory_id):
         return None
     if not can_commercial_city_gain_territory(state, player, territory_id):
         return None
@@ -6194,19 +6226,28 @@ def maybe_trigger_market_event(state: GameState, rng=random) -> Optional[str]:
     # La Banque de Threl : son controleur IA traverse le krach sans rien
     # perdre. Personne d'autre n'y echappe, pas meme l'humain qui l'a batie.
     abrite = get_ai_wonder_controller(state, "threl_bank")
+    # Regle dictee : un joueur en paradis fiscal ne perd jamais d'argent
+    # dans une crise ou un krach boursier.
+    tax_haven_players = sorted(
+        player for player in state.player_money
+        if is_tax_haven_player(state, player)
+    )
     for player in list(state.player_money):
-        if player == abrite:
+        if player == abrite or player in tax_haven_players:
             continue
         current = state.player_money[player]
         lost = (current * 2) // 3 if event_type == "crash" else current // 3
         state.player_money[player] = current - lost
         total_lost += lost
     if event_type == "crash":
-        message = f"Tour {state.turn}: crash boursier. Tous les joueurs perdent deux tiers de leurs ecus economises ({total_lost} ecu(s) perdus)."
+        message = f"Tour {state.turn}: crash boursier. Deux tiers des ecus economises partent en fumee ({total_lost} ecu(s) perdus)."
     else:
-        message = f"Tour {state.turn}: crise boursiere. Tous les joueurs perdent un tiers de leurs ecus economises ({total_lost} ecu(s) perdus)."
+        message = f"Tour {state.turn}: crise boursiere. Un tiers des ecus economises part en fumee ({total_lost} ecu(s) perdus)."
     if abrite is not None:
         message += f" J{abrite + 1} n'y perd rien : la {get_wonder_name('threl_bank')} tient."
+    if tax_haven_players:
+        abris = ", ".join(f"J{player + 1}" for player in tax_haven_players)
+        message += f" {abris} n'y perd rien : un paradis fiscal ne connait pas la crise."
     record_major_event(state, message)
     return message
 
